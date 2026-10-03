@@ -1,8 +1,8 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-04 01:57 (UTC+7)
+- Cập nhật: 2026-10-04 03:22 (UTC+7)
 - Model thực hiện: Codex (GPT-6)
-- Commit HEAD đã kiểm trước cập nhật này: `1b8cb30`, nhánh `main` (hash commit chứa tài liệu này được báo ở kết quả)
+- Commit HEAD đã kiểm trước cập nhật này: `6b5a120`, nhánh `main` (hash commit chứa tài liệu này được báo ở kết quả)
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - Quy ước: ✅ có bằng chứng · 🟡 làm một phần · ❌ chưa làm (đã tìm, không thấy) · ❓ không chứng minh được
 
@@ -12,9 +12,9 @@
 
 > **PHA B / repo hiện tại:** `D:/R2AI/r2ai-stage3`, history mới trên main. Các số crawl/extract/index/LB phía dưới là snapshot legacy OLD ngày 03/10, không phải kết quả chạy lớn ở NEW. Mapping hiện tại: `eval`→`src/r2ai/eval`, `index`→`src/r2ai/index`, `retrieve`→`src/r2ai/retrieve`, `submission`→`src/r2ai/submit`, `vicrawl`→`src/vicrawl`, `config`→`configs`; CLI xem README. Đọc query/docs/chunks/index/K100 cũ ở OLD; ghi pipeline mới vào NEW. Status mặc định đọc NEW/state, đối chiếu OLD phải dùng `--state-dir` rõ ràng.
 > Gate đã đo: core **36 pass**, full **272 pass / 2 deselected**, slow **2 pass / 10 deselected**; OLD full 234 pass và slow 2 pass. Replay JSON sub06 **181.960.105 byte**, SHA256 `07e0fd59f8cc4b8abbf129dc1536305bdbef17ce510b6fe39fe50fe62133acc3`, byte/query/field diff=0; validator **1.200 query / 22.800 chunk / 0 lỗi**. Không rerun model/GPU hay nộp LB. Python 3.12.13, torch 2.11.0+cu128, 102 package freeze khớp OLD. Chi tiết run ở `out/runs/restructure/` và `out/runs/reproduce-sub06/` (ignored).
-> Copy raw/crawl.db: **Đã copy** 18,031 shard / 3,679,529,131 byte (3.427 GiB) và crawl.db 376,438,784 byte sang NEW; hash/inventory nguồn–đích khớp, SQL 653.970 URL / 624.596 ok / 48 domain khớp. Writer dừng, WAL0; không overwrite hay move/xóa OLD. RAW_DIR=RAW_WRITE_DIR=NEW/data/raw_vi; status mặc định NEW đã kiểm. Extract.db mới chưa có; chưa chạy extract/crawl/GPU lớn. OLD raw hash sau copy, source161 và state6 vẫn không đổi. Manifest `out/runs/restructure/data-copy.json`.
+> Copy raw/crawl.db: **Đã copy** 18,031 shard / 3,679,529,131 byte (3.427 GiB) và crawl.db 376,438,784 byte sang NEW; hash/inventory nguồn–đích khớp, SQL 653.970 URL / 624.596 ok / 48 domain khớp. Writer dừng, WAL0; không overwrite hay move/xóa OLD. RAW_DIR=RAW_WRITE_DIR=NEW/data/raw_vi; status mặc định NEW đã kiểm. Extract NEW đã hoàn tất (xem bên dưới); không chạy crawl thật. OLD raw hash sau copy, source161 và state6 vẫn không đổi. Manifest `out/runs/restructure/data-copy.json`.
 
-> Pipeline sau PHA B: Extract đang chạy: **1,039/18.031 shard**, **43,674 doc** trong checkpoint NEW tại 2026-10-04 01:57 UTC+7; raw/data/state đều NEW, workers2. PID launcher 22592; log `out/runs/coverage-rebuild/extract.log`. Chưa có kết quả chunk/index/K100/submission mới. Validator JSON sub06 thực đã pass: 1.200 query / 22.800 chunk / 0 lỗi (không áp budget ZIP vào file JSON181MB).
+> Pipeline sau PHA B: Extract NEW hoàn tất: **18.031/18.031 shard**, **632.208 doc**, status {"ok": 623852, "thin": 8356}; elapsed CLI **5438.0 s**, workers2. Checkpoint khớp tập raw NEW, số hàng parquet khớp SQLite; không còn shard pending. Doc ok: Vinmec **26.124**, MEDLATEC **24.709**. 6 hash/size state OLD giữ nguyên. Chunk → index → K100 → submission đang chạy theo chuỗi; chưa có điểm LB mới. Bằng chứng `out/runs/coverage-rebuild/extract.json`, `old-state-after-extract.json`.
 
 ## 1. Crawl (vi)
 
@@ -46,7 +46,7 @@ Chưa có: zh (không có `data/raw_zh*`), `nhathuoclongchau.com.vn`, `zysjonlin
 | M2 | Crawl vi hoàn tất | 🟡 | 624.596/653.970 `ok`; còn `youmed.vn` (halted) và 2 domain robots chặn. Xem mục 1 |
 | M3 | ≥100k doc `ok` để dựng baseline | ✅ | `out/MILESTONE_1.md`: 101.554 `ok` lúc 2026-10-02 20:20:44 |
 | M4 | QA trích xuất domain vi lớn | 🟡 | 23 báo cáo `out/qa_extract/*.md` (300 doc/domain). Đây là mẫu QA, không phải duyệt toàn bộ. Không thấy báo cáo cho `bachmai`, `tamanhhospital`, `tuoitre` v.v. (domain dưới ngưỡng QA gate) |
-| M5 | Extract toàn bộ doc vi | 🟡 | `state/extract.db`: 3.103 shard đã xử lý/18.031; `data/docs_vi`: 125.499 doc = 20,1% số `ok`. Lần ghi cuối 2026-10-03 02:43. Xem mục 4 |
+| M5 | Extract toàn bộ doc vi | ✅ | NEW: 18.031/18.031 shard, 632.208 doc; checkpoint/raw/parquet khớp. Snapshot OLD xem mục 4; kết quả NEW ở phần đầu báo cáo. |
 | M6 | Scorer local theo metric | ✅ | `eval/scorer.py`, `tests/test_scorer.py`, commit `ae6b90d`. Chưa đối chiếu với điểm LB nào (không có điểm LB) |
 | M7 | Chunk + index + truy hồi baseline (BGE-M3 hybrid + reranker) | 🟡 | `data/index/t256/` (faiss.index, dense.npy, sparse.npz, 6,8 GB), 818.080 chunk, **chỉ trên 123.874 doc**; `data/runs/vi_k100.parquet` (1.200 query). Xem mục 5 |
 | M8 | Nộp thử lên leaderboard | ✅ | `Downloads/SCOREBOARD.md` (người dùng cung cấp, 2026-10-03): 7 lượt có điểm, tốt nhất sub06 Final 0,0626. Đối chiếu tên/dung lượng zip với `out/submissions/` khớp. `out/submissions/LOG.md` chưa cập nhật (vẫn ghi "nothing uploaded") |
@@ -75,6 +75,10 @@ Kích thước raw lớn nhất: suckhoedoisong.vn 916 MB (5.884 shard) · medla
 
 ## 4. Extract
 
+**Kết quả NEW tại 2026-10-04 03:22 UTC+7:** Extract NEW hoàn tất: **18.031/18.031 shard**, **632.208 doc**, status {"ok": 623852, "thin": 8356}; elapsed CLI **5438.0 s**, workers2. Checkpoint khớp tập raw NEW, số hàng parquet khớp SQLite; không còn shard pending. Doc ok: Vinmec **26.124**, MEDLATEC **24.709**. 6 hash/size state OLD giữ nguyên. Chunk → index → K100 → submission đang chạy theo chuỗi; chưa có điểm LB mới. Bằng chứng `out/runs/coverage-rebuild/extract.json`, `old-state-after-extract.json`.
+
+Các số bên dưới lưu snapshot OLD ngày 03/10.
+
 - Output: `data/docs_vi/<domain>__<timestamp>-<pid>-<seq>-<hash>.parquet` (3.083 file, phẳng, không có thư mục con theo domain; 474 MB). Cột: `doc_ids, url, final_url, domain, title, description, question, answer, body, paragraphs, lang, n_tokens_bge_m3, text_sha1, fetched_at, url_norm, status, extractor, headings`.
 - Tổng 125.499 doc (metadata parquet), `status`: ok 123.881, thin 1.618. `body` không rỗng 99,8%.
 - **Phủ rất lệch**: các domain có >5k URL (có QA gate) chỉ được extract ~300 doc. Ví dụ: suckhoedoisong.vn 324/79.284 `ok`, thanhnien.vn 312/71.029, vinmec.com 301/26.127, medlatec.vn 301/24.709, hellobacsi.com 301/11.743, khoahocphothong.vn 301/8.143. Trong khi vietnamnet 13.834 (≈100%), giadinhonline 12.209, tiemchunglongchau 11.353, laodong 10.419/31.282, suckhoecongdongonline 10.588/154.501.
@@ -101,13 +105,15 @@ Lưu ý: sub01/sub02 dùng K=5 doc, C=2 chunk; sub03–sub10 gồm các biến t
 
 ## 6. Lệch so với `R2AI_STAGE3_CONTEXT.md`
 
+Extract NEW hoàn tất: **18.031/18.031 shard**, **632.208 doc**, status {"ok": 623852, "thin": 8356}; elapsed CLI **5438.0 s**, workers2. Checkpoint khớp tập raw NEW, số hàng parquet khớp SQLite; không còn shard pending. Doc ok: Vinmec **26.124**, MEDLATEC **24.709**. 6 hash/size state OLD giữ nguyên. Chunk → index → K100 → submission đang chạy theo chuỗi; chưa có điểm LB mới. Bằng chứng `out/runs/coverage-rebuild/extract.json`, `old-state-after-extract.json`.
+
 Extract đang chạy: **1,039/18.031 shard**, **43,674 doc** trong checkpoint NEW tại 2026-10-04 01:57 UTC+7; raw/data/state đều NEW, workers2. PID launcher 22592; log `out/runs/coverage-rebuild/extract.log`. Chưa có kết quả chunk/index/K100/submission mới. Validator JSON sub06 thực đã pass: 1.200 query / 22.800 chunk / 0 lỗi (không áp budget ZIP vào file JSON181MB).
 
 Validator JSON trực tiếp đã sửa cho Python3.12 bằng Path.open(newline=""). Một test parametrized cho cả hai CLI: LF hợp lệ/CRLF bị từ chối, 4 ca RED→GREEN; full suite **272 passed / 2 deselected / 152,22s**. Guard được kiểm chỉ gọi ở preflight CLI, không trong vòng lặp shard; giữ quét recursive để bảo vệ junction/symlink con. Không thêm gọi assert_writable mỗi shard.
 
 Replay JSON giữ nguyên SHA256 nhưng ZIP NEW **46.083.494 byte**, OLD **46.047.946 byte**, chênh **35.548 byte** do bước nén/metadata (nguyên nhân build zlib chưa xác minh). Cả hai dưới 45,7 MiB = 47.919.923 byte. Khi ZIP sát ngưỡng, --max-zip-mib có thể chọn k_chunk khác OLD; luôn đo ZIP thực trên môi trường nộp hiện tại.
 
-Chuyển raw/state sau gate repo: **Đã copy** 18,031 shard / 3,679,529,131 byte (3.427 GiB) và crawl.db 376,438,784 byte sang NEW; hash/inventory nguồn–đích khớp, SQL 653.970 URL / 624.596 ok / 48 domain khớp. Writer dừng, WAL0; không overwrite hay move/xóa OLD. RAW_DIR=RAW_WRITE_DIR=NEW/data/raw_vi; status mặc định NEW đã kiểm. Extract.db mới chưa có; chưa chạy extract/crawl/GPU lớn. OLD raw hash sau copy, source161 và state6 vẫn không đổi. Manifest `out/runs/restructure/data-copy.json`.
+Chuyển raw/state sau gate repo: **Đã copy** 18,031 shard / 3,679,529,131 byte (3.427 GiB) và crawl.db 376,438,784 byte sang NEW; hash/inventory nguồn–đích khớp, SQL 653.970 URL / 624.596 ok / 48 domain khớp. Writer dừng, WAL0; không overwrite hay move/xóa OLD. RAW_DIR=RAW_WRITE_DIR=NEW/data/raw_vi; status mặc định NEW đã kiểm. Extract NEW đã hoàn tất (xem bên dưới); không chạy crawl thật. OLD raw hash sau copy, source161 và state6 vẫn không đổi. Manifest `out/runs/restructure/data-copy.json`.
 
 Review độc lập toàn bộ repo: sửa 3 nhóm Important (profile/dup import, guard nested redirects/sidecars, docs parquet rỗng); 11 test RED→GREEN. Suite sau sửa: **268 pass**, slow **2 pass**, replay sub06 SHA/diff=0 trong **78.8s**. Minor kế thừa OLD về validator JSON trên Python3.12 đã sửa trong lượt tiếp theo (xem cập nhật trên).
 
@@ -134,7 +140,7 @@ Hai dòng ❓ từ CONTEXT:
 
 ## 7. Blockers
 
-1. **Extract dừng ở 20%**: 125.499/624.596 doc `ok`; các domain lớn nhất (suckhoedoisong, thanhnien, vinmec, medlatec, suckhoecongdongonline) gần như chưa được extract. Index và mọi file nộp hiện chỉ bao phủ 123.874 doc. Vinmec và MEDLATEC (nguồn của 83% query theo gold check) có ~300 doc/domain trong index → recall sẽ thấp.
+1. **Extract NEW đã đủ; chờ index mới**: 632.208 doc đã trích xuất từ 18.031 shard. Index legacy chỉ bao phủ 123.874 doc; chưa dùng index mới hay đo recall/LB mới. Vinmec/MEDLATEC đã có 26.124/24.709 doc ok trong NEW.
 2. **Recall là nút thắt**: LB tốt nhất 0,0626 (Doc R 0,088 ở K=100). Index chỉ 2,8% corpus (123.874/4.394.718 URL) và chưa có zh. Pseudo-dev không dùng được để chọn cấu hình; chỉ LB mới đo thật. Còn chưa biết scorer local có khớp LB không (chưa có bản chấm local trên cùng file nộp, vì không có gold).
 3. **Chưa có dữ liệu zh**: CONTEXT ước ~77% corpus là zh; hiện 0 doc zh. Nếu gold có nhiều zh, recall bị chặn trên.
 4. `youmed.vn` halted (bot_challenge); `vov.vn` và `baolangson.vn` chặn bởi robots (11.765 URL không lấy được, đúng theo quyết định tôn trọng robots).
@@ -155,6 +161,7 @@ Hai dòng ❓ từ CONTEXT:
 | 2026-10-04 01:22 | Codex (GPT-6) | Review độc lập + 11 regression RED→GREEN; suite268/slow2 pass, replay JSON/hash giữ nguyên, các input hash và elapsed đã lưu. Không có Critical/Important còn mở. |
 | 2026-10-04 01:26 | Codex (GPT-6) | Sau gate repo/push: copy raw18.031 shard+crawl.db+domain CSV, hash/inventory/SQL khớp, OLD không đổi, raw root NEW ổn định; chưa extract lớn. |
 | 2026-10-04 01:50 | Codex (GPT-6) | Sửa hai validator JSON, regression4 RED→GREEN/full272 pass; ghi chênh ZIP và guard chỉ preflight. Chuẩn bị extract đủ18.031 shard, workers2 trên RAM16GiB; chưa có kết quả extract lớn. |
+| 2026-10-04 03:22 | Codex (GPT-6) | Extract NEW đủ18.031 shard/632208doc; checkpoint/raw/parquet khớp, state OLD bất biến. Chunk/index/K100/submission chờ kết quả; không ghi điểm LB. |
 | 2026-10-04 01:57 | Codex (GPT-6) | Khởi chạy extract raw NEW/state NEW workers2; snapshot 1039shards/43674docs. JSON validator thực1200/22800/0lỗi. Các bước sau chờ extract hoàn tất. |
 | 2026-10-03 23:10 | Claude Sonnet 5.5 | Thêm điểm LB từ `SCOREBOARD.md` (M8, M9, mục 5, 7, 8); kiểm số học bảng điểm |
 | 2026-10-03 22:50 | Claude Sonnet 5.5 | Tạo `PROGRESS.md` (template không có trong repo) từ khảo sát chỉ-đọc: `state/*.db` (ro), `data/`, `out/`, `logs/`, `git` ở HEAD `ae6b90d`; chạy 36 test (scorer, make_submission, chunk) pass |

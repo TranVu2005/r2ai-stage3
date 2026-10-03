@@ -10,3 +10,5 @@ Thực hiện sau gate repo/replay, ngoài timebox tạo repo. OLD giữ nguyên
 6. Giữ raw NEW ổn định đến sau 11/11/2026. Sau đó extract mới 18.031 shard → chunk docs NEW → embed/index → K100 → make_submission/validator cùng bundle NEW. Không chạy crawl thật nếu chưa duyệt riêng; youmed vẫn halted.
 
 Copy không có nghĩa đã extract/index đủ corpus; thời gian chạy lớn chưa đo. Quy trình giữ lại extract.db cũ là phương án khác, không dùng lần này. Kiểm chứng thực tế được ghi vào PROGRESS.
+
+Kiểm chứng 2026-10-04 01:26 UTC+7: **Đã copy** 18,031 shard / 3,679,529,131 byte (3.427 GiB) và crawl.db 376,438,784 byte sang NEW; hash/inventory nguồn–đích khớp, SQL 653.970 URL / 624.596 ok / 48 domain khớp. Writer dừng, WAL0; không overwrite hay move/xóa OLD. RAW_DIR=RAW_WRITE_DIR=NEW/data/raw_vi; status mặc định NEW đã kiểm. Extract.db mới chưa có; chưa chạy extract/crawl/GPU lớn. OLD raw hash sau copy, source161 và state6 vẫn không đổi. Manifest `out/runs/restructure/data-copy.json`.

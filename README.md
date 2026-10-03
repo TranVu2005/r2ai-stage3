@@ -22,7 +22,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'
 
 DATA_DIR đọc legacy OLD/data. WORK_DATA_DIR ghi NEW/data; OUT_DIR/RUNS_DIR/STATE_DIR/LOG_DIR đều NEW. R2AI_OLD_ROOT bắt buộc nếu DATA_DIR ngoài repo; mọi writer chính từ chối ghi OLD kể cả CLI override/temp/cleanup. Input thiếu/rỗng phải lỗi trước tạo output; không fallback/trộn bundle.
 
-Trong phiên tạo repo, extract chưa chạy và state mới rỗng. Trước copy, crawl ghi NEW/data/raw_vi nhưng extract đọc RAW_DIR ở OLD: shard crawl mới không được extract nếu thiếu `--raw-dir` NEW. **Copy raw_vi và crawl.db sang NEW trước extract lớn**; giữ nguyên OLD, không copy extract.db/docs cũ. Copy chỉ khi writer dừng/WAL0, kiểm hash/inventory, không overwrite đích đã có dữ liệu. Xem [quy trình copy](docs/data-transition.md).
+Đã copy/kiểm vào 2026-10-04 01:26 UTC+7: **18.031 shard (3.427 GiB)** và crawl.db sang NEW, hash/inventory/SQL khớp; .env đã chọn raw NEW. Extract chưa chạy. Trong phiên tạo repo trước copy, state mới rỗng. Trước copy, crawl ghi NEW/data/raw_vi nhưng extract đọc RAW_DIR ở OLD: shard crawl mới không được extract nếu thiếu `--raw-dir` NEW. **Copy raw_vi và crawl.db sang NEW trước extract lớn**; giữ nguyên OLD, không copy extract.db/docs cũ. Copy chỉ khi writer dừng/WAL0, kiểm hash/inventory, không overwrite đích đã có dữ liệu. Xem [quy trình copy](docs/data-transition.md).
 
 Sau copy, .env đổi `R2AI_RAW_DIR=D:/R2AI/r2ai-stage3/data/raw_vi`, RAW_DIR=RAW_WRITE_DIR. Giữ raw NEW ổn định đến sau 11/11/2026; extract.db mới lưu path tuyệt đối này. Crawl resume DB bản sao; extract chạy mới đủ **18.031 shard**, làm lại 3.103 shard (17,2%), còn 14.928 chưa có checkpoint. Chưa đo thời gian extract/embed lớn. Không crawl thật khi chưa được duyệt riêng.
 

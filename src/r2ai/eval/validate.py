@@ -70,7 +70,8 @@ def read_text(path: Path) -> str:
         with zipfile.ZipFile(path) as z:
             files = [n for n in z.namelist() if not n.endswith('/')]
             return z.read(files[0]).decode('utf-8') if files else ''
-    return path.read_text(encoding='utf-8', newline='')
+    with path.open(encoding='utf-8', newline='') as f:
+        return f.read()
 
 
 def load_raw(path: Path) -> tuple[object, list[str]]:

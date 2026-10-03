@@ -62,7 +62,8 @@ def main(argv=None):
                 errs.append(f'zip must hold exactly one top-level .json, got {names[:5]}')
             raw = z.read(names[0]).decode('utf-8') if names else ''
     else:
-        raw = p.read_text(encoding='utf-8', newline='')
+        with p.open(encoding='utf-8', newline='') as f:
+            raw = f.read()
     try:
         sub = json.loads(raw)
     except ValueError as e:

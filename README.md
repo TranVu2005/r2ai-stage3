@@ -77,7 +77,7 @@ python -B -m pytest -q -p no:cacheprovider
 python -B -m pytest tests/test_vicrawl_integration.py -m slow -q -p no:cacheprovider
 ```
 
-Core 36 test giữ nguyên assertions. Suite đã đo sau review: **268 pass**, hai test slow **2 pass** riêng. Suite mặc định loại 2 test slow nên chạy dòng cuối riêng. Validator ZIP đã kiểm; validator JSON trực tiếp có lỗi compatibility kế thừa OLD trên Python3.12 (sửa riêng). Bare clone cần legacy `.env`, HF tokenizer cache và OLD/out/{crawl_sample.csv,sample_raw} để chạy parity/extractor tests; không bỏ assertion/skip hoặc commit cả out. Test mockserver chỉ dùng localhost/temp.
+Core 36 test giữ nguyên assertions. Suite đã đo sau review: **272 pass**, hai test slow **2 pass** riêng. Suite mặc định loại 2 test slow nên chạy dòng cuối riêng. Validator ZIP và JSON trực tiếp đã kiểm trên Python3.12, giữ kiểm tra CRLF. Bare clone cần legacy `.env`, HF tokenizer cache và OLD/out/{crawl_sample.csv,sample_raw} để chạy parity/extractor tests; không bỏ assertion/skip hoặc commit cả out. Test mockserver chỉ dùng localhost/temp.
 
 ## Công cụ phụ và lịch sử
 

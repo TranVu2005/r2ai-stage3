@@ -1,8 +1,8 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-04 01:26 (UTC+7)
+- Cập nhật: 2026-10-04 01:50 (UTC+7)
 - Model thực hiện: Codex (GPT-6)
-- Commit HEAD đã kiểm trước cập nhật này: `52c7c61`, nhánh `main` (hash commit chứa tài liệu này được báo ở kết quả PHA B)
+- Commit HEAD đã kiểm trước cập nhật này: `1410b26`, nhánh `main` (hash commit chứa tài liệu này được báo ở kết quả)
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - Quy ước: ✅ có bằng chứng · 🟡 làm một phần · ❌ chưa làm (đã tìm, không thấy) · ❓ không chứng minh được
 
@@ -11,7 +11,7 @@
 
 
 > **PHA B / repo hiện tại:** `D:/R2AI/r2ai-stage3`, history mới trên main. Các số crawl/extract/index/LB phía dưới là snapshot legacy OLD ngày 03/10, không phải kết quả chạy lớn ở NEW. Mapping hiện tại: `eval`→`src/r2ai/eval`, `index`→`src/r2ai/index`, `retrieve`→`src/r2ai/retrieve`, `submission`→`src/r2ai/submit`, `vicrawl`→`src/vicrawl`, `config`→`configs`; CLI xem README. Đọc query/docs/chunks/index/K100 cũ ở OLD; ghi pipeline mới vào NEW. Status mặc định đọc NEW/state, đối chiếu OLD phải dùng `--state-dir` rõ ràng.
-> Gate đã đo: core **36 pass**, full **268 pass / 2 deselected**, slow **2 pass / 10 deselected**; OLD full 234 pass và slow 2 pass. Replay JSON sub06 **181.960.105 byte**, SHA256 `07e0fd59f8cc4b8abbf129dc1536305bdbef17ce510b6fe39fe50fe62133acc3`, byte/query/field diff=0; validator **1.200 query / 22.800 chunk / 0 lỗi**. Không rerun model/GPU hay nộp LB. Python 3.12.13, torch 2.11.0+cu128, 102 package freeze khớp OLD. Chi tiết run ở `out/runs/restructure/` và `out/runs/reproduce-sub06/` (ignored).
+> Gate đã đo: core **36 pass**, full **272 pass / 2 deselected**, slow **2 pass / 10 deselected**; OLD full 234 pass và slow 2 pass. Replay JSON sub06 **181.960.105 byte**, SHA256 `07e0fd59f8cc4b8abbf129dc1536305bdbef17ce510b6fe39fe50fe62133acc3`, byte/query/field diff=0; validator **1.200 query / 22.800 chunk / 0 lỗi**. Không rerun model/GPU hay nộp LB. Python 3.12.13, torch 2.11.0+cu128, 102 package freeze khớp OLD. Chi tiết run ở `out/runs/restructure/` và `out/runs/reproduce-sub06/` (ignored).
 > Copy raw/crawl.db: **Đã copy** 18,031 shard / 3,679,529,131 byte (3.427 GiB) và crawl.db 376,438,784 byte sang NEW; hash/inventory nguồn–đích khớp, SQL 653.970 URL / 624.596 ok / 48 domain khớp. Writer dừng, WAL0; không overwrite hay move/xóa OLD. RAW_DIR=RAW_WRITE_DIR=NEW/data/raw_vi; status mặc định NEW đã kiểm. Extract.db mới chưa có; chưa chạy extract/crawl/GPU lớn. OLD raw hash sau copy, source161 và state6 vẫn không đổi. Manifest `out/runs/restructure/data-copy.json`.
 
 ## 1. Crawl (vi)
@@ -99,9 +99,13 @@ Lưu ý: sub01/sub02 dùng K=5 doc, C=2 chunk; sub03–sub10 gồm các biến t
 
 ## 6. Lệch so với `R2AI_STAGE3_CONTEXT.md`
 
+Validator JSON trực tiếp đã sửa cho Python3.12 bằng Path.open(newline=""). Một test parametrized cho cả hai CLI: LF hợp lệ/CRLF bị từ chối, 4 ca RED→GREEN; full suite **272 passed / 2 deselected / 152,22s**. Guard được kiểm chỉ gọi ở preflight CLI, không trong vòng lặp shard; giữ quét recursive để bảo vệ junction/symlink con. Không thêm gọi assert_writable mỗi shard.
+
+Replay JSON giữ nguyên SHA256 nhưng ZIP NEW **46.083.494 byte**, OLD **46.047.946 byte**, chênh **35.548 byte** do bước nén/metadata (nguyên nhân build zlib chưa xác minh). Cả hai dưới 45,7 MiB = 47.919.923 byte. Khi ZIP sát ngưỡng, --max-zip-mib có thể chọn k_chunk khác OLD; luôn đo ZIP thực trên môi trường nộp hiện tại.
+
 Chuyển raw/state sau gate repo: **Đã copy** 18,031 shard / 3,679,529,131 byte (3.427 GiB) và crawl.db 376,438,784 byte sang NEW; hash/inventory nguồn–đích khớp, SQL 653.970 URL / 624.596 ok / 48 domain khớp. Writer dừng, WAL0; không overwrite hay move/xóa OLD. RAW_DIR=RAW_WRITE_DIR=NEW/data/raw_vi; status mặc định NEW đã kiểm. Extract.db mới chưa có; chưa chạy extract/crawl/GPU lớn. OLD raw hash sau copy, source161 và state6 vẫn không đổi. Manifest `out/runs/restructure/data-copy.json`.
 
-Review độc lập toàn bộ repo: sửa 3 nhóm Important (profile/dup import, guard nested redirects/sidecars, docs parquet rỗng); 11 test RED→GREEN. Suite sau sửa: **268 pass**, slow **2 pass**, replay sub06 SHA/diff=0 trong **78.8s**. Minor kế thừa OLD: validator JSON trực tiếp dùng Path.read_text(newline=...) không tương thích Python3.12; validator ZIP đã pass, sửa compatibility ở đợt riêng.
+Review độc lập toàn bộ repo: sửa 3 nhóm Important (profile/dup import, guard nested redirects/sidecars, docs parquet rỗng); 11 test RED→GREEN. Suite sau sửa: **268 pass**, slow **2 pass**, replay sub06 SHA/diff=0 trong **78.8s**. Minor kế thừa OLD về validator JSON trên Python3.12 đã sửa trong lượt tiếp theo (xem cập nhật trên).
 
 PHA B đã sửa CONTEXT/metric theo scorer giữ dấu câu, ngưỡng 0,4 và không dedupe ở metric; builder dedupe nguyên để replay sub06. Bảng dưới lưu các lệch của snapshot OLD, không còn là danh sách lỗi chưa sửa. NEW mở pipeline extract → chunk → index → retrieve/K100 → submission; công cụ ghi phụ khóa trong main tới khi có guard. Cài torch dùng `--torch-backend cu128` để giữ wheel CUDA và lấy đúng dependency đã pin từ PyPI. Status read-only, mặc định STATE_DIR; không log vào OLD.
 
@@ -146,5 +150,6 @@ Hai dòng ❓ từ CONTEXT:
 | 2026-10-04 01:02 | Codex (GPT-6) | PHA B: src layout, paths/env/guards/status, pins và docs; core36/full257/slow2 pass, replay sub06 JSON/hash/diff=0; OLD/state/fixtures bất biến. Copy raw và extract lớn chưa chạy. |
 | 2026-10-04 01:22 | Codex (GPT-6) | Review độc lập + 11 regression RED→GREEN; suite268/slow2 pass, replay JSON/hash giữ nguyên, các input hash và elapsed đã lưu. Không có Critical/Important còn mở. |
 | 2026-10-04 01:26 | Codex (GPT-6) | Sau gate repo/push: copy raw18.031 shard+crawl.db+domain CSV, hash/inventory/SQL khớp, OLD không đổi, raw root NEW ổn định; chưa extract lớn. |
+| 2026-10-04 01:50 | Codex (GPT-6) | Sửa hai validator JSON, regression4 RED→GREEN/full272 pass; ghi chênh ZIP và guard chỉ preflight. Chuẩn bị extract đủ18.031 shard, workers2 trên RAM16GiB; chưa có kết quả extract lớn. |
 | 2026-10-03 23:10 | Claude Sonnet 5.5 | Thêm điểm LB từ `SCOREBOARD.md` (M8, M9, mục 5, 7, 8); kiểm số học bảng điểm |
 | 2026-10-03 22:50 | Claude Sonnet 5.5 | Tạo `PROGRESS.md` (template không có trong repo) từ khảo sát chỉ-đọc: `state/*.db` (ro), `data/`, `out/`, `logs/`, `git` ở HEAD `ae6b90d`; chạy 36 test (scorer, make_submission, chunk) pass |

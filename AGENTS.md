@@ -11,3 +11,5 @@
 - Không đổi raw root sau khi có checkpoint extract lớn nếu chưa migration mọi shards.path. Giữ raw NEW ổn định đến sau 11/11/2026.
 - Replay sub06 đọc cache/chunks/docs OLD rõ ràng; pipeline mới chọn toàn bộ bundle NEW. Không tự fallback/trộn bundle.
 - Sau mỗi việc cập nhật docs/PROGRESS.md: header UTC+7/model/HEAD thực đã xác minh trước commit, thêm Changelog, cập nhật §6. Không ghi commit tự tham chiếu hay điểm leaderboard chưa đo. Deadline public 31/10/2026; private 04/11/2026 tối đa 5 lượt; kết quả 11/11/2026.
+
+- assert_writable quét recursive chỉ ở preflight CLI; không gọi trong vòng lặp shard. ZIP nén khác OLD có thể đổi kc sát budget; đo ZIP thực, giữ hash JSON làm gate parity.

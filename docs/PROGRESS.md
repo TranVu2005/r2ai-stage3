@@ -1,8 +1,8 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-04 03:22 (UTC+7)
+- Cập nhật: 2026-10-04 03:27 (UTC+7)
 - Model thực hiện: Codex (GPT-6)
-- Commit HEAD đã kiểm trước cập nhật này: `6b5a120`, nhánh `main` (hash commit chứa tài liệu này được báo ở kết quả)
+- Commit HEAD đã kiểm trước cập nhật này: `214865f`, nhánh `main` (hash commit chứa tài liệu này được báo ở kết quả)
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - Quy ước: ✅ có bằng chứng · 🟡 làm một phần · ❌ chưa làm (đã tìm, không thấy) · ❓ không chứng minh được
 
@@ -105,6 +105,8 @@ Lưu ý: sub01/sub02 dùng K=5 doc, C=2 chunk; sub03–sub10 gồm các biến t
 
 ## 6. Lệch so với `R2AI_STAGE3_CONTEXT.md`
 
+Cập nhật 2026-10-04 03:27: chunk NEW đã nạp 623.805 doc đủ điều kiện (118 s), target256, min-body-tokens50; đang tokenise, chưa có kết quả chunk/index/retrieval.
+
 Extract NEW hoàn tất: **18.031/18.031 shard**, **632.208 doc**, status {"ok": 623852, "thin": 8356}; elapsed CLI **5438.0 s**, workers2. Checkpoint khớp tập raw NEW, số hàng parquet khớp SQLite; không còn shard pending. Doc ok: Vinmec **26.124**, MEDLATEC **24.709**. 6 hash/size state OLD giữ nguyên. Chunk → index → K100 → submission đang chạy theo chuỗi; chưa có điểm LB mới. Bằng chứng `out/runs/coverage-rebuild/extract.json`, `old-state-after-extract.json`.
 
 Extract đang chạy: **1,039/18.031 shard**, **43,674 doc** trong checkpoint NEW tại 2026-10-04 01:57 UTC+7; raw/data/state đều NEW, workers2. PID launcher 22592; log `out/runs/coverage-rebuild/extract.log`. Chưa có kết quả chunk/index/K100/submission mới. Validator JSON sub06 thực đã pass: 1.200 query / 22.800 chunk / 0 lỗi (không áp budget ZIP vào file JSON181MB).
@@ -149,7 +151,7 @@ Hai dòng ❓ từ CONTEXT:
 
 ## 8. 3 việc tiếp theo (đường găng tới 31/10)
 
-1. **Raw/crawl state đã copy và kiểm hash; bước tiếp theo: extract mới đủ 18.031 shard (14.928 chưa có checkpoint), rebuild chunk/embed/index/K100/submission** (thời gian extract + embed toàn bộ: chưa đo; `data/index/t256/meta.json` chỉ ghi 327 s cho phần embed của lần chạy cuối). Đây là điều kiện để mọi bước sau có ý nghĩa.
+1. **Extract NEW đã đủ 18.031 shard / 632.208 doc; đang rebuild chunk → embed/index → K100 → submission.** Chunk nạp 623.805 doc đủ điều kiện trong 118 s; chưa có số chunk/index/K100 mới. Elapsed extract đã đo 5.438,011 s; thời gian pipeline còn lại chưa đo.
 2. **Sau rebuild, nộp lại cấu hình sub06 (kd=100, chunk full)** để đo gain từ độ phủ; chốt giới hạn upload (nằm giữa 45,7 MiB đã lên được và 110 MiB không lên được) bằng JSON compact; ghi điểm vào `out/submissions/LOG.md`. Còn lại A/B: 1 id vs cả nhóm id trùng.
 3. **Quyết định zh**: lấy mẫu 2% mỗi domain zh, tính yield trên 1.200 query, rồi xếp thứ tự crawl; song song commit code đang untracked.
 
@@ -162,6 +164,7 @@ Hai dòng ❓ từ CONTEXT:
 | 2026-10-04 01:26 | Codex (GPT-6) | Sau gate repo/push: copy raw18.031 shard+crawl.db+domain CSV, hash/inventory/SQL khớp, OLD không đổi, raw root NEW ổn định; chưa extract lớn. |
 | 2026-10-04 01:50 | Codex (GPT-6) | Sửa hai validator JSON, regression4 RED→GREEN/full272 pass; ghi chênh ZIP và guard chỉ preflight. Chuẩn bị extract đủ18.031 shard, workers2 trên RAM16GiB; chưa có kết quả extract lớn. |
 | 2026-10-04 03:22 | Codex (GPT-6) | Extract NEW đủ18.031 shard/632208doc; checkpoint/raw/parquet khớp, state OLD bất biến. Chunk/index/K100/submission chờ kết quả; không ghi điểm LB. |
+| 2026-10-04 03:27 | Codex (GPT-6) | Chunk NEW nạp623.805 doc đủ điều kiện trong118s, target256; cập nhật đường găng vì extract đã hoàn tất. Chưa có index/K100/submission mới. |
 | 2026-10-04 01:57 | Codex (GPT-6) | Khởi chạy extract raw NEW/state NEW workers2; snapshot 1039shards/43674docs. JSON validator thực1200/22800/0lỗi. Các bước sau chờ extract hoàn tất. |
 | 2026-10-03 23:10 | Claude Sonnet 5.5 | Thêm điểm LB từ `SCOREBOARD.md` (M8, M9, mục 5, 7, 8); kiểm số học bảng điểm |
 | 2026-10-03 22:50 | Claude Sonnet 5.5 | Tạo `PROGRESS.md` (template không có trong repo) từ khảo sát chỉ-đọc: `state/*.db` (ro), `data/`, `out/`, `logs/`, `git` ở HEAD `ae6b90d`; chạy 36 test (scorer, make_submission, chunk) pass |

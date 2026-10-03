@@ -68,4 +68,5 @@ async def main():
     c = df.filter(pl.col("comparable"))
     print(f"pairs={df.height} comparable={c.height} text_identical={int(c['text_identical'].sum())} same_final_url={int(df['same_final_url'].sum())}")
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

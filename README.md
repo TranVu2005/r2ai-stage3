@@ -66,7 +66,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Replay failed' }
 python scripts/validate_submission.py D:/R2AI/r2ai-stage3/out/runs/reproduce-sub06/sub06_vi_kd100_kc19_full.zip --queries D:/GitHub/r2ai-stage3/data/raw/query.parquet --corpus D:/GitHub/r2ai-stage3/data/raw/links_corpus.parquet --docs-dir D:/GitHub/r2ai-stage3/data/docs_vi --max-zip-mib 45.7
 ```
 
-JSON byte diff = 0; SHA256 `07e0fd59f8cc4b8abbf129dc1536305bdbef17ce510b6fe39fe50fe62133acc3`, 181.960.105 byte; 1.200 query / 22.800 chunk; validator 0 lỗi. ZIP bytes có thể khác do metadata/nền tảng nén. Run config/metrics nằm cạnh artifact; không rerun embedding/reranker hoặc nộp leaderboard. Final 0,0626 là điểm cũ theo PROGRESS, chưa có scoreboard gốc.
+JSON byte diff = 0; replay sau review 78.8s; SHA256 `07e0fd59f8cc4b8abbf129dc1536305bdbef17ce510b6fe39fe50fe62133acc3`, 181.960.105 byte; 1.200 query / 22.800 chunk; validator 0 lỗi. ZIP bytes có thể khác do metadata/nền tảng nén. Run config/metrics nằm cạnh artifact; không rerun embedding/reranker hoặc nộp leaderboard. Final 0,0626 là điểm cũ theo PROGRESS, chưa có scoreboard gốc.
 
 ## Score và test
 
@@ -77,7 +77,7 @@ python -B -m pytest -q -p no:cacheprovider
 python -B -m pytest tests/test_vicrawl_integration.py -m slow -q -p no:cacheprovider
 ```
 
-Core 36 test giữ nguyên assertions. Suite mặc định loại 2 test slow nên chạy dòng cuối riêng. Bare clone cần legacy `.env`, HF tokenizer cache và OLD/out/{crawl_sample.csv,sample_raw} để chạy parity/extractor tests; không bỏ assertion/skip hoặc commit cả out. Test mockserver chỉ dùng localhost/temp.
+Core 36 test giữ nguyên assertions. Suite đã đo sau review: **268 pass**, hai test slow **2 pass** riêng. Suite mặc định loại 2 test slow nên chạy dòng cuối riêng. Validator ZIP đã kiểm; validator JSON trực tiếp có lỗi compatibility kế thừa OLD trên Python3.12 (sửa riêng). Bare clone cần legacy `.env`, HF tokenizer cache và OLD/out/{crawl_sample.csv,sample_raw} để chạy parity/extractor tests; không bỏ assertion/skip hoặc commit cả out. Test mockserver chỉ dùng localhost/temp.
 
 ## Công cụ phụ và lịch sử
 

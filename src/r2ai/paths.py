@@ -73,8 +73,26 @@ SUBMISSIONS_LOG = ROOT / 'submissions/LOG.md'
 
 def assert_writable(path: str | Path) -> Path:
     resolved = resolve_path(path)
-    if OLD_ROOT is not None and resolved.is_relative_to(OLD_ROOT):
+    if OLD_ROOT is None:
+        return resolved
+    if resolved.is_relative_to(OLD_ROOT):
         raise ValueError(f'Write to OLD is forbidden: {resolved}')
+    # Check existing descendants before a directory writer can open files or
+    # clean up shards. A child junction/symlink can redirect an otherwise safe
+    # root. Track resolved directories to avoid revisiting alias cycles.
+    pending = [resolved] if resolved.is_dir() else []
+    seen = set()
+    while pending:
+        directory = pending.pop()
+        if directory in seen:
+            continue
+        seen.add(directory)
+        for child in directory.iterdir():
+            target = resolve_path(child)
+            if target.is_relative_to(OLD_ROOT):
+                raise ValueError(f'Write to OLD is forbidden: {target}')
+            if target.is_dir() and target not in seen:
+                pending.append(target)
     return resolved
 
 

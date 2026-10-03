@@ -79,3 +79,21 @@ def test_missing_and_empty_input_fails_without_output(tmp_path, monkeypatch):
         with pytest.raises(ValueError):
             mod.require_inputs(path)
     assert not (tmp_path / 'new/out').exists()
+
+
+@pytest.mark.parametrize('nested',['index/t256/shards','state/crawl.db','chunks/docs.parquet','runs/partial.parquet','logs/crawl.log'])
+def test_guard_rejects_redirected_descendant_before_directory_write(tmp_path,monkeypatch,nested):
+    old=tmp_path/'old'
+    mod=load(tmp_path,monkeypatch,f'R2AI_DATA_DIR={old / "data"}\nR2AI_OLD_ROOT={old}\n')
+    root=tmp_path/'new/writer'
+    child=root/nested
+    child.parent.mkdir(parents=True,exist_ok=True)
+    child.write_text('original',encoding='utf-8')
+    original=Path.resolve
+    def redirected(self,*args,**kwargs):
+        return old/'protected' if self==child else original(self,*args,**kwargs)
+    monkeypatch.setattr(Path,'resolve',redirected)
+    with pytest.raises(ValueError,match='Write to OLD is forbidden'):
+        mod.assert_writable(root)
+    assert child.read_text(encoding='utf-8')=='original'
+    assert not old.exists()

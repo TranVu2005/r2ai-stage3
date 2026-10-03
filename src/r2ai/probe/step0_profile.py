@@ -17,7 +17,6 @@ import polars as pl
 SEED = 42
 RAW = RAW_DATA_DIR
 OUT = OUT_DIR
-OUT.mkdir(exist_ok=True)
 
 CJK = r"[㐀-䶿一-鿿豈-﫿]"
 ABBR = re.compile(r"\b(?:[A-Z]{2,}[A-Za-z0-9]*|[A-Z][a-z]?[0-9][A-Za-z0-9]*|HbA1c|CT|MRI|ECG|COVID(?:-19)?)\b")
@@ -201,6 +200,7 @@ def query_profile() -> dict:
 
 def main() -> None:
     auxiliary_disabled()
+    OUT.mkdir(exist_ok=True)
     res = {"corpus": corpus_profile(), "query": query_profile()}
     (OUT / "profile_static.json").write_text(json.dumps(res, ensure_ascii=False, indent=1, default=str), "utf-8")
     c, q = res["corpus"], res["query"]

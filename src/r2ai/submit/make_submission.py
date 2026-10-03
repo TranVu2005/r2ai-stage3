@@ -190,6 +190,14 @@ def main(argv=None):
     if a.chunk_mode == 'c2' and a.k_chunk > C2_MAX_K:
         ap.error(f'c2 needs cached chunk scores, available for the top {C2_MAX_K} docs only')
     a.out = str(assert_writable(a.out))
+    # ZIP, JSON and stats are independent destinations; an existing sidecar
+    # may be redirected even when the ZIP path is safe. Check every possible
+    # budget-selected basename before inputs/models or output creation.
+    candidates = range(1, a.k_doc + 1) if a.zip_budget_mib else range(1, a.k_chunk + 1)
+    for candidate in candidates:
+        output = assert_writable(a.out.replace('{kc}', str(candidate)))
+        assert_writable(output.with_suffix('.json'))
+        assert_writable(output.with_suffix('.stats.json'))
     a.queries = str(resolve_path(a.queries))
     runs, chunk_root, docs_root = resolve_path(a.runs_dir), resolve_path(a.chunks_dir), resolve_path(a.docs_dir)
     required = [runs / 'vi_k100.parquet', Path(a.queries), chunk_root / 'docs.parquet']
@@ -197,8 +205,11 @@ def main(argv=None):
         required += [runs / 'vi_k100_chunk_scores.parquet', chunks_file(a.target, base=chunk_root)]
     else:
         require_inputs(docs_root)
-        if not any(docs_root.glob('*.parquet')):
+        document_files = list(docs_root.glob('*.parquet'))
+        if not document_files:
             raise ValueError(f'Missing or empty parquet input: {docs_root}')
+        if not any(pq.ParquetFile(source).metadata.num_rows for source in document_files):
+            raise ValueError(f'Empty document input: {docs_root}')
     if a.chunk_mode == 'window':
         required += [runs / 'vi_k100_chunk_scores.parquet', chunks_file(a.target, base=chunk_root), index_dir(a.target, base=Path(a.index_dir)) / 'dense.npy']
     require_inputs(*required)
@@ -340,7 +351,7 @@ def main(argv=None):
         out, n_docs, n_chunks, lens, st = build(kc)
         zp = assert_writable(a.out.replace('{kc}', str(kc)))
         zp.parent.mkdir(parents=True, exist_ok=True)
-        js = zp.with_suffix('.json')
+        js = assert_writable(zp.with_suffix('.json'))
         write_submission(out, js)
         with zipfile.ZipFile(zp, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
             z.write(js, js.name)
@@ -358,7 +369,7 @@ def main(argv=None):
              'docs_per_query': dist(n_docs), 'chunks_per_query': dist(n_chunks),
              'chunk_tokens_bge_m3': dist(lens) if lens else None,
              'json_bytes': js.stat().st_size, 'zip_bytes': zp.stat().st_size, 'full_text_source_counts': full_src}
-    zp.with_suffix('.stats.json').write_text(json.dumps(stats, indent=1), encoding='utf-8')
+    assert_writable(zp.with_suffix('.stats.json')).write_text(json.dumps(stats, indent=1), encoding='utf-8')
     print(json.dumps(stats, indent=1))
     return 0
 

@@ -126,3 +126,61 @@ def test_gold_report_keeps_legacy_output_basename(tmp_path):
     assert response.status_code==200
     assert Path(response.json['path']).name=='gold_check_report.md'
     assert (tmp_path/'gold_check_report.md').is_file()
+
+
+@pytest.mark.parametrize('mode', ['import', 'cli'])
+def test_profile_import_and_locked_cli_do_not_create_old_output(tmp_path, mode):
+    old=tmp_path/'old'
+    old.mkdir()
+    output=old/'profile-output'
+    if mode=='cli':
+        proc=run_cli(tmp_path,'r2ai.probe.step0_profile',[],{'R2AI_OUT_DIR':str(output)})
+        assert 'auxiliary writer is disabled' in proc.stdout+proc.stderr
+    else:
+        env=dict(os.environ,PYTHONDONTWRITEBYTECODE='1',R2AI_OLD_ROOT=str(old),R2AI_DATA_DIR=str(old/'data'),R2AI_OUT_DIR=str(output))
+        proc=subprocess.run([sys.executable,'-B','-c','import r2ai.probe.step0_profile'],cwd=ROOT,env=env,capture_output=True,text=True,timeout=30)
+        assert proc.returncode==0,proc.stderr
+    assert not output.exists()
+
+
+def test_dup_check_import_does_not_execute_main(tmp_path):
+    env=dict(os.environ,PYTHONDONTWRITEBYTECODE='1',R2AI_OLD_ROOT=str(tmp_path/'old'),R2AI_DATA_DIR=str(tmp_path/'old/data'),R2AI_OUT_DIR=str(tmp_path/'new/out'))
+    proc=subprocess.run([sys.executable,'-B','-c','from r2ai.probe.step0_dup_check import norm; assert callable(norm)'],cwd=ROOT,env=env,capture_output=True,text=True,timeout=30)
+    assert proc.returncode==0,proc.stderr
+    assert not (tmp_path/'new').exists()
+
+
+@pytest.mark.parametrize('suffix',['.json','.stats.json'])
+def test_submission_sidecar_redirect_is_guarded_before_input_or_output(tmp_path,monkeypatch,suffix):
+    from r2ai import paths
+    from r2ai.submit import make_submission as module
+    old=tmp_path/'old'
+    monkeypatch.setattr(paths,'OLD_ROOT',old)
+    output=tmp_path/'new/result.zip'
+    sidecar=output.with_suffix(suffix)
+    original=Path.resolve
+    def redirected(self,*args,**kwargs):
+        return old/'redirected' if self==sidecar else original(self,*args,**kwargs)
+    monkeypatch.setattr(Path,'resolve',redirected)
+    with pytest.raises(ValueError,match='Write to OLD is forbidden'):
+        module.main(['--k-doc','1','--k-chunk','1','--chunk-mode','full','--out',str(output),'--runs-dir',str(tmp_path/'missing'),'--docs-dir',str(tmp_path/'missing-docs')])
+    assert not output.parent.exists()
+
+
+def test_empty_full_document_parquet_fails_before_tokenizer_and_output(tmp_path,monkeypatch):
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from r2ai.submit import make_submission as module
+    runs,chunks,docs=(tmp_path/name for name in ('runs','chunks','docs'))
+    for p in (runs,chunks,docs):p.mkdir()
+    pq.write_table(pa.Table.from_pylist([{'query_id':1,'rank':1,'doc_id':10}]),runs/'vi_k100.parquet')
+    pq.write_table(pa.Table.from_pylist([{'doc_id':10,'doc_ids_group':[10]}]),chunks/'docs.parquet')
+    pq.write_table(pa.Table.from_pylist([{'id':1}]),tmp_path/'queries.parquet')
+    schema=pa.schema([('question',pa.string()),('status',pa.string()),('doc_ids',pa.list_(pa.int64())),('answer',pa.string()),('body',pa.string()),('title',pa.string()),('description',pa.string())])
+    pq.write_table(pa.Table.from_pylist([],schema=schema),docs/'empty.parquet')
+    def tokenizer_should_not_run():pytest.fail('Tokenizer reached with empty docs')
+    monkeypatch.setattr(module,'Tokenizer',tokenizer_should_not_run)
+    output=tmp_path/'new/result.zip'
+    with pytest.raises(ValueError,match='Empty document input'):
+        module.main(['--k-doc','1','--k-chunk','1','--chunk-mode','full','--out',str(output),'--runs-dir',str(runs),'--chunks-dir',str(chunks),'--docs-dir',str(docs),'--queries',str(tmp_path/'queries.parquet')])
+    assert not output.parent.exists()

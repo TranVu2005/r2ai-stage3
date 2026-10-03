@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools==78.1.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "r2ai-stage3"
+version = "0.1.0"
+description = "R2AI Stage 3 medical retrieval, crawling, extraction and evaluation"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "httpx[http2,brotli]==0.28.1",
+  "zstandard==0.25.0",
+  "polars==1.44.2",
+  "pyarrow==25.0.1",
+  "pyyaml==6.0.3",
+  "lxml==6.1.3",
+  "lxml-html-clean==0.4.5",
+  "cssselect==1.5.0",
+  "trafilatura==2.2.0",
+  "langdetect==1.0.9",
+  "transformers==5.18.0",
+  "tokenizers==0.23.2",
+  "wakepy==1.0.0",
+  "huggingface-hub==1.33.0",
+]
+
+[project.optional-dependencies]
+probe = [
+  "requests==2.34.2",
+  "warcio==1.8.1",
+  "flask==3.1.3",
+  "sentencepiece==0.2.2",
+  "aiohttp==3.14.3",
+  "psutil==7.2.2",
+]
+ml = [
+  "numpy==2.5.3",
+  "scipy==1.18.1",
+  "scikit-learn==1.9.1",
+  "sentence-transformers==6.1.0",
+  "flagembedding==1.4.2",
+  "faiss-cpu==1.15.1",
+  "rank-bm25==0.2.2",
+  "jieba==0.42.1",
+]
+torch-cu128 = ["torch==2.11.0+cu128"]
+dev = ["pytest==9.1.1"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["r2ai*", "vicrawl*"]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }

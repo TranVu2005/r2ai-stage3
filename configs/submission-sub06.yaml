@@ -1,0 +1,14 @@
+run_id: reproduce-sub06
+k_doc: 100
+k_chunk: 19
+chunk_mode: full
+dedupe_scope: doc
+max_chunk_tokens: 0
+queries: D:\GitHub\r2ai-stage3\data\raw\query.parquet
+runs_dir: D:\GitHub\r2ai-stage3\data\runs
+chunks_dir: D:\GitHub\r2ai-stage3\data\chunks
+docs_dir: D:\GitHub\r2ai-stage3\data\docs_vi
+out: D:\R2AI\r2ai-stage3\out\runs\reproduce-sub06\sub06_vi_kd100_kc19_full.zip
+expected_json_sha256: 07e0fd59f8cc4b8abbf129dc1536305bdbef17ce510b6fe39fe50fe62133acc3
+tokenizer_snapshot: 5617a9f61b028005a4858fdac845db406aefb181
+leaderboard_final_from_legacy_progress: 0.0626

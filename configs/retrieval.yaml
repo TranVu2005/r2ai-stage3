@@ -1,0 +1,17 @@
+target: 256
+seed: 42
+dense_weight: 0.7
+aggregate: max
+model: BAAI/bge-m3
+model_snapshot: 5617a9f61b028005a4858fdac845db406aefb181
+reranker: BAAI/bge-reranker-v2-m3
+reranker_snapshot: 953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e
+k_max: 100
+tier2_docs: 50
+chunk_docs: 50
+batch_size: 16
+shard_size: 10000
+flat_max_gb: 4.0
+baseline_index: IndexFlatIP
+note: Run record, not a new configuration parser. CLI commands in README select the
+  existing parameters.

@@ -1,0 +1,61 @@
+# Per-domain crawl settings. Domains not listed use `defaults` + the `default` group.
+# Resolution order: group values < defaults < per-domain keys.
+#
+#   group      rate/connection class (see `groups`)
+#   rate_cap   hard ceiling in req/s for this domain (the adaptive tuner never exceeds it)
+#   max_conns  max concurrent connections for this domain
+#   extractor  name in vicrawl/extractors/sites.py, or `generic` (trafilatura)
+#   priority   wave: wave N starts when every wave < N domain has finished / halted / is waiting at the QA gate
+#   background true => never blocks later waves (starts with wave 1 and runs alongside everything)
+#   qa_gate    true/false; default = true when the domain has >= 5000 urls (stops after 300 ok docs until `crawl.py approve`)
+#   start_rate first-run req/s (later runs start at 75% of the learned rate)
+
+groups:
+  cdn_large:   {rate_cap: 8, max_conns: 8}
+  default:     {rate_cap: 4, max_conns: 2}
+  slow_server: {rate_cap: 1, max_conns: 4}      # p50 latency > 3s: widen concurrency, never raise the rate
+
+defaults:
+  lang: vi
+  group: default
+  priority: 1
+  extractor: generic
+  start_rate: 1.0
+
+domains:
+  # ---- wave 2: the large news / hospital sites ---------------------------------------------------------
+  suckhoedoisong.vn:   {priority: 2, extractor: suckhoedoisong}
+  thanhnien.vn:        {priority: 2, group: cdn_large, extractor: thanhnien}
+  laodong.vn:          {priority: 2, extractor: laodong}
+  vinmec.com:          {priority: 2, extractor: vinmec}
+  medlatec.vn:         {priority: 2, extractor: medlatec}
+
+  # ---- background: biggest single domain (154k urls), runs alongside every wave ----------------------------
+  # Measured 2026-10-02 (out/amp_check_suckhoecongdongonline.vn.md): p50 0.74s, p95 1.5s => NOT a slow server today,
+  # and no AMP/mobile variant exists. So it uses the default class (4 req/s cap). If it degrades to p50 > 3s the tuner
+  # stops raising the rate and opens up to 4 connections instead; switch to `group: slow_server` to hard-cap at 1 req/s.
+  suckhoecongdongonline.vn: {background: true, max_conns: 4, extractor: suckhoecongdongonline}
+
+  # ---- wave 1: small / medium domains with a dedicated extractor -------------------------------------------
+  phunusuckhoe.giadinhonline.vn: {extractor: giadinhonline_phunu}
+  giadinhonline.vn:              {extractor: giadinhonline}
+  tiemchunglongchau.com.vn:      {extractor: tiemchunglongchau}
+  hellobacsi.com:                {extractor: hellobacsi}
+  vietnamnet.vn:                 {group: cdn_large, extractor: vietnamnet}
+  vnexpress.net:                 {group: cdn_large}
+
+  # ---- extractor assigned after QA review (generic output carried sidebar/footer boilerplate) -------------------
+  suckhoeviet.org.vn:   {extractor: suckhoeviet}
+  baoangiang.com.vn:    {extractor: baoangiang}
+  baodanang.vn:         {extractor: cms_entry}
+  baohaiphong.vn:       {extractor: cms_entry}
+  baonghean.vn:         {extractor: cms_entry}
+  phuyen.baodaklak.vn:  {extractor: baodaklak}
+  baocantho.com.vn:     {extractor: baocantho}
+  khoahocphothong.vn:   {extractor: khoahocphothong}
+
+  # ---- throttled after the 2026-10-02 diagnosis (out of the QA review) ------------------------------------------
+  # dantri: Varnish "428 Too Many Requests" after ~275 requests at ~0.95 req/s (428 now backs off like 429 and is retried).
+  dantri.com.vn:        {rate_cap: 0.3, start_rate: 0.3, max_conns: 1}
+  # qdnd: intermittent JS challenge ("Attention Required", ?jskey=); not solved on purpose -> retry challenged URLs after 24h, at most 2 times.
+  qdnd.vn:              {rate_cap: 0.3, max_conns: 1, challenge_retry_h: 24, challenge_max_retries: 2}

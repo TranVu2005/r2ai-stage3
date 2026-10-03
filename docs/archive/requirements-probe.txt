@@ -1,0 +1,5 @@
+requests>=2.32
+polars>=1.30
+trafilatura>=2.0
+transformers>=4.40
+warcio>=1.8

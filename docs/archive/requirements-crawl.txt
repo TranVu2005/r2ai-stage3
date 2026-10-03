@@ -1,0 +1,15 @@
+httpx[http2,brotli]>=0.28
+zstandard
+polars
+pyarrow
+pyyaml
+lxml
+lxml_html_clean
+cssselect
+trafilatura
+langdetect
+transformers
+tokenizers
+wakepy
+pytest
+uvloop; sys_platform != "win32"

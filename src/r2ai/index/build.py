@@ -13,6 +13,8 @@ build: shards of --shard-size chunks in chunk_id order -> data/index/t{target}/s
          sparse.npz   scipy CSR float16->float32 [N, vocab] (lexical weights)
          faiss.index  IndexFlatIP over float32 if N*1024*4 bytes <= --flat-max-gb, else IVF (nlist = 4*sqrt(N)), IP
          meta.json    model, max_len, N, chunk file, build times
+       --no-ann skips faiss.index (meta faiss = null).
+assemble: only the assemble step above from finished shards (python -m index.build assemble --target 256 [--no-ann]).
 Row i of every file = chunk_id i of chunks_t{target}.parquet.
 """
 from __future__ import annotations
@@ -108,10 +110,102 @@ def cmd_bench(a):
     return 0
 
 
-def cmd_build(a):
+def assemble_sparse(sh: Path, n_shards: int, n: int, dest: Path) -> int:
+    """Concatenate shard CSRs into one CSR without vstack's second full copy; returns nnz."""
+    from scipy.sparse import csr_matrix, load_npz, save_npz
+    nnz = [load_npz(sh / f'{i:05d}.sparse.npz').nnz for i in range(n_shards)]
+    total = int(sum(nnz))
+    idx_t = np.int32 if total < 2**31 else np.int64
+    indptr = np.zeros(n + 1, dtype=idx_t)
+    indices = np.empty(total, dtype=np.int32)
+    data = np.empty(total, dtype=np.float32)
+    row = pos = 0
+    vocab = None
+    for i in range(n_shards):
+        m = load_npz(sh / f'{i:05d}.sparse.npz').tocsr()
+        vocab = m.shape[1]
+        k = m.nnz
+        indices[pos:pos + k] = m.indices
+        data[pos:pos + k] = m.data
+        indptr[row + 1:row + m.shape[0] + 1] = m.indptr[1:] + pos
+        row += m.shape[0]
+        pos += k
+    assert row == n and pos == total, (row, n, pos, total)
+    save_npz(dest, csr_matrix((data, indices, indptr), shape=(n, vocab)))
+    return total
+
+
+def build_faiss(dense, flat_max_gb: float, nprobe: int = 64):
+    """Flat IP when float32 fits flat_max_gb, else IVF + 8-bit scalar quantiser (~N*1024 bytes in RAM, not 4x).
+
+    Retrieval re-scores candidates exactly from dense.npy, so SQ8 only affects candidate recall."""
     import faiss
+    n = len(dense)
+    flat_gb = n * 1024 * 4 / 2**30
+    if flat_gb <= flat_max_gb:
+        index, kind = faiss.IndexFlatIP(1024), 'IndexFlatIP'
+    else:
+        nlist = int(4 * np.sqrt(n))
+        index = faiss.IndexIVFScalarQuantizer(faiss.IndexFlatIP(1024), 1024, nlist,
+                                              faiss.ScalarQuantizer.QT_8bit, faiss.METRIC_INNER_PRODUCT)
+        rs = np.random.RandomState(42).choice(n, min(n, 50 * nlist), replace=False)
+        index.train(np.asarray(dense[np.sort(rs)], dtype=np.float32))
+        index.nprobe = nprobe
+        kind = f'IndexIVFScalarQuantizer(nlist={nlist}, QT_8bit, nprobe={nprobe})'
+    for b in range(0, n, 50000):
+        index.add(np.asarray(dense[b:b + 50000], dtype=np.float32))
+    return index, kind
+
+
+def assemble_index(out: Path, n: int, shard_size: int, flat_max_gb: float, ann: bool = True) -> dict:
+    """Shards -> dense.npy (memmap fill), sparse.npz (one CSR) and, if ann, faiss.index; returns the meta fields.
+
+    ann=False skips FAISS (exact block-scan retrieval reads dense.npy / sparse.npz directly)."""
+    sh = out / 'shards'
+    n_shards = (n + shard_size - 1) // shard_size
+    missing = [i for i in range(n_shards) if not (sh / f'{i:05d}.sparse.npz').exists()]
+    assert not missing, f'{len(missing)} shards not done, first {missing[:5]}'
+    dense = np.lib.format.open_memmap(out / 'dense.tmp.npy', mode='w+', dtype=np.float16, shape=(n, 1024))
+    for i in range(n_shards):
+        lo = i * shard_size
+        d = np.load(sh / f'{i:05d}.dense.npy')
+        dense[lo:lo + len(d)] = d
+    dense.flush()
+    del dense
+    os.replace(out / 'dense.tmp.npy', out / 'dense.npy')
+    nnz = assemble_sparse(sh, n_shards, n, out / 'sparse.tmp.npz')
+    os.replace(out / 'sparse.tmp.npz', out / 'sparse.npz')
+    kind, flat_gb = None, 0.0
+    if ann:
+        import faiss
+        dense = np.load(out / 'dense.npy', mmap_mode='r')
+        flat_gb = n * 1024 * 4 / 2**30
+        index, kind = build_faiss(dense, flat_max_gb)
+        faiss.write_index(index, str(out / 'faiss.tmp.index'))
+        os.replace(out / 'faiss.tmp.index', out / 'faiss.index')
+    return {'faiss': kind, 'faiss_float32_gb': round(flat_gb, 2), 'sparse_nnz': int(nnz)}
+
+
+def cmd_assemble(a):
+    """Re-run only the assemble step from finished shards (no model, no chunk texts loaded)."""
+    out = assert_writable(index_dir(a.target))
+    n = pq.ParquetFile(chunks_file(a.target)).metadata.num_rows
+    t0 = time.time()
+    info = assemble_index(out, n, a.shard_size, a.flat_max_gb, ann=not a.no_ann)
+    cf = chunks_file(a.target)
+    meta = {'model': 'BAAI/bge-m3', 'dense': 'CLS, L2-normalised, fp16', 'sparse': 'relu(sparse_linear) max per token id',
+            'max_len': 512, 'fp16': True, 'batch_size': None, 'n_chunks': n, **info, 'chunks_file': data_label(cf),
+            'chunks_file_mtime': os.path.getmtime(cf), 'embed_seconds_this_run': None, 'assemble_seconds': round(time.time() - t0),
+            'shards_done_before_this_run': None, 'peak_vram_allocated_mib_this_run': None,
+            'built_at': time.strftime('%Y-%m-%d %H:%M:%S')}
+    (out / 'meta.json').write_text(json.dumps(meta, indent=1), encoding='utf-8')
+    print(json.dumps(meta, indent=1))
+    return 0
+
+
+def cmd_build(a):
     import torch
-    from scipy.sparse import load_npz, save_npz, vstack
+    from scipy.sparse import save_npz
     from r2ai.index.bge_m3 import M3Encoder
     out = assert_writable(index_dir(a.target))
     sh = out / 'shards'
@@ -148,42 +242,11 @@ def cmd_build(a):
     del enc
     torch.cuda.empty_cache()
 
-    # assemble
-    dense = np.lib.format.open_memmap(out / 'dense.tmp.npy', mode='w+', dtype=np.float16, shape=(n, 1024))
-    mats = []
-    for i in range(n_shards):
-        lo = i * a.shard_size
-        d = np.load(sh / f'{i:05d}.dense.npy')
-        dense[lo:lo + len(d)] = d
-        mats.append(load_npz(sh / f'{i:05d}.sparse.npz'))
-    dense.flush()
-    del dense
-    os.replace(out / 'dense.tmp.npy', out / 'dense.npy')
-    csr = vstack(mats, format='csr')
-    assert csr.shape[0] == n
-    save_npz(out / 'sparse.tmp.npz', csr)
-    os.replace(out / 'sparse.tmp.npz', out / 'sparse.npz')
-
-    dense = np.load(out / 'dense.npy', mmap_mode='r')
-    flat_gb = n * 1024 * 4 / 2**30
-    if flat_gb <= a.flat_max_gb:
-        index = faiss.IndexFlatIP(1024)
-        kind = 'IndexFlatIP'
-    else:
-        nlist = int(4 * np.sqrt(n))
-        index = faiss.IndexIVFFlat(faiss.IndexFlatIP(1024), 1024, nlist, faiss.METRIC_INNER_PRODUCT)
-        rs = np.random.RandomState(42).choice(n, min(n, 50 * nlist), replace=False)
-        index.train(np.asarray(dense[np.sort(rs)], dtype=np.float32))
-        index.nprobe = 64
-        kind = f'IndexIVFFlat(nlist={nlist}, nprobe=64)'
-    for b in range(0, n, 50000):
-        index.add(np.asarray(dense[b:b + 50000], dtype=np.float32))
-    faiss.write_index(index, str(out / 'faiss.tmp.index'))
-    os.replace(out / 'faiss.tmp.index', out / 'faiss.index')
+    del texts                                                       # free ~GBs before assembling
+    info = assemble_index(out, n, a.shard_size, a.flat_max_gb, ann=not a.no_ann)
     cf = chunks_file(a.target)
     meta = {'model': 'BAAI/bge-m3', 'dense': 'CLS, L2-normalised, fp16', 'sparse': 'relu(sparse_linear) max per token id',
-            'max_len': 512, 'fp16': True, 'batch_size': a.batch_size, 'n_chunks': n, 'faiss': kind,
-            'faiss_float32_gb': round(flat_gb, 2), 'sparse_nnz': int(csr.nnz), 'chunks_file': data_label(cf),
+            'max_len': 512, 'fp16': True, 'batch_size': a.batch_size, 'n_chunks': n, **info, 'chunks_file': data_label(cf),
             'chunks_file_mtime': os.path.getmtime(cf), 'embed_seconds_this_run': round(t_embed),
             'shards_done_before_this_run': done_before, 'peak_vram_allocated_mib_this_run': peak,
             'built_at': time.strftime('%Y-%m-%d %H:%M:%S')}
@@ -204,12 +267,18 @@ def main(argv=None):
     p.add_argument('--batch-size', type=int, default=16)
     p.add_argument('--shard-size', type=int, default=10000)
     p.add_argument('--flat-max-gb', type=float, default=4.0)
+    p.add_argument('--no-ann', action='store_true', help='skip the FAISS index (exact block-scan retrieval)')
+    p = sub.add_parser('assemble', help='only assemble dense.npy / sparse.npz (/ faiss.index) from finished shards')
+    p.add_argument('--target', type=int, default=256)
+    p.add_argument('--shard-size', type=int, default=10000)
+    p.add_argument('--flat-max-gb', type=float, default=4.0)
+    p.add_argument('--no-ann', action='store_true', help='skip the FAISS index (exact block-scan retrieval)')
     a = ap.parse_args(argv)
     assert_writable(INDEX_DIR)
     require_inputs(chunks_file(a.target))
     if pq.ParquetFile(chunks_file(a.target)).metadata.num_rows == 0:
         raise ValueError(f'Empty chunk input: {chunks_file(a.target)}')
-    return cmd_bench(a) if a.cmd == 'bench' else cmd_build(a)
+    return {'bench': cmd_bench, 'build': cmd_build, 'assemble': cmd_assemble}[a.cmd](a)
 
 
 if __name__ == '__main__':

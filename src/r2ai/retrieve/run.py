@@ -46,15 +46,28 @@ def ws(s: str) -> str:
 
 
 class Index:
-    def __init__(self, target: int, exclude_fields: tuple[str, ...] = ()):
-        import faiss
-        from scipy.sparse import load_npz
+    def __init__(self, target: int, exclude_fields: tuple[str, ...] = (), candidates: str = 'faiss',
+                 sparse_cache: str | Path | None = None):
+        """candidates='faiss': FAISS + full CSC (legacy). 'exact': no FAISS/CSC; dense.npy and a CSR mmap cache
+        (sparse_cache, default <index>/sparse_mmap) are block-scanned by retrieve.exact.exact_candidates."""
         d = index_dir(target)
         self.meta = json.loads((d / 'meta.json').read_text(encoding='utf-8'))
         t0 = time.time()
-        self.faiss = faiss.read_index(str(d / 'faiss.index'))
+        self.mode = candidates
+        if candidates == 'faiss':
+            import faiss
+            from scipy.sparse import load_npz
+            self.faiss = faiss.read_index(str(d / 'faiss.index'))
+            self.csc = load_npz(d / 'sparse.npz').tocsc()
+        elif candidates == 'exact':
+            from r2ai.retrieve.exact import load_sparse_mmap, split_sparse_npz
+            assert not exclude_fields, '--exclude-fields is not supported with exact candidates'
+            cache = assert_writable(sparse_cache or d / 'sparse_mmap')
+            self.sparse_cache_info = split_sparse_npz(d / 'sparse.npz', cache)
+            self.sparse = load_sparse_mmap(cache)[:3]
+        else:
+            raise ValueError(f'unknown candidates mode: {candidates}')
         self.dense = np.load(d / 'dense.npy', mmap_mode='r')
-        self.csc = load_npz(d / 'sparse.npz').tocsc()
         ch = pq.read_table(chunks_file(target), columns=['doc_id', 'field', 'text'])
         self.doc_id = ch['doc_id'].to_numpy()
         self.field = np.array(ch['field'].to_pylist())

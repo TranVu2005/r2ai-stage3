@@ -1,8 +1,8 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-04 14:05 (UTC+7)
+- Cập nhật: 2026-10-04 15:40 (UTC+7)
 - Model thực hiện: Claude Opus 5.5
-- Commit HEAD đã kiểm trước cập nhật này: `ea0ec4c`, nhánh `main` (hash commit chứa tài liệu này được báo ở kết quả)
+- Commit HEAD đã kiểm trước cập nhật này: `08b2fe4`, nhánh `main` (hash commit chứa tài liệu này được báo ở kết quả)
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - Quy ước: ✅ có bằng chứng · 🟡 làm một phần · ❌ chưa làm (đã tìm, không thấy) · ❓ không chứng minh được
 
@@ -95,8 +95,8 @@ Các số bên dưới lưu snapshot OLD ngày 03/10.
 | Scorer | ✅ `python -m eval.scorer`, test pass | `eval/scorer.py`, `tests/test_scorer.py` (nằm trong 36 passed) |
 | Validator | ✅ | `eval/validate.py`, `scripts/validate_submission.py`; `logs/sub01.log`: validator exit code 0 |
 | Chunking | ✅ legacy t128/t256/t400 · 🟡 NEW | Legacy: `data/chunks/chunks_t256.parquet` 818.080 chunk; `chunk_report.json`. NEW: lần 1 hết RAM (xem đầu báo cáo); code đã xử lý theo bucket `doc_id` (`--batch-docs`, mặc định 20.000), output `.partial` → rename; chưa chạy lại toàn corpus. `tests/test_chunk.py` |
-| Index | 🟡 FAISS `IndexFlatIP` dense + sparse, t256, `built_at` 2026-10-03 06:11:40 | `data/index/t256/meta.json` (123.874 doc, 3,12 GB float32). Index **cũ**: lập trước khi crawl xong |
-| Truy hồi | 🟡 hybrid w=0.7, `max`, rerank `bge-reranker-v2-m3` fp16, seed 42 | `retrieve/run.py`, `data/runs/vi_k100.meta.json` (1.200 query, 13.083 s = 10,9 s/query), `vi_k100.parquet` 119.934 dòng (≥74, p50 100 doc/query) |
+| Index | 🟡 legacy: FAISS `IndexFlatIP` dense + sparse, t256, `built_at` 2026-10-03 06:11:40 · NEW: chunk xong (3.909.586 chunk / 623.805 doc), embed **chưa chạy xong** | Legacy `OLD/data/index/t256/meta.json` (123.874 doc, 3,12 GB float32, nnz 73.316.966 = 89,6/chunk). NEW `data/chunks/chunk_report.json` (14:34); `data/index/t256/shards/` chỉ có `00000.dense.npy` (14:42), không process embed lúc 14:52–15:34. `index.build` có `--no-ann` và `assemble` (chỉ ghép shard, không nạp model/text) |
+| Truy hồi | 🟡 hybrid w=0.7, `max`, rerank `bge-reranker-v2-m3` fp16, seed 42. Thêm `--candidates exact` (block-scan dense.npy + CSR mmap, không FAISS/CSC); gate legacy 1.199/1.200 (99,917%) K100 trước rerank giống hệt | `src/r2ai/retrieve/exact.py`, `exact_gate.py`, `out/runs/exact-gate/*.json`; `retrieve/run.py`, `data/runs/vi_k100.meta.json` (1.200 query, 13.083 s = 10,9 s/query), `vi_k100.parquet` 119.934 dòng (≥74, p50 100 doc/query) |
 | Dev set | ⚠ pseudo-dev, **bão hòa và lệch xa LB** (dev chunk F2 0,358 so với LB Final 0,0158 cùng cấu hình c2) | `data/dev/pseudo_vi_v2.parquet` 462 dòng (400 A tiêu đề-làm-query + B hỏi đáp). `out/retrieval/ablation_t256.md`: A R@5 0,9975, B R@1 1,0; chunk-level B F2 0,358. Trang nguồn nằm trong index nên số này **không dự báo điểm LB** (chính `out/submissions/LOG.md` nêu điều này) |
 | File nộp | sub01–sub10 đã sinh, chưa nộp | `out/submissions/*.zip` (sub01, sub02 zip 3,5 MB; sub03–sub10 json/zip tới 110 MB). `scripts/make_submission.py`, `submission/build.py`, `tests/test_make_submission.py` |
 | Điểm leaderboard | ✅ 7 lượt, nguồn `Downloads/SCOREBOARD.md` | Final: sub02 0,0158 · sub03 0,0273 · sub04 0,0551 · sub05 0,0623 · **sub06 0,0626** · sub07 0,0545 · sub08 0,0507. Final = (Doc F2 + Chunk F2)/2 kiểm lại đúng cho cả 7 dòng. sub01 không có điểm riêng; sub09, sub10 và sub05_k50_full không nộp / không upload được |
@@ -108,6 +108,8 @@ Lưu ý: sub01/sub02 dùng K=5 doc, C=2 chunk; sub03–sub10 gồm các biến t
 Cập nhật 2026-10-04 03:27: chunk NEW đã nạp 623.805 doc đủ điều kiện (118 s), target256, min-body-tokens50; đang tokenise, chưa có kết quả chunk/index/retrieval.
 
 Cập nhật 2026-10-04 13:51: lần chunk này thất bại do hết RAM; `index.chunk` đã chuyển sang xử lý theo lô, cần chạy lại.
+
+Cập nhật 2026-10-04 15:40: retrieval có `--candidates exact` (mặc định vẫn `faiss`). Gate trên index legacy 818.080 chunk, 1.200 query, không rerank: K100 doc trước rerank giống hệt **1.199/1.200 (99,917%)**, cùng thứ tự 1.199; tập ứng viên giống hệt 1.191; điểm dense/sparse trên tập giống hệt lệch 0,0. 9 ca lệch tập ứng viên đều là tie trên chunk trùng vector ở biên top-200 sparse (`argpartition` cũ chọn tuỳ ý); 1 ca (qid 694) đổi 3 doc trùng nội dung trong K100. Exact: dense 12,9 s, sparse 33,2 s, union+rescore 2,7 s, peak RSS 1,256 GiB, private 1,544 GiB. Cũ (FAISS mmap + CSC): 198,0 s, peak RSS 3,743 GiB. Số doc phân biệt trước rerank: min 74, p5 136, p50 227, 5 query < 100. Mix là min-max theo tập ứng viên nên không có phương án "hybrid một lượt quét". Embed NEW chưa chạy xong (process không còn); Bước chạy thật 3,9M chưa làm.
 
 Cập nhật 2026-10-04 14:05: repo chuyển về `D:/GitHub/r2ai-stage3`; OLD thành `D:/GitHub/r2ai-stage3-old` (chuyển từng mục con vì thư mục gốc bị process khác giữ handle; không xóa gì). `.env` local trỏ legacy sang `-old`, data/state/out NEW nằm trong repo. `extract.db` NEW: 18.031 `shards.path` đổi prefix `D:\R2AI\r2ai-stage3\data\raw_vi\` → `D:\GitHub\r2ai-stage3\data\raw_vi\` (backup `out/runs/extract.db.before-move`), 0 thiếu file, `ExtractPipeline.pending()` = 0. `.venv` cài lại editable `--no-deps`, freeze 102 package không đổi. Hash crawl.db/extract.db OLD không đổi.
 
@@ -146,7 +148,7 @@ Hai dòng ❓ từ CONTEXT:
 
 ## 7. Blockers
 
-1. **Extract NEW đã đủ; chunk NEW cần chạy lại sau sửa hết RAM, rồi mới có index mới**: 632.208 doc đã trích xuất từ 18.031 shard. Index legacy chỉ bao phủ 123.874 doc; chưa dùng index mới hay đo recall/LB mới. Vinmec/MEDLATEC đã có 26.124/24.709 doc ok trong NEW.
+1. **Embed NEW chưa xong**: chunk NEW đã có 3.909.586 chunk (RAM/elapsed lần chunk này không có log trong repo, chưa đo). Process embed dừng sau khi ghi `00000.dense.npy` (14:42, chưa có `.sparse.npz`), không còn chạy lúc 14:52–15:34; cần người dùng chạy lại (resume từ shard 0). Ước tính 10,51 h là ngoại suy từ bench, chưa đo end-to-end. 632.208 doc đã trích xuất từ 18.031 shard. Index legacy chỉ bao phủ 123.874 doc; chưa dùng index mới hay đo recall/LB mới. Vinmec/MEDLATEC đã có 26.124/24.709 doc ok trong NEW.
 2. **Recall là nút thắt**: LB tốt nhất 0,0626 (Doc R 0,088 ở K=100). Index chỉ 2,8% corpus (123.874/4.394.718 URL) và chưa có zh. Pseudo-dev không dùng được để chọn cấu hình; chỉ LB mới đo thật. Còn chưa biết scorer local có khớp LB không (chưa có bản chấm local trên cùng file nộp, vì không có gold).
 3. **Chưa có dữ liệu zh**: CONTEXT ước ~77% corpus là zh; hiện 0 doc zh. Nếu gold có nhiều zh, recall bị chặn trên.
 4. `youmed.vn` halted (bot_challenge); `vov.vn` và `baolangson.vn` chặn bởi robots (11.765 URL không lấy được, đúng theo quyết định tôn trọng robots).
@@ -155,7 +157,7 @@ Hai dòng ❓ từ CONTEXT:
 
 ## 8. 3 việc tiếp theo (đường găng tới 31/10)
 
-1. **Chạy lại chunk NEW bằng code theo lô** (`python -m r2ai.index.chunk --docs-dir D:/GitHub/r2ai-stage3/data/docs_vi --out-dir D:/GitHub/r2ai-stage3/data/chunks --targets 256`), nên reboot trước để pagefile C: co lại; ghi RAM đỉnh/elapsed. Sau đó embed/index → K100 → submission. Lần 1 nạp 623.805 doc đủ điều kiện trong 118 s rồi hết RAM; chưa có số chunk/index/K100 mới. Elapsed extract đã đo 5.438,011 s; thời gian pipeline còn lại chưa đo.
+1. **Chạy lại embed NEW** (`python scripts/build_index.py build --target 256 --batch-size 64 --shard-size 10000 --no-ann`; GPU phải rảnh). Xong thì `python scripts/run_retrieval_k100.py --target 256 --candidates exact --queries D:/GitHub/r2ai-stage3-old/data/raw/query.parquet --out-dir D:/GitHub/r2ai-stage3/out/runs/vi-k100`, đo peak RSS/VRAM, phân bố doc phân biệt (nếu nhiều query < 100 doc: cân nhắc tăng k ứng viên, chưa tự đổi), rồi submission + validator. Elapsed extract đã đo 5.438,011 s; thời gian embed/K100 3,9M chưa đo.
 2. **Sau rebuild, nộp lại cấu hình sub06 (kd=100, chunk full)** để đo gain từ độ phủ; chốt giới hạn upload (nằm giữa 45,7 MiB đã lên được và 110 MiB không lên được) bằng JSON compact; ghi điểm vào `out/submissions/LOG.md`. Còn lại A/B: 1 id vs cả nhóm id trùng.
 3. **Quyết định zh**: lấy mẫu 2% mỗi domain zh, tính yield trên 1.200 query, rồi xếp thứ tự crawl; song song commit code đang untracked.
 
@@ -170,6 +172,7 @@ Hai dòng ❓ từ CONTEXT:
 | 2026-10-04 03:22 | Codex (GPT-6) | Extract NEW đủ18.031 shard/632208doc; checkpoint/raw/parquet khớp, state OLD bất biến. Chunk/index/K100/submission chờ kết quả; không ghi điểm LB. |
 | 2026-10-04 03:27 | Codex (GPT-6) | Chunk NEW nạp623.805 doc đủ điều kiện trong118s, target256; cập nhật đường găng vì extract đã hoàn tất. Chưa có index/K100/submission mới. |
 | 2026-10-04 13:51 | Claude Opus 5.5 | Chunk NEW lần 1 hết RAM (ArrowMemoryError sau 32.858 s, pagefile C: 49 GB). Sửa `index.chunk`: bucket theo khoảng `doc_id` vào `.chunk_tmp` trong out-dir, xử lý từng lô `--batch-docs` (mặc định 20.000), ghi nối `chunk_id`, output `.partial` → rename, dọn tmp/partial khi lỗi. Đối chiếu code cũ trên 301 file / 10.402 doc, target 128+256, lô 1.000 và 20.000: docs/chunks `Table.equals` + schema + `chunk_report.json` giống hệt. Thêm 2 test (lô 1/2/100 cho cùng output; lỗi không để lại partial); full suite 274 pass / 2 deselected. Chưa chạy lại toàn corpus. |
+| 2026-10-04 15:40 | Claude Opus 5.5 | Exact block-scan candidates: `retrieve/exact.py` (dense.npy đọc theo khối căn ranh giới doc, CSR mmap cache tách từ `sparse.npz` mỗi lần 1 mảng, running top-k tie theo id giảm như IndexFlatIP), `--candidates exact` trong `run_retrieval_k100` (mặc định `faiss`), log `vi_k100.candidates.parquet` + cảnh báo < 100 doc, peak RSS/private trong meta. `index.build`: sửa thiếu import `save_npz` (crash shard 0) và `flat_gb` không định nghĩa (crash khi ghi meta), thêm `--no-ann` và subcommand `assemble`. Gate legacy 99,917% K100 trước rerank giống hệt; full suite **296 pass / 2 deselected**. Embed NEW không chạy; chưa có K100/submission 3,9M. |
 | 2026-10-04 14:05 | Claude Opus 5.5 | Chuyển repo `D:/R2AI/r2ai-stage3` → `D:/GitHub/r2ai-stage3`, OLD → `D:/GitHub/r2ai-stage3-old` (không xóa). Sửa prefix 18.031 path trong `extract.db` (pending 0), cài lại editable (freeze 102 không đổi), cập nhật path trong `.env.example`, README, AGENTS (cảnh báo `git clean -fdx` cả trong repo vì data/state là file ignored), `configs/submission-sub06.yaml`. Kiểm chứng: full suite 274 pass / 2 deselected; replay sub06 từ input `-old` JSON SHA256 `07e0fd59…acc3`, validator 1.200 query / 22.800 chunk / 0 lỗi; `crawl.py status` đọc state NEW. |
 | 2026-10-04 01:57 | Codex (GPT-6) | Khởi chạy extract raw NEW/state NEW workers2; snapshot 1039shards/43674docs. JSON validator thực1200/22800/0lỗi. Các bước sau chờ extract hoàn tất. |
 | 2026-10-03 23:10 | Claude Sonnet 5.5 | Thêm điểm LB từ `SCOREBOARD.md` (M8, M9, mục 5, 7, 8); kiểm số học bảng điểm |

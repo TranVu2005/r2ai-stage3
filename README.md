@@ -45,14 +45,16 @@ python scripts/extract.py --raw-dir D:/GitHub/r2ai-stage3/data/raw_vi --docs-dir
 if ($LASTEXITCODE -ne 0) { throw 'Extract failed' }
 python -m r2ai.index.chunk --docs-dir D:/GitHub/r2ai-stage3/data/docs_vi --out-dir D:/GitHub/r2ai-stage3/data/chunks --targets 256
 if ($LASTEXITCODE -ne 0) { throw 'Chunk failed' }
-python scripts/build_index.py build --target 256 --batch-size 16 --shard-size 10000 --flat-max-gb 4
+python scripts/build_index.py build --target 256 --batch-size 16 --shard-size 10000 --flat-max-gb 4   # 3,9M chunk: thêm --no-ann, dùng --candidates exact
 if ($LASTEXITCODE -ne 0) { throw 'Index failed' }
-python scripts/run_retrieval_k100.py --target 256 --queries D:/GitHub/r2ai-stage3-old/data/raw/query.parquet --out-dir D:/GitHub/r2ai-stage3/out/runs/vi-k100
+python scripts/run_retrieval_k100.py --target 256 --candidates exact --queries D:/GitHub/r2ai-stage3-old/data/raw/query.parquet --out-dir D:/GitHub/r2ai-stage3/out/runs/vi-k100
 if ($LASTEXITCODE -ne 0) { throw 'K100 failed' }
 python scripts/make_submission.py --k-doc 100 --k-chunk 19 --chunk-mode full --dedupe-scope doc --runs-dir D:/GitHub/r2ai-stage3/out/runs/vi-k100 --chunks-dir D:/GitHub/r2ai-stage3/data/chunks --docs-dir D:/GitHub/r2ai-stage3/data/docs_vi --queries D:/GitHub/r2ai-stage3-old/data/raw/query.parquet --out D:/GitHub/r2ai-stage3/out/runs/new-full/submission.zip
 if ($LASTEXITCODE -ne 0) { throw 'Submission failed' }
 python scripts/validate_submission.py D:/GitHub/r2ai-stage3/out/runs/new-full/submission.zip --queries D:/GitHub/r2ai-stage3-old/data/raw/query.parquet --corpus D:/GitHub/r2ai-stage3-old/data/raw/links_corpus.parquet --docs-dir D:/GitHub/r2ai-stage3/data/docs_vi
 ```
+
+`--candidates exact` quét chính xác theo khối `dense.npy` và cache CSR mmap `<index>/sparse_mmap` (tạo từ `sparse.npz`, không sửa file gốc), không cần `faiss.index`; mặc định `faiss` giữ nguyên. Nếu đã có shard mà thiếu dense/sparse/meta: `python scripts/build_index.py assemble --target 256 --no-ann`. Gate tương đương: `python -m r2ai.retrieve.exact_gate --help`.
 
 Retrieval dev (có guard, cần index/chunks NEW và dev legacy): `python scripts/retrieve.py dev --target 256 --dev D:/GitHub/r2ai-stage3-old/data/dev/pseudo_vi_v2.parquet`. Output OUT_DIR/retrieval. Index build giữ nguyên nhánh FAISS theo flat-max-gb, không ép thuật toán corpus mở rộng.
 

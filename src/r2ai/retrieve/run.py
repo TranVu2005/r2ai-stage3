@@ -49,7 +49,8 @@ class Index:
     def __init__(self, target: int, exclude_fields: tuple[str, ...] = (), candidates: str = 'faiss',
                  sparse_cache: str | Path | None = None):
         """candidates='faiss': FAISS + full CSC (legacy). 'exact': no FAISS/CSC; dense.npy and a CSR mmap cache
-        (sparse_cache, default <index>/sparse_mmap) are block-scanned by retrieve.exact.exact_candidates."""
+        (sparse_cache, default <index>/sparse_mmap) are block-scanned by retrieve.exact.exact_candidates, and the chunk
+        text is a memory-mapped Arrow copy (<index>/text.arrow) instead of an in-memory parquet column."""
         d = index_dir(target)
         self.meta = json.loads((d / 'meta.json').read_text(encoding='utf-8'))
         t0 = time.time()
@@ -68,10 +69,15 @@ class Index:
         else:
             raise ValueError(f'unknown candidates mode: {candidates}')
         self.dense = np.load(d / 'dense.npy', mmap_mode='r')
-        ch = pq.read_table(chunks_file(target), columns=['doc_id', 'field', 'text'])
+        if candidates == 'exact':
+            from r2ai.retrieve.exact import text_mmap
+            ch = pq.read_table(chunks_file(target), columns=['doc_id', 'field'])
+            self.text, self.text_cache_info = text_mmap(chunks_file(target), assert_writable(d / 'text.arrow'))
+        else:
+            ch = pq.read_table(chunks_file(target), columns=['doc_id', 'field', 'text'])
+            self.text = ch['text']
         self.doc_id = ch['doc_id'].to_numpy()
         self.field = np.array(ch['field'].to_pylist())
-        self.text = ch['text']
         self.submittable = np.isin(self.field, SUBMITTABLE)
         self.allowed = ~np.isin(self.field, list(exclude_fields)) if exclude_fields else None
         order = np.argsort(self.doc_id, kind='stable')               # doc -> chunk ids
@@ -83,7 +89,8 @@ class Index:
         return self._chunk_sorted[lo:hi]
 
     def texts(self, ids) -> list[str]:
-        return self.text.take(np.asarray(ids)).to_pylist()
+        from r2ai.retrieve.exact import take_texts
+        return take_texts(self.text, ids)
 
     def candidates(self, qd: np.ndarray, qs, k: int = TOP_CHUNKS):
         """-> chunk ids (union of dense/sparse top-k), dense scores, sparse scores."""

@@ -205,7 +205,9 @@ def main(argv=None):
             'candidates': a.candidates, 'exact': exact_stats,
             'distinct_docs_before_rerank': {'queries_this_run': len(cq), 'min': int(nd_all.min()), 'p5': float(np.percentile(nd_all, 5)),
                                             'p50': float(np.percentile(nd_all, 50)), 'n_lt_100': int((nd_all < K_MAX).sum())},
-            'peak_rss_gib': peak_rss_gib(), 'peak_private_gib': peak_private_gib(), 'index_meta': index.meta}
+            'peak_rss_gib': peak_rss_gib(), 'peak_private_gib': peak_private_gib(),
+            'peak_vram_allocated_mib': round(torch.cuda.max_memory_allocated() / 2**20) if torch.cuda.is_initialized() else None,
+            'index_meta': index.meta}
     (out_dir / f'vi_k100{tag}.meta.json').write_text(json.dumps(meta, indent=1), encoding='utf-8')
     print(json.dumps(meta, indent=1))
     return 0

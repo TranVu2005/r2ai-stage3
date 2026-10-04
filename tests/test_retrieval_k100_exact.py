@@ -88,10 +88,10 @@ def test_k100_exact_equals_faiss(env):
         assert pq.read_table(env['tmp'] / 'old' / f).equals(pq.read_table(env['tmp'] / 'new' / f)), f
     meta = json.loads((env['tmp'] / 'new' / 'vi_k100.meta.json').read_text(encoding='utf-8'))
     assert meta['candidates'] == 'exact' and meta['distinct_docs_before_rerank']['min'] >= 1
-    assert meta['peak_rss_gib'] > 0 and 'dense_seconds' in meta['exact']
+    assert meta['peak_rss_gib'] > 0 and 'dense_seconds' in meta['exact'] and 'peak_vram_allocated_mib' in meta
     cs = pq.read_table(env['tmp'] / 'new' / 'vi_k100.candidates.parquet')
     assert cs.num_rows == 30 and cs.column_names == ['query_id', 'n_candidates', 'n_docs']
-    assert (env['idx'] / 'sparse_mmap' / 'shape.json').exists()
+    assert (env['idx'] / 'sparse_mmap' / 'shape.json').exists() and (env['idx'] / 'text.arrow').exists()
 
 
 def test_k100_exact_does_not_need_faiss(env):

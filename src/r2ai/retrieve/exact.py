@@ -66,6 +66,53 @@ def load_sparse_mmap(cache_dir: str | Path):
     return (*arrs, tuple(info['shape']))
 
 
+def text_mmap(parquet: str | Path, cache: str | Path):
+    """Text column of a chunks parquet as a memory-mapped Arrow IPC file (zero-copy, file-backed pages instead of
+    ~7 GiB of Arrow pool memory for 3.9M chunks). Built once by streaming row groups; rebuilt if the parquet changes.
+    -> (ChunkedArray, info)."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    parquet, cache = Path(parquet), Path(cache)
+    st = parquet.stat()
+    side = cache.with_suffix('.json')
+    src = {'source': str(parquet), 'source_size': st.st_size, 'source_mtime': st.st_mtime}
+    reused = False
+    if cache.exists() and side.exists():
+        info = json.loads(side.read_text(encoding='utf-8'))
+        reused = all(info.get(k) == v for k, v in src.items())
+    if not reused:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        tmp = cache.with_suffix('.tmp.arrow')
+        pf = pq.ParquetFile(parquet)
+        with pa.OSFile(str(tmp), 'wb') as f, pa.ipc.new_file(f, pa.schema([('text', pa.string())])) as w:
+            for i in range(pf.metadata.num_row_groups):            # one row group in memory at a time
+                w.write_table(pf.read_row_group(i, columns=['text']))
+        os.replace(tmp, cache)
+        tmp = side.with_suffix('.tmp.json')
+        tmp.write_text(json.dumps({**src, 'rows': pf.metadata.num_rows}, indent=1), encoding='utf-8')
+        os.replace(tmp, side)
+        del pf
+        pa.default_memory_pool().release_unused()
+    col = pa.ipc.open_file(pa.memory_map(str(cache), 'r')).read_all().column('text')
+    return col, {**src, 'cache': str(cache), 'reused': reused}
+
+
+def take_texts(col, ids) -> list[str]:
+    """col[ids] as Python strings, taken chunk by chunk (ChunkedArray.take concatenates the chunks first, which
+    overflows 32-bit string offsets once the column holds more than 2 GiB of text)."""
+    ids = np.asarray(ids, dtype=np.int64)
+    out: list = [None] * len(ids)
+    if not len(ids):
+        return []
+    bounds = np.cumsum([0] + [len(c) for c in col.chunks])
+    ci = np.searchsorted(bounds, ids, side='right') - 1
+    for c in np.unique(ci):
+        pos = np.flatnonzero(ci == c)
+        for k, t in zip(pos, col.chunk(int(c)).take(ids[pos] - bounds[c]).to_pylist()):
+            out[k] = t
+    return out
+
+
 def _read_rows(a, lo: int, hi: int) -> np.ndarray:
     """Rows lo..hi-1 of a. For a whole-file np.memmap (np.load mmap_mode='r') read them with a plain file read:
     the copy is private and freed after the block, so a full scan does not keep the mapped file pages in the

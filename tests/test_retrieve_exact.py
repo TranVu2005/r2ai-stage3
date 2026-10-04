@@ -150,3 +150,41 @@ def test_read_rows_from_memmap_is_a_private_copy(fx, tmp_path):
     ids_mm, _ = exact.dense_topk(mm, fx['qd'], K, block_rows=777, doc_id=fx['doc_id'])
     ids, _ = exact.dense_topk(fx['dense'], fx['qd'], K, block_rows=777, doc_id=fx['doc_id'])
     assert all(np.array_equal(a, b) for a, b in zip(ids_mm, ids))
+
+
+def _chunked_texts(tmp_path, n=1000, rg=97):
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    rng = np.random.RandomState(42)
+    texts = [('xin chào ' * rng.randint(0, 5)) + str(i) for i in range(n)]
+    src = tmp_path / 'chunks.parquet'
+    pq.write_table(pa.table({'chunk_id': np.arange(n), 'text': texts}), src, row_group_size=rg)
+    return src, texts
+
+
+def test_take_texts_across_chunks_keeps_order_and_duplicates(tmp_path):
+    import pyarrow.parquet as pq
+    src, texts = _chunked_texts(tmp_path)
+    col = pq.read_table(src, columns=['text'])['text']
+    assert col.num_chunks > 1
+    ids = np.array([999, 0, 96, 97, 500, 0, 998, 97])
+    assert exact.take_texts(col, ids) == [texts[i] for i in ids]
+    assert exact.take_texts(col, np.zeros(0, np.int64)) == []
+
+
+def test_text_mmap_cache_equals_column_and_is_reused(tmp_path):
+    import os
+    import pyarrow.parquet as pq
+    src, texts = _chunked_texts(tmp_path)
+    cache = tmp_path / 'idx' / 'text.arrow'
+    col, info = exact.text_mmap(src, cache)
+    assert info['reused'] is False and col.to_pylist() == texts
+    assert exact.take_texts(col, np.array([5, 900])) == [texts[5], texts[900]]
+    del col
+    col, info = exact.text_mmap(src, cache)
+    assert info['reused'] is True and col.to_pylist() == texts
+    del col
+    st = src.stat()
+    os.utime(src, (st.st_atime, st.st_mtime + 10))                     # source changed -> rebuilt
+    col, info = exact.text_mmap(src, cache)
+    assert info['reused'] is False and col.num_chunks >= 1

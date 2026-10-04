@@ -3,8 +3,8 @@
 - Trả lời tiếng Việt, ngắn gọn, ưu tiên số liệu đo thực tế; chưa đo thì ghi rõ.
 - Repo độc lập, code ở src/r2ai và src/vicrawl. Mọi root/runtime path qua r2ai.paths; .env tự nạp trước thư viện HF. CLI > process env > .env > mặc định.
 - Không đổi thuật toán, version thư viện, API, schema, thứ tự rank/chunk, dedupe hoặc metric trong việc tổ chức code/path. Chạy test phù hợp và ghi kết quả.
-- Không ghi, xóa, rename/move OLD `D:/GitHub/r2ai-stage3`. OLD là backup cho đến khi người dùng xác nhận.
-- Cấm `git clean -fdx`, reset/remove tại OLD hoặc Git cha `D:/GitHub`: data/out khoảng 15,366 GiB không tracked có thể mất. Stage theo allowlist; không commit corpus, state, output, .env, secret hay token; tracked file <=5.000.000 byte.
+- Không ghi, xóa, rename/move OLD `D:/GitHub/r2ai-stage3-old`. OLD là backup cho đến khi người dùng xác nhận.
+- Cấm `git clean -fdx`, reset/remove trong repo này, tại OLD hoặc Git cha `D:/GitHub`: data/state/out của repo (raw_vi, docs_vi, extract.db...) là file ignored, OLD còn khoảng 15,366 GiB không tracked; lệnh clean sẽ xóa mất. Stage theo allowlist; không commit corpus, state, output, .env, secret hay token; tracked file <=5.000.000 byte.
 - Guard đích ghi kể cả override/temp/cleanup trước I/O. Công cụ phụ bị khóa trong main/__main__; giữ import thư viện cho test. Chỉ mở khóa sau khi thêm guard, không thêm bypass OLD.
 - Không crawl thật khi chưa được duyệt rõ. Youmed halted; --limit là cutoff rank, không phải số pending tiếp theo. Status mặc định STATE_DIR; đối chiếu OLD phải truyền --state-dir rõ, đọc URI ro và không tạo log.
 - Sau gate repo, copy raw_vi/crawl.db sang NEW trước extract lớn, giữ nguyên OLD, kiểm writer dừng/WAL0/hash/inventory. Crawl/extract cùng raw NEW; không mang extract.db/docs cũ vào bundle mới.

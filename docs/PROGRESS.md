@@ -1,8 +1,8 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-04 13:51 (UTC+7)
+- Cập nhật: 2026-10-04 14:05 (UTC+7)
 - Model thực hiện: Claude Opus 5.5
-- Commit HEAD đã kiểm trước cập nhật này: `1be0614`, nhánh `main` (hash commit chứa tài liệu này được báo ở kết quả)
+- Commit HEAD đã kiểm trước cập nhật này: `ea0ec4c`, nhánh `main` (hash commit chứa tài liệu này được báo ở kết quả)
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - Quy ước: ✅ có bằng chứng · 🟡 làm một phần · ❌ chưa làm (đã tìm, không thấy) · ❓ không chứng minh được
 
@@ -10,7 +10,7 @@
 > Snapshot nguồn OLD ngày 03/10: repo git nằm ở `D:\GitHub` (gốc chung nhiều dự án). `git ls-files` trong `r2ai-stage3` chỉ có **4 file đã commit** (`eval/README.md`, `eval/scorer.py`, `eval/validate.py`, `tests/test_scorer.py`). Mọi thứ khác (crawler, extract, index, submission…) là **untracked**, nên không có commit hash để dẫn; bằng chứng là path và mtime.
 
 
-> **PHA B / repo hiện tại:** `D:/R2AI/r2ai-stage3`, history mới trên main. Các số crawl/extract/index/LB phía dưới là snapshot legacy OLD ngày 03/10, không phải kết quả chạy lớn ở NEW. Mapping hiện tại: `eval`→`src/r2ai/eval`, `index`→`src/r2ai/index`, `retrieve`→`src/r2ai/retrieve`, `submission`→`src/r2ai/submit`, `vicrawl`→`src/vicrawl`, `config`→`configs`; CLI xem README. Đọc query/docs/chunks/index/K100 cũ ở OLD; ghi pipeline mới vào NEW. Status mặc định đọc NEW/state, đối chiếu OLD phải dùng `--state-dir` rõ ràng.
+> **PHA B / repo hiện tại:** `D:/GitHub/r2ai-stage3` (chuyển từ `D:/R2AI/r2ai-stage3` ngày 04/10 14:00; OLD đổi tên thành `D:/GitHub/r2ai-stage3-old`), history mới trên main. Trong các mục bên dưới, "OLD" là `D:/GitHub/r2ai-stage3-old`. Các số crawl/extract/index/LB phía dưới là snapshot legacy OLD ngày 03/10, không phải kết quả chạy lớn ở NEW. Mapping hiện tại: `eval`→`src/r2ai/eval`, `index`→`src/r2ai/index`, `retrieve`→`src/r2ai/retrieve`, `submission`→`src/r2ai/submit`, `vicrawl`→`src/vicrawl`, `config`→`configs`; CLI xem README. Đọc query/docs/chunks/index/K100 cũ ở OLD; ghi pipeline mới vào NEW. Status mặc định đọc NEW/state, đối chiếu OLD phải dùng `--state-dir` rõ ràng.
 > Gate đã đo: core **36 pass**, full **272 pass / 2 deselected**, slow **2 pass / 10 deselected**; OLD full 234 pass và slow 2 pass. Replay JSON sub06 **181.960.105 byte**, SHA256 `07e0fd59f8cc4b8abbf129dc1536305bdbef17ce510b6fe39fe50fe62133acc3`, byte/query/field diff=0; validator **1.200 query / 22.800 chunk / 0 lỗi**. Không rerun model/GPU hay nộp LB. Python 3.12.13, torch 2.11.0+cu128, 102 package freeze khớp OLD. Chi tiết run ở `out/runs/restructure/` và `out/runs/reproduce-sub06/` (ignored).
 > Copy raw/crawl.db: **Đã copy** 18,031 shard / 3,679,529,131 byte (3.427 GiB) và crawl.db 376,438,784 byte sang NEW; hash/inventory nguồn–đích khớp, SQL 653.970 URL / 624.596 ok / 48 domain khớp. Writer dừng, WAL0; không overwrite hay move/xóa OLD. RAW_DIR=RAW_WRITE_DIR=NEW/data/raw_vi; status mặc định NEW đã kiểm. Extract NEW đã hoàn tất (xem bên dưới); không chạy crawl thật. OLD raw hash sau copy, source161 và state6 vẫn không đổi. Manifest `out/runs/restructure/data-copy.json`.
 
@@ -109,6 +109,8 @@ Cập nhật 2026-10-04 03:27: chunk NEW đã nạp 623.805 doc đủ điều ki
 
 Cập nhật 2026-10-04 13:51: lần chunk này thất bại do hết RAM; `index.chunk` đã chuyển sang xử lý theo lô, cần chạy lại.
 
+Cập nhật 2026-10-04 14:05: repo chuyển về `D:/GitHub/r2ai-stage3`; OLD thành `D:/GitHub/r2ai-stage3-old` (chuyển từng mục con vì thư mục gốc bị process khác giữ handle; không xóa gì). `.env` local trỏ legacy sang `-old`, data/state/out NEW nằm trong repo. `extract.db` NEW: 18.031 `shards.path` đổi prefix `D:\R2AI\r2ai-stage3\data\raw_vi\` → `D:\GitHub\r2ai-stage3\data\raw_vi\` (backup `out/runs/extract.db.before-move`), 0 thiếu file, `ExtractPipeline.pending()` = 0. `.venv` cài lại editable `--no-deps`, freeze 102 package không đổi. Hash crawl.db/extract.db OLD không đổi.
+
 Extract NEW hoàn tất: **18.031/18.031 shard**, **632.208 doc**, status {"ok": 623852, "thin": 8356}; elapsed CLI **5438.0 s**, workers2. Checkpoint khớp tập raw NEW, số hàng parquet khớp SQLite; không còn shard pending. Doc ok: Vinmec **26.124**, MEDLATEC **24.709**. 6 hash/size state OLD giữ nguyên. Chunk lần 1 (target 256) **thất bại** 12:29 sau 32.858 s: `ArrowMemoryError` (realloc 2.818.572.288 byte) khi dựng bảng chunk; RAM 15,7 GiB, pagefile C: tự tăng lên 49 GB (đỉnh 31,6 GB), tokenize 11.455.367 paragraph mất 22.024 s do swap. `data/chunks/docs.parquet` của lần này là output dở, không dùng. `index.chunk` đã sửa sang xử lý theo lô (Changelog 13:51); chưa chạy lại trên corpus đầy đủ, RAM/thời gian mới chưa đo. Index → K100 → submission chờ chunk; chưa có điểm LB mới. Bằng chứng `out/runs/coverage-rebuild/extract.json`, `old-state-after-extract.json`.
 
 Extract đang chạy: **1,039/18.031 shard**, **43,674 doc** trong checkpoint NEW tại 2026-10-04 01:57 UTC+7; raw/data/state đều NEW, workers2. PID launcher 22592; log `out/runs/coverage-rebuild/extract.log`. Chưa có kết quả chunk/index/K100/submission mới. Validator JSON sub06 thực đã pass: 1.200 query / 22.800 chunk / 0 lỗi (không áp budget ZIP vào file JSON181MB).
@@ -153,7 +155,7 @@ Hai dòng ❓ từ CONTEXT:
 
 ## 8. 3 việc tiếp theo (đường găng tới 31/10)
 
-1. **Chạy lại chunk NEW bằng code theo lô** (`python -m r2ai.index.chunk --docs-dir D:/R2AI/r2ai-stage3/data/docs_vi --out-dir D:/R2AI/r2ai-stage3/data/chunks --targets 256`), nên reboot trước để pagefile C: co lại; ghi RAM đỉnh/elapsed. Sau đó embed/index → K100 → submission. Lần 1 nạp 623.805 doc đủ điều kiện trong 118 s rồi hết RAM; chưa có số chunk/index/K100 mới. Elapsed extract đã đo 5.438,011 s; thời gian pipeline còn lại chưa đo.
+1. **Chạy lại chunk NEW bằng code theo lô** (`python -m r2ai.index.chunk --docs-dir D:/GitHub/r2ai-stage3/data/docs_vi --out-dir D:/GitHub/r2ai-stage3/data/chunks --targets 256`), nên reboot trước để pagefile C: co lại; ghi RAM đỉnh/elapsed. Sau đó embed/index → K100 → submission. Lần 1 nạp 623.805 doc đủ điều kiện trong 118 s rồi hết RAM; chưa có số chunk/index/K100 mới. Elapsed extract đã đo 5.438,011 s; thời gian pipeline còn lại chưa đo.
 2. **Sau rebuild, nộp lại cấu hình sub06 (kd=100, chunk full)** để đo gain từ độ phủ; chốt giới hạn upload (nằm giữa 45,7 MiB đã lên được và 110 MiB không lên được) bằng JSON compact; ghi điểm vào `out/submissions/LOG.md`. Còn lại A/B: 1 id vs cả nhóm id trùng.
 3. **Quyết định zh**: lấy mẫu 2% mỗi domain zh, tính yield trên 1.200 query, rồi xếp thứ tự crawl; song song commit code đang untracked.
 
@@ -168,6 +170,7 @@ Hai dòng ❓ từ CONTEXT:
 | 2026-10-04 03:22 | Codex (GPT-6) | Extract NEW đủ18.031 shard/632208doc; checkpoint/raw/parquet khớp, state OLD bất biến. Chunk/index/K100/submission chờ kết quả; không ghi điểm LB. |
 | 2026-10-04 03:27 | Codex (GPT-6) | Chunk NEW nạp623.805 doc đủ điều kiện trong118s, target256; cập nhật đường găng vì extract đã hoàn tất. Chưa có index/K100/submission mới. |
 | 2026-10-04 13:51 | Claude Opus 5.5 | Chunk NEW lần 1 hết RAM (ArrowMemoryError sau 32.858 s, pagefile C: 49 GB). Sửa `index.chunk`: bucket theo khoảng `doc_id` vào `.chunk_tmp` trong out-dir, xử lý từng lô `--batch-docs` (mặc định 20.000), ghi nối `chunk_id`, output `.partial` → rename, dọn tmp/partial khi lỗi. Đối chiếu code cũ trên 301 file / 10.402 doc, target 128+256, lô 1.000 và 20.000: docs/chunks `Table.equals` + schema + `chunk_report.json` giống hệt. Thêm 2 test (lô 1/2/100 cho cùng output; lỗi không để lại partial); full suite 274 pass / 2 deselected. Chưa chạy lại toàn corpus. |
+| 2026-10-04 14:05 | Claude Opus 5.5 | Chuyển repo `D:/R2AI/r2ai-stage3` → `D:/GitHub/r2ai-stage3`, OLD → `D:/GitHub/r2ai-stage3-old` (không xóa). Sửa prefix 18.031 path trong `extract.db` (pending 0), cài lại editable (freeze 102 không đổi), cập nhật path trong `.env.example`, README, AGENTS (cảnh báo `git clean -fdx` cả trong repo vì data/state là file ignored), `configs/submission-sub06.yaml`. Kiểm chứng: full suite 274 pass / 2 deselected; replay sub06 từ input `-old` JSON SHA256 `07e0fd59…acc3`, validator 1.200 query / 22.800 chunk / 0 lỗi; `crawl.py status` đọc state NEW. |
 | 2026-10-04 01:57 | Codex (GPT-6) | Khởi chạy extract raw NEW/state NEW workers2; snapshot 1039shards/43674docs. JSON validator thực1200/22800/0lỗi. Các bước sau chờ extract hoàn tất. |
 | 2026-10-03 23:10 | Claude Sonnet 5.5 | Thêm điểm LB từ `SCOREBOARD.md` (M8, M9, mục 5, 7, 8); kiểm số học bảng điểm |
 | 2026-10-03 22:50 | Claude Sonnet 5.5 | Tạo `PROGRESS.md` (template không có trong repo) từ khảo sát chỉ-đọc: `state/*.db` (ro), `data/`, `out/`, `logs/`, `git` ở HEAD `ae6b90d`; chạy 36 test (scorer, make_submission, chunk) pass |

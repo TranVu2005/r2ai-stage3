@@ -1,8 +1,8 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-04 03:27 (UTC+7)
-- Model thực hiện: Codex (GPT-6)
-- Commit HEAD đã kiểm trước cập nhật này: `214865f`, nhánh `main` (hash commit chứa tài liệu này được báo ở kết quả)
+- Cập nhật: 2026-10-04 13:51 (UTC+7)
+- Model thực hiện: Claude Opus 5.5
+- Commit HEAD đã kiểm trước cập nhật này: `1be0614`, nhánh `main` (hash commit chứa tài liệu này được báo ở kết quả)
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - Quy ước: ✅ có bằng chứng · 🟡 làm một phần · ❌ chưa làm (đã tìm, không thấy) · ❓ không chứng minh được
 
@@ -14,7 +14,7 @@
 > Gate đã đo: core **36 pass**, full **272 pass / 2 deselected**, slow **2 pass / 10 deselected**; OLD full 234 pass và slow 2 pass. Replay JSON sub06 **181.960.105 byte**, SHA256 `07e0fd59f8cc4b8abbf129dc1536305bdbef17ce510b6fe39fe50fe62133acc3`, byte/query/field diff=0; validator **1.200 query / 22.800 chunk / 0 lỗi**. Không rerun model/GPU hay nộp LB. Python 3.12.13, torch 2.11.0+cu128, 102 package freeze khớp OLD. Chi tiết run ở `out/runs/restructure/` và `out/runs/reproduce-sub06/` (ignored).
 > Copy raw/crawl.db: **Đã copy** 18,031 shard / 3,679,529,131 byte (3.427 GiB) và crawl.db 376,438,784 byte sang NEW; hash/inventory nguồn–đích khớp, SQL 653.970 URL / 624.596 ok / 48 domain khớp. Writer dừng, WAL0; không overwrite hay move/xóa OLD. RAW_DIR=RAW_WRITE_DIR=NEW/data/raw_vi; status mặc định NEW đã kiểm. Extract NEW đã hoàn tất (xem bên dưới); không chạy crawl thật. OLD raw hash sau copy, source161 và state6 vẫn không đổi. Manifest `out/runs/restructure/data-copy.json`.
 
-> Pipeline sau PHA B: Extract NEW hoàn tất: **18.031/18.031 shard**, **632.208 doc**, status {"ok": 623852, "thin": 8356}; elapsed CLI **5438.0 s**, workers2. Checkpoint khớp tập raw NEW, số hàng parquet khớp SQLite; không còn shard pending. Doc ok: Vinmec **26.124**, MEDLATEC **24.709**. 6 hash/size state OLD giữ nguyên. Chunk → index → K100 → submission đang chạy theo chuỗi; chưa có điểm LB mới. Bằng chứng `out/runs/coverage-rebuild/extract.json`, `old-state-after-extract.json`.
+> Pipeline sau PHA B: Extract NEW hoàn tất: **18.031/18.031 shard**, **632.208 doc**, status {"ok": 623852, "thin": 8356}; elapsed CLI **5438.0 s**, workers2. Checkpoint khớp tập raw NEW, số hàng parquet khớp SQLite; không còn shard pending. Doc ok: Vinmec **26.124**, MEDLATEC **24.709**. 6 hash/size state OLD giữ nguyên. Chunk lần 1 (target 256) **thất bại** 12:29 sau 32.858 s: `ArrowMemoryError` (realloc 2.818.572.288 byte) khi dựng bảng chunk; RAM 15,7 GiB, pagefile C: tự tăng lên 49 GB (đỉnh 31,6 GB), tokenize 11.455.367 paragraph mất 22.024 s do swap. `data/chunks/docs.parquet` của lần này là output dở, không dùng. `index.chunk` đã sửa sang xử lý theo lô (Changelog 13:51); chưa chạy lại trên corpus đầy đủ, RAM/thời gian mới chưa đo. Index → K100 → submission chờ chunk; chưa có điểm LB mới. Bằng chứng `out/runs/coverage-rebuild/extract.json`, `old-state-after-extract.json`.
 
 ## 1. Crawl (vi)
 
@@ -94,7 +94,7 @@ Các số bên dưới lưu snapshot OLD ngày 03/10.
 |---|---|---|
 | Scorer | ✅ `python -m eval.scorer`, test pass | `eval/scorer.py`, `tests/test_scorer.py` (nằm trong 36 passed) |
 | Validator | ✅ | `eval/validate.py`, `scripts/validate_submission.py`; `logs/sub01.log`: validator exit code 0 |
-| Chunking | ✅ t128/t256/t400 | `data/chunks/chunks_t256.parquet` 818.080 chunk; `chunk_report.json`; `tests/test_chunk.py` |
+| Chunking | ✅ legacy t128/t256/t400 · 🟡 NEW | Legacy: `data/chunks/chunks_t256.parquet` 818.080 chunk; `chunk_report.json`. NEW: lần 1 hết RAM (xem đầu báo cáo); code đã xử lý theo bucket `doc_id` (`--batch-docs`, mặc định 20.000), output `.partial` → rename; chưa chạy lại toàn corpus. `tests/test_chunk.py` |
 | Index | 🟡 FAISS `IndexFlatIP` dense + sparse, t256, `built_at` 2026-10-03 06:11:40 | `data/index/t256/meta.json` (123.874 doc, 3,12 GB float32). Index **cũ**: lập trước khi crawl xong |
 | Truy hồi | 🟡 hybrid w=0.7, `max`, rerank `bge-reranker-v2-m3` fp16, seed 42 | `retrieve/run.py`, `data/runs/vi_k100.meta.json` (1.200 query, 13.083 s = 10,9 s/query), `vi_k100.parquet` 119.934 dòng (≥74, p50 100 doc/query) |
 | Dev set | ⚠ pseudo-dev, **bão hòa và lệch xa LB** (dev chunk F2 0,358 so với LB Final 0,0158 cùng cấu hình c2) | `data/dev/pseudo_vi_v2.parquet` 462 dòng (400 A tiêu đề-làm-query + B hỏi đáp). `out/retrieval/ablation_t256.md`: A R@5 0,9975, B R@1 1,0; chunk-level B F2 0,358. Trang nguồn nằm trong index nên số này **không dự báo điểm LB** (chính `out/submissions/LOG.md` nêu điều này) |
@@ -107,7 +107,9 @@ Lưu ý: sub01/sub02 dùng K=5 doc, C=2 chunk; sub03–sub10 gồm các biến t
 
 Cập nhật 2026-10-04 03:27: chunk NEW đã nạp 623.805 doc đủ điều kiện (118 s), target256, min-body-tokens50; đang tokenise, chưa có kết quả chunk/index/retrieval.
 
-Extract NEW hoàn tất: **18.031/18.031 shard**, **632.208 doc**, status {"ok": 623852, "thin": 8356}; elapsed CLI **5438.0 s**, workers2. Checkpoint khớp tập raw NEW, số hàng parquet khớp SQLite; không còn shard pending. Doc ok: Vinmec **26.124**, MEDLATEC **24.709**. 6 hash/size state OLD giữ nguyên. Chunk → index → K100 → submission đang chạy theo chuỗi; chưa có điểm LB mới. Bằng chứng `out/runs/coverage-rebuild/extract.json`, `old-state-after-extract.json`.
+Cập nhật 2026-10-04 13:51: lần chunk này thất bại do hết RAM; `index.chunk` đã chuyển sang xử lý theo lô, cần chạy lại.
+
+Extract NEW hoàn tất: **18.031/18.031 shard**, **632.208 doc**, status {"ok": 623852, "thin": 8356}; elapsed CLI **5438.0 s**, workers2. Checkpoint khớp tập raw NEW, số hàng parquet khớp SQLite; không còn shard pending. Doc ok: Vinmec **26.124**, MEDLATEC **24.709**. 6 hash/size state OLD giữ nguyên. Chunk lần 1 (target 256) **thất bại** 12:29 sau 32.858 s: `ArrowMemoryError` (realloc 2.818.572.288 byte) khi dựng bảng chunk; RAM 15,7 GiB, pagefile C: tự tăng lên 49 GB (đỉnh 31,6 GB), tokenize 11.455.367 paragraph mất 22.024 s do swap. `data/chunks/docs.parquet` của lần này là output dở, không dùng. `index.chunk` đã sửa sang xử lý theo lô (Changelog 13:51); chưa chạy lại trên corpus đầy đủ, RAM/thời gian mới chưa đo. Index → K100 → submission chờ chunk; chưa có điểm LB mới. Bằng chứng `out/runs/coverage-rebuild/extract.json`, `old-state-after-extract.json`.
 
 Extract đang chạy: **1,039/18.031 shard**, **43,674 doc** trong checkpoint NEW tại 2026-10-04 01:57 UTC+7; raw/data/state đều NEW, workers2. PID launcher 22592; log `out/runs/coverage-rebuild/extract.log`. Chưa có kết quả chunk/index/K100/submission mới. Validator JSON sub06 thực đã pass: 1.200 query / 22.800 chunk / 0 lỗi (không áp budget ZIP vào file JSON181MB).
 
@@ -142,7 +144,7 @@ Hai dòng ❓ từ CONTEXT:
 
 ## 7. Blockers
 
-1. **Extract NEW đã đủ; chờ index mới**: 632.208 doc đã trích xuất từ 18.031 shard. Index legacy chỉ bao phủ 123.874 doc; chưa dùng index mới hay đo recall/LB mới. Vinmec/MEDLATEC đã có 26.124/24.709 doc ok trong NEW.
+1. **Extract NEW đã đủ; chunk NEW cần chạy lại sau sửa hết RAM, rồi mới có index mới**: 632.208 doc đã trích xuất từ 18.031 shard. Index legacy chỉ bao phủ 123.874 doc; chưa dùng index mới hay đo recall/LB mới. Vinmec/MEDLATEC đã có 26.124/24.709 doc ok trong NEW.
 2. **Recall là nút thắt**: LB tốt nhất 0,0626 (Doc R 0,088 ở K=100). Index chỉ 2,8% corpus (123.874/4.394.718 URL) và chưa có zh. Pseudo-dev không dùng được để chọn cấu hình; chỉ LB mới đo thật. Còn chưa biết scorer local có khớp LB không (chưa có bản chấm local trên cùng file nộp, vì không có gold).
 3. **Chưa có dữ liệu zh**: CONTEXT ước ~77% corpus là zh; hiện 0 doc zh. Nếu gold có nhiều zh, recall bị chặn trên.
 4. `youmed.vn` halted (bot_challenge); `vov.vn` và `baolangson.vn` chặn bởi robots (11.765 URL không lấy được, đúng theo quyết định tôn trọng robots).
@@ -151,7 +153,7 @@ Hai dòng ❓ từ CONTEXT:
 
 ## 8. 3 việc tiếp theo (đường găng tới 31/10)
 
-1. **Extract NEW đã đủ 18.031 shard / 632.208 doc; đang rebuild chunk → embed/index → K100 → submission.** Chunk nạp 623.805 doc đủ điều kiện trong 118 s; chưa có số chunk/index/K100 mới. Elapsed extract đã đo 5.438,011 s; thời gian pipeline còn lại chưa đo.
+1. **Chạy lại chunk NEW bằng code theo lô** (`python -m r2ai.index.chunk --docs-dir D:/R2AI/r2ai-stage3/data/docs_vi --out-dir D:/R2AI/r2ai-stage3/data/chunks --targets 256`), nên reboot trước để pagefile C: co lại; ghi RAM đỉnh/elapsed. Sau đó embed/index → K100 → submission. Lần 1 nạp 623.805 doc đủ điều kiện trong 118 s rồi hết RAM; chưa có số chunk/index/K100 mới. Elapsed extract đã đo 5.438,011 s; thời gian pipeline còn lại chưa đo.
 2. **Sau rebuild, nộp lại cấu hình sub06 (kd=100, chunk full)** để đo gain từ độ phủ; chốt giới hạn upload (nằm giữa 45,7 MiB đã lên được và 110 MiB không lên được) bằng JSON compact; ghi điểm vào `out/submissions/LOG.md`. Còn lại A/B: 1 id vs cả nhóm id trùng.
 3. **Quyết định zh**: lấy mẫu 2% mỗi domain zh, tính yield trên 1.200 query, rồi xếp thứ tự crawl; song song commit code đang untracked.
 
@@ -165,6 +167,7 @@ Hai dòng ❓ từ CONTEXT:
 | 2026-10-04 01:50 | Codex (GPT-6) | Sửa hai validator JSON, regression4 RED→GREEN/full272 pass; ghi chênh ZIP và guard chỉ preflight. Chuẩn bị extract đủ18.031 shard, workers2 trên RAM16GiB; chưa có kết quả extract lớn. |
 | 2026-10-04 03:22 | Codex (GPT-6) | Extract NEW đủ18.031 shard/632208doc; checkpoint/raw/parquet khớp, state OLD bất biến. Chunk/index/K100/submission chờ kết quả; không ghi điểm LB. |
 | 2026-10-04 03:27 | Codex (GPT-6) | Chunk NEW nạp623.805 doc đủ điều kiện trong118s, target256; cập nhật đường găng vì extract đã hoàn tất. Chưa có index/K100/submission mới. |
+| 2026-10-04 13:51 | Claude Opus 5.5 | Chunk NEW lần 1 hết RAM (ArrowMemoryError sau 32.858 s, pagefile C: 49 GB). Sửa `index.chunk`: bucket theo khoảng `doc_id` vào `.chunk_tmp` trong out-dir, xử lý từng lô `--batch-docs` (mặc định 20.000), ghi nối `chunk_id`, output `.partial` → rename, dọn tmp/partial khi lỗi. Đối chiếu code cũ trên 301 file / 10.402 doc, target 128+256, lô 1.000 và 20.000: docs/chunks `Table.equals` + schema + `chunk_report.json` giống hệt. Thêm 2 test (lô 1/2/100 cho cùng output; lỗi không để lại partial); full suite 274 pass / 2 deselected. Chưa chạy lại toàn corpus. |
 | 2026-10-04 01:57 | Codex (GPT-6) | Khởi chạy extract raw NEW/state NEW workers2; snapshot 1039shards/43674docs. JSON validator thực1200/22800/0lỗi. Các bước sau chờ extract hoàn tất. |
 | 2026-10-03 23:10 | Claude Sonnet 5.5 | Thêm điểm LB từ `SCOREBOARD.md` (M8, M9, mục 5, 7, 8); kiểm số học bảng điểm |
 | 2026-10-03 22:50 | Claude Sonnet 5.5 | Tạo `PROGRESS.md` (template không có trong repo) từ khảo sát chỉ-đọc: `state/*.db` (ro), `data/`, `out/`, `logs/`, `git` ở HEAD `ae6b90d`; chạy 36 test (scorer, make_submission, chunk) pass |

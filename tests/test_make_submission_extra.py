@@ -58,6 +58,7 @@ def env(tmp_path, monkeypatch):
         assert ms.main(common + ['--out', str(out), *extra]) == 0
         return (json.loads(out.with_suffix('.json').read_text(encoding='utf-8')),
                 json.loads(out.with_suffix('.stats.json').read_text(encoding='utf-8')), out)
+    build.dirs = {'tmp': tmp_path, 'runs': runs, 'chunks': chunks, 'groups': groups}
     return build, order, rows
 
 
@@ -96,3 +97,47 @@ def test_extra_flag_errors(env, args):
     build, _, _ = env
     with pytest.raises(SystemExit):
         build('bad', *args)
+
+
+def test_k_chunk_budget_adds_full_chunks_in_rank_order(env):
+    build, order, _ = env
+    base, bst, _ = build('base')
+    _, _, z4 = build('kc4', '--k-chunk', '4')
+    sub, st, z = build('budget', '--k-chunk-zip-budget-bytes', str(z4.stat().st_size))
+    assert st['k_chunk'] == 4 and z.stat().st_size <= z4.stat().st_size
+    assert all(t['zip_bytes'] > z4.stat().st_size for t in st['tried'] if t['k_chunk'] > 4)
+    assert 'k_doc_total' not in bst and 'extra_chunk_docs' not in st
+    for b, s in zip(base, sub):
+        assert s['relevant_docs'] == b['relevant_docs'] and s['relevant_chunks'][:2] == b['relevant_chunks']
+        assert [c['doc_id'] for c in s['relevant_chunks']] == order[b['id']][:4]
+        assert all(c['chunk_text'] == _body(c['doc_id']) for c in s['relevant_chunks'])     # whole body, verbatim
+
+
+def test_doc_ranking_appends_docs_after_k100(env):
+    build, _, _ = env
+    dd = build.dirs
+    runs2 = dd['tmp'] / 'runs2'
+    runs2.mkdir()
+    groups = dict(dd['groups']) | {d: [d] for d in range(1000, 1092)} | {d: [d] for d in range(2000, 2011)} | {2001: [2001, 2101]}
+    pq.write_table(pa.table({'doc_id': list(groups), 'doc_ids_group': list(groups.values())}), dd['chunks'] / 'docs.parquet')
+    q1 = list(range(10, 10 + N_DOCS)) + list(range(1000, 1092))                     # 99 cached docs
+    q2 = list(range(10, 10 + N_DOCS))[::-1]
+    run = [(1, k, d) for k, d in enumerate(q1, 1)] + [(2, k, d) for k, d in enumerate(q2, 1)]
+    pq.write_table(pa.table({'query_id': [r[0] for r in run], 'rank': pa.array([r[1] for r in run], pa.int32()),
+                             'doc_id': [r[2] for r in run], 'score': pa.array([0.0] * len(run), pa.float32()),
+                             'tier': pa.array([1] * len(run), pa.int8())}), runs2 / 'vi_k100.parquet')
+    rk = [(1, 1000), (1, 2000), (1, 10), (1, 2001), (1, 2002), (2, 2005), (2, 12), (2, 2006)]
+    pq.write_table(pa.table({'query_id': [q for q, _ in rk], 'rank': [1, 2, 3, 4, 5, 1, 2, 3],
+                             'doc_id': [d for _, d in rk]}), dd['tmp'] / 'rank.parquet')
+    common = ['--k-doc', '100', '--runs-dir', str(runs2)]
+    base, _, _ = build('b100', *common)
+    sub, st, _ = build('k101', *common, '--doc-ranking', str(dd['tmp'] / 'rank.parquet'), '--k-doc-total', '101')
+    extra = {1: [2000, 2001, 2101], 2: [2005, 2006]}
+    for b, s in zip(base, sub):
+        assert s['relevant_chunks'] == b['relevant_chunks']
+        assert s['relevant_docs'] == b['relevant_docs'] + extra[b['id']] and len(set(s['relevant_docs'])) == len(s['relevant_docs'])
+    assert st['docs_from_ranking'] == 4 and st['queries_short_of_k_doc_total'] == 1
+    for bad in (['--doc-ranking', 'x.parquet'], ['--k-doc-total', '150'], ['--doc-ranking', 'x', '--k-doc-total', '100'],
+                ['--k-doc', '50', '--doc-ranking', 'x', '--k-doc-total', '150']):
+        with pytest.raises(SystemExit):
+            build('bad', '--runs-dir', str(runs2), *(['--k-doc', '100'] if '--k-doc' not in bad else []), *bad)

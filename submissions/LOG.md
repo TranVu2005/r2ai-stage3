@@ -157,3 +157,37 @@ byte-identical on every line); relevant_chunks: first 19 identical for 1,200/1,2
 N = 100 (size only, not built: ranks 51-100 have no chunk score, measured with their first answer/body chunk): ZIP 65,855,436 B
 (62.81 MiB), 17,935,513 B over the 45.7 MiB budget.
 Regression: the default builder after this change rebuilds the uploaded JSON byte-identically (SHA256 `50ac7367...37ab`).
+
+## A / B / C variants of sub_new_vi_kd100_kc19_full (2026-10-05, not uploaded)
+
+Baseline (best so far, Final 0.1748) = `out/runs/new-full/sub_new_vi_kd100_kc19_full.zip`. Each file changes exactly one
+factor; files in `out/runs/ab-2026-10-05b/`. No rerank, no corpus embedding. Common builder args: `--k-doc 100 --k-chunk 19
+--chunk-mode full --dedupe-scope doc --runs-dir out/runs/vi-k100`.
+
+| variant | change | extra args | relevant_docs ids/query min/p5/p50/max | chunks/query | JSON B | ZIP B | ZIP SHA256 | validator | out-of-scope diff |
+|---|---|---|---|---|---|---|---|---|---|
+| A `A/sub_abA_kd100_fullk_45mib.zip` | full chunks for docs ranked 20..23 | `--k-chunk-zip-budget-bytes 47919923 --k-chunk-max 50` | = baseline | 23 | 188,731,563 | 47,277,964 | `bf2b94a36cdf159b0dcd95a3d6a02d2fdd152e07941775b2087eda7bea4d3c23` | 0 errors (`--max-zip-mib 45.7`) | 0 |
+| V3 `V3/sub_abV3_kd200_kc19_full.zip` | relevant_docs to 200 primary docs | `--doc-ranking .../cand/vi_cand.docs.parquet --k-doc-total 200` | 79 / 169 / 200 / 212 | 19 | 157,121,008 | 39,775,610 | `fa73bf9fb387e056fa2220b935cca94182f28c82fb617c97e21530cc2d96ead8` | 0 errors (`--max-zip-mib 45.7`) | 0 |
+| C `C/sub_abC_kd100_fullk_probe63mib.zip` | full chunks for docs ranked 20..32; **upload-limit probe, upload only after A has a score** | `--k-chunk-zip-budget-bytes 65855436 --k-chunk-max 60` | = baseline | 32 | 260,260,224 | 65,062,696 | `3d1b045f00245fe5421a1fbb363ae0656d6ea3f5066e8f341d2b23dcbf676bdf` | 0 errors (no size limit) | 0 |
+| V3b `V3b/sub_abV3b_kd150_kc19_full.zip` | relevant_docs to 150 primary docs | `--doc-ranking ... --k-doc-total 150` | 79 / 150 / 150 / 159 | 19 | 156,679,502 | 39,519,425 | `fe0f217a2343b3b7985e93cabc030307cb00a7290810daaf4eebd1a00116ec1c` | 0 errors (`--max-zip-mib 45.7`) | 0 |
+
+JSON SHA256: A `d63537dd9cf7a56f8aecb9880f9d8ce6db01a99ffda9d9c8edf258f90d0d975f`, V3 `984e1cce0f666ff2c9785e4937d069645988aff8374fb10bbb12b3e91afcd844`,
+C `e588e7bf49c7f64147d8c65505949dd685fd1537373915c405f44ea638498d17`, V3b `42a641204d1ed986e89e2a376a400963ab7c440baec57b5d92aadd28ebb6ef97`.
+Suggested upload order: **A -> V3 -> C -> V3b** (depending on the scores).
+
+* A / C: k_chunk search on written zips. A: k 35 -> 70,988,656 B, 27 -> 55,335,458, 23 -> 47,277,964 (chosen), 25 -> 51,320,743,
+  24 -> 49,304,898. C: 40 -> 80,883,339, 29 -> 59,335,467, 34 -> 69,006,693, 31 -> 63,212,600, 32 -> 65,062,696 (chosen),
+  33 -> 67,034,795. Each rank adds ~2 MB of zip. Added full chunks: A 4,800 (chars p50 4,859 / p95 8,982 / max 47,450;
+  BGE-M3 tokens p50 1,278.5 / p95 2,375 / max 12,367); C 15,600 (chars p50 4,825 / max 251,693; tokens p50 1,274 / max 69,680),
+  same rule as the baseline (whole answer if inside the body, else whole body, no cap). id and relevant_docs byte-identical,
+  first 19 chunks byte-identical and later chunks in K100 rank order for 1,200/1,200 queries.
+* V3 / V3b: docs after the K100 cache = candidate docs not in K100, ordered by max hybrid chunk score (w 0.7, min-max over the
+  query's candidates), each expanded to its doc_ids_group. relevant_chunks byte-identical and the baseline ids are a byte-identical
+  prefix (same order) for 1,200/1,200 queries; no duplicate ids. Queries short of the target (not enough candidate docs): 155
+  for K200, 40 for K150. Primary docs/query K200 min 79 / p5 169 / p50 200; K150 min 79 / p5 150 / p50 150.
+* Candidate ranking: `run_retrieval_k100 --candidates exact --candidates-only` (queries encoded on cuda, exact scan on cpu, no
+  rerank) -> `out/runs/ab-2026-10-05b/cand/` (`vi_cand.docs.parquet` 317,765 rows, `vi_cand.chunks.parquet` 431,653 rows).
+  429 s (dense 95.2, sparse 253.5, union+rescore 41.3), peak RSS 5.552 GiB, private 6.411 GiB, VRAM 1,338 MiB.
+  Gate: n_candidates and n_docs equal `vi_k100.candidates.parquet` for 1,200/1,200 queries; K100 docs within the candidate docs
+  1,200/1,200; tier-1 set (top-200 chunks -> top-50 docs by hybrid) and tier-2 set (next docs by hybrid order) reproduced 1,200/1,200.
+* Default builder after this change still rebuilds the uploaded JSON byte-identically (SHA256 `50ac7367...37ab`).

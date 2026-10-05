@@ -17,6 +17,11 @@ Outputs
   vi_k100.candidates.parquet    query_id, n_candidates (after union), n_docs (distinct docs among the candidates)
 --candidates exact: first-stage candidates by exact block scan over dense.npy / the sparse CSR mmap cache
 (retrieve.exact) instead of FAISS + full CSC; same k=200 per branch, union, re-score, mix, rerank. Default faiss.
+--candidates-only (with --candidates exact): stop after the first stage, no reranker, no _partial.pkl. Writes, without
+overwriting existing files, vi_cand.docs.parquet (query_id, rank, doc_id, score: every candidate doc ordered by its max
+hybrid chunk score; ties keep the first chunk of the stable argsort, as the tier-2 loop), vi_cand.chunks.parquet
+(query_id, chunk_id, doc_id, dense, sparse, hybrid for every candidate chunk, in candidate order = ascending chunk_id),
+vi_cand.candidates.parquet (as vi_k100.candidates.parquet) and vi_cand.meta.json.
 """
 from __future__ import annotations
 
@@ -59,6 +64,45 @@ def peak_private_gib() -> float | None:
     return round(m.peak_pagefile / 2**30, 3) if hasattr(m, 'peak_pagefile') else None
 
 
+CAND_SUFFIXES = ('.docs.parquet', '.chunks.parquet', '.candidates.parquet', '.meta.json')
+
+
+def write_candidates(out_dir: Path, qs_rows, res: dict, index, minmax, meta: dict, t_start: float) -> None:
+    """Full first-stage ranking per query (see --candidates-only); res: row index -> (cand, dense, sparse)."""
+    docs = {k: [] for k in ('query_id', 'rank', 'doc_id', 'score')}
+    chunks = {k: [] for k in ('query_id', 'chunk_id', 'doc_id', 'dense', 'sparse', 'hybrid')}
+    cnt = {k: [] for k in ('query_id', 'n_candidates', 'n_docs')}
+    for i, r in enumerate(qs_rows):
+        qid = int(r['id'])
+        cand, dsc, ssc = res[i]
+        h = W * minmax(dsc) + (1 - W) * minmax(ssc)
+        dids = np.asarray(index.doc_id[cand], dtype=np.int64)
+        seen: dict[int, float] = {}
+        for j in np.argsort(-h, kind='stable'):
+            seen.setdefault(int(dids[j]), float(h[j]))
+        for k, (d, sc) in enumerate(seen.items(), 1):
+            for key, v in zip(docs, (qid, k, d, sc)):
+                docs[key].append(v)
+        for key, v in zip(chunks, ([qid] * len(cand), cand.tolist(), dids.tolist(), dsc.tolist(), ssc.tolist(), h.tolist())):
+            chunks[key] += v
+        for key, v in zip(cnt, (qid, len(cand), len(seen))):
+            cnt[key].append(v)
+    paths = [out_dir / f'vi_cand{x}' for x in CAND_SUFFIXES]
+    pq.write_table(pa.table({'query_id': pa.array(docs['query_id'], pa.int64()), 'rank': pa.array(docs['rank'], pa.int32()),
+                             'doc_id': pa.array(docs['doc_id'], pa.int64()), 'score': pa.array(docs['score'], pa.float32())}), paths[0])
+    pq.write_table(pa.table({'query_id': pa.array(chunks['query_id'], pa.int64()), 'chunk_id': pa.array(chunks['chunk_id'], pa.int64()),
+                             'doc_id': pa.array(chunks['doc_id'], pa.int64()), 'dense': pa.array(chunks['dense'], pa.float32()),
+                             'sparse': pa.array(chunks['sparse'], pa.float32()), 'hybrid': pa.array(chunks['hybrid'], pa.float32())}), paths[1])
+    pq.write_table(pa.table({'query_id': pa.array(cnt['query_id'], pa.int64()), 'n_candidates': pa.array(cnt['n_candidates'], pa.int32()),
+                             'n_docs': pa.array(cnt['n_docs'], pa.int32())}), paths[2])
+    nd = np.asarray(cnt['n_docs'])
+    meta |= {'seconds_this_run': round(time.time() - t_start), 'peak_rss_gib': peak_rss_gib(), 'peak_private_gib': peak_private_gib(),
+             'docs_per_query': {'min': int(nd.min()), 'p5': float(np.percentile(nd, 5)), 'p50': float(np.percentile(nd, 50)),
+                                'max': int(nd.max())}, 'rows_docs': len(docs['doc_id']), 'rows_chunks': len(chunks['chunk_id'])}
+    paths[3].write_text(json.dumps(meta, indent=1), encoding='utf-8')
+    print(json.dumps(meta, indent=1, default=str))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--target', type=int, default=256)
@@ -69,7 +113,11 @@ def main(argv=None):
     ap.add_argument('--block-rows', type=int, default=100_000, help='exact: rows per scanned block')
     ap.add_argument('--device', default='cpu', help='exact: dense block matmul on cpu|cuda')
     ap.add_argument('--sparse-cache', default=None, help='exact: CSR mmap cache dir (default <index>/sparse_mmap)')
+    ap.add_argument('--candidates-only', action='store_true',
+                    help='exact only: write the full hybrid candidate ranking (vi_cand.*), no rerank')
     a = ap.parse_args(argv)
+    if a.candidates_only and a.candidates != 'exact':
+        ap.error('--candidates-only needs --candidates exact')
     a.out_dir = str(assert_writable(a.out_dir))
     a.queries = str(resolve_path(a.queries))
     need = ('meta.json', 'dense.npy', 'sparse.npz') + (('faiss.index',) if a.candidates == 'faiss' else ())
@@ -87,7 +135,11 @@ def main(argv=None):
     qs_rows = pq.read_table(a.queries).to_pylist()
     if a.limit:
         qs_rows = qs_rows[:a.limit]
-    done: dict[int, dict] = pickle.load(open(partial, 'rb')) if partial.exists() else {}
+    if a.candidates_only:
+        cand_files = [assert_writable(out_dir / f'vi_cand{x}') for x in CAND_SUFFIXES]
+        if any(f.exists() for f in cand_files):
+            raise ValueError(f'refusing to overwrite existing candidate outputs in {out_dir}')
+    done: dict[int, dict] = {} if a.candidates_only else (pickle.load(open(partial, 'rb')) if partial.exists() else {})
     print(f'{len(done)} queries restored from {partial.name}', flush=True)
 
     t_start = time.time()
@@ -114,6 +166,13 @@ def main(argv=None):
                        'peak_private_gib_after_candidates': peak_private_gib(),
                        'sparse_cache': {k: index.sparse_cache_info.get(k) for k in ('nnz', 'shape', 'reused')}}
         print(f'exact candidates: {json.dumps(exact_stats)}', flush=True)
+    if a.candidates_only:
+        write_candidates(out_dir, qs_rows, exact_res, index, minmax, {
+            'queries': len(qs_rows), 'w': W, 'agg': AGG, 'target': a.target, 'seed': 42, 'k_per_branch': 200,
+            'candidates': 'exact', 'exact': exact_stats, 'encoder_device': 'cuda' if torch.cuda.is_available() else 'cpu',
+            'peak_vram_allocated_mib': round(torch.cuda.max_memory_allocated() / 2**20) if torch.cuda.is_initialized() else None,
+            'index_meta': index.meta}, t_start)
+        return 0
     rr = Reranker(max_len=512)
     cstat: dict[int, tuple[int, int]] = {}
 

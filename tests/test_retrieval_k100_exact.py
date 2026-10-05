@@ -114,3 +114,38 @@ def test_exact_gate_stages_agree_on_fixture(env):
     res = json.loads((out / 'compare.json').read_text(encoding='utf-8'))
     assert res['k100_prerank_same_set'] == 30 and res['candidate_set_identical'] == 30 and res['diffs'] == []
     assert json.loads((out / 'legacy.json').read_text(encoding='utf-8'))['index_files_unchanged'] is True
+
+
+def test_candidates_only_full_ranking_matches_k100(env, monkeypatch):
+    from r2ai.index import bge_m3
+    k100 = env['k100']
+    base = ['--queries', str(env['q']), '--candidates', 'exact']
+    assert k100.main(base + ['--out-dir', str(env['tmp'] / 'full')]) == 0
+
+    class NoRR:
+        def __init__(self, **kw):
+            raise AssertionError('reranker must not be loaded')
+    monkeypatch.setattr(bge_m3, 'Reranker', NoRR)
+    out = env['tmp'] / 'cand'
+    assert k100.main(base + ['--out-dir', str(out), '--candidates-only', '--block-rows', '97']) == 0
+    assert not (out / '_partial.pkl').exists() and not (out / 'vi_k100.parquet').exists()
+    full = env['tmp'] / 'full'
+    assert pq.read_table(out / 'vi_cand.candidates.parquet').equals(pq.read_table(full / 'vi_k100.candidates.parquet'))
+    docs = pq.read_table(out / 'vi_cand.docs.parquet').to_pandas()
+    chunks = pq.read_table(out / 'vi_cand.chunks.parquet').to_pandas()
+    k = pq.read_table(full / 'vi_k100.parquet').to_pandas()
+    for q, g in docs.groupby('query_id'):
+        assert list(g['rank']) == list(range(1, len(g) + 1)) and g['doc_id'].is_unique
+        assert (np.diff(g['score'].to_numpy()) <= 0).all()
+        c = chunks[chunks.query_id == q]
+        assert set(g['doc_id']) == set(c['doc_id'])
+        assert np.allclose(g.set_index('doc_id')['score'], c.groupby('doc_id')['hybrid'].max().loc[g['doc_id']])
+        kq = k[k.query_id == q]
+        assert set(kq['doc_id']) <= set(g['doc_id'])
+        t1 = set(kq[kq.tier == 1]['doc_id'])
+        rest = [d for d in g['doc_id'] if d not in t1][:int((kq.tier == 2).sum())]
+        assert set(rest) == set(kq[kq.tier == 2]['doc_id'])          # tier 2 = next docs by hybrid order
+    with pytest.raises(ValueError, match='overwrite'):
+        k100.main(base + ['--out-dir', str(out), '--candidates-only'])
+    with pytest.raises(SystemExit):
+        k100.main(['--queries', str(env['q']), '--out-dir', str(env['tmp'] / 'y'), '--candidates-only'])

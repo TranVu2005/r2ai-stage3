@@ -12,6 +12,12 @@
                   from the index text (memory-mapped <index>/text.arrow). Appended after the regular chunks, rank order.
                   N <= 50 (scores are cached for the top-50 docs). --extra-zip-budget-bytes B: largest N in
                   [k_chunk, --extra-chunk-docs] whose real zip is <= B bytes (binary search on written zips).
+  k_chunk search  --k-chunk-zip-budget-bytes B: largest k_chunk in [--k-chunk, --k-chunk-max] whose real zip is <= B bytes
+                  (binary search on written zips; same chunk rule, so the first --k-chunk chunks stay identical).
+  docs > 100      --doc-ranking P --k-doc-total K (needs --k-doc 100): relevant_docs = the K100 docs as above, then the
+                  next docs of P (query_id, rank, doc_id; vi_cand.docs.parquet of run_retrieval_k100 --candidates-only)
+                  that are not in the K100 cache, in rank order, until K primary docs; each expanded to its doc_ids_group.
+                  relevant_chunks unchanged.
   dedupe          per query, in rank order, a later chunk is dropped when its text equals an earlier one after
                   normalisation (NFKC, html.unescape, lowercase, whitespace collapsed), or when
                   LCS_tokens(BGE-M3) / len(shorter) >= 0.8 against an earlier kept chunk.
@@ -187,6 +193,11 @@ def main(argv=None):
                     help='docs ranked k_chunk+1..N get 1 extra chunk (best reranker-scored t256 chunk); 0 = off, N <= 50')
     ap.add_argument('--extra-zip-budget-bytes', type=int, default=0,
                     help='with --extra-chunk-docs: largest N in [k_chunk, N] whose real zip is <= B bytes (0 = off)')
+    ap.add_argument('--k-chunk-zip-budget-bytes', type=int, default=0,
+                    help='largest k_chunk in [--k-chunk, --k-chunk-max] whose real zip is <= B bytes (0 = off)')
+    ap.add_argument('--k-chunk-max', type=int, default=0, help='upper end of the --k-chunk-zip-budget-bytes search (default k_doc)')
+    ap.add_argument('--doc-ranking', default=None, help='parquet (query_id, rank, doc_id): docs after the K100 cache (with --k-doc-total)')
+    ap.add_argument('--k-doc-total', type=int, default=0, help='primary docs in relevant_docs incl. --doc-ranking docs (> 100)')
     a = ap.parse_args(argv)
     if a.k_chunk is None:
         if not a.zip_budget_mib:
@@ -205,6 +216,20 @@ def main(argv=None):
             ap.error('--extra-chunk-docs keeps k_chunk fixed: use --extra-zip-budget-bytes, not --max-zip-mib / --zip-budget-mib')
     elif a.extra_zip_budget_bytes:
         ap.error('--extra-zip-budget-bytes needs --extra-chunk-docs')
+    if a.k_chunk_zip_budget_bytes:
+        a.k_chunk_max = a.k_chunk_max or a.k_doc
+        if not a.k_chunk <= a.k_chunk_max <= a.k_doc:
+            ap.error('need k_chunk <= --k-chunk-max <= k_doc')
+        if a.max_zip_mib or a.zip_budget_mib or a.extra_chunk_docs:
+            ap.error('--k-chunk-zip-budget-bytes excludes --max-zip-mib, --zip-budget-mib and --extra-chunk-docs')
+        if a.chunk_mode == 'c2' and a.k_chunk_max > C2_MAX_K:
+            ap.error(f'c2 needs cached chunk scores, available for the top {C2_MAX_K} docs only')
+    elif a.k_chunk_max:
+        ap.error('--k-chunk-max needs --k-chunk-zip-budget-bytes')
+    if bool(a.doc_ranking) != bool(a.k_doc_total):
+        ap.error('--doc-ranking and --k-doc-total go together')
+    if a.doc_ranking and (a.k_doc != 100 or a.k_doc_total <= 100):
+        ap.error('--doc-ranking needs --k-doc 100 and --k-doc-total > 100')
     a.out = str(assert_writable(a.out))
     # ZIP, JSON and stats are independent destinations; an existing sidecar
     # may be redirected even when the ZIP path is safe. Check every possible
@@ -228,6 +253,9 @@ def main(argv=None):
             raise ValueError(f'Empty document input: {docs_root}')
     if a.extra_chunk_docs:
         required += [runs / 'vi_k100_chunk_scores.parquet', chunks_file(a.target, base=chunk_root)]
+    if a.doc_ranking:
+        a.doc_ranking = str(resolve_path(a.doc_ranking))
+        required += [Path(a.doc_ranking)]
     if a.chunk_mode == 'window':
         required += [runs / 'vi_k100_chunk_scores.parquet', chunks_file(a.target, base=chunk_root), index_dir(a.target, base=Path(a.index_dir)) / 'dense.npy']
     require_inputs(*required)
@@ -241,7 +269,17 @@ def main(argv=None):
         if r['rank'] <= a.k_doc:
             top[r['query_id']].append(r['doc_id'])
     groups = {r['doc_id']: r['doc_ids_group'] for r in pq.read_table(chunk_root / 'docs.parquet', columns=['doc_id', 'doc_ids_group']).to_pylist()}
-    need = {d for v in top.values() for d in v[:a.k_chunk]}
+    need = {d for v in top.values() for d in v[:max(a.k_chunk, a.k_chunk_max)]}
+    more: dict[int, list[int]] = {q: [] for q in qids}                 # --doc-ranking docs after the K100 cache
+    if a.doc_ranking:
+        cached = {q: set() for q in qids}
+        for r in run:
+            cached.setdefault(r['query_id'], set()).add(r['doc_id'])
+        rk = pq.read_table(a.doc_ranking, columns=['query_id', 'rank', 'doc_id']).to_pandas().sort_values(['query_id', 'rank'], kind='stable')
+        for q, d in zip(rk['query_id'].tolist(), rk['doc_id'].tolist()):
+            if q in more and d not in cached[q] and len(top[q]) + len(more[q]) < a.k_doc_total:
+                more[q].append(d)
+                cached[q].add(d)
 
     chunk_text: dict[int, str] = {}
     best: dict[tuple[int, int], list[int]] = {}
@@ -301,7 +339,7 @@ def main(argv=None):
               'window_docs_cut': 0, 'window_docs_fallback_dense': 0}
         wlen: dict[tuple[int, str], int] = {}
         for q in qids:
-            docs = list(dict.fromkeys(int(x) for d in top[q] for x in groups[d]))
+            docs = list(dict.fromkeys(int(x) for d in top[q] + more[q] for x in groups[d]))
             if win is not None:
                 win.ensure_len(top[q][:kc])
             cand = []
@@ -372,6 +410,11 @@ def main(argv=None):
         lens += xlens
         if nx:
             st |= xst | {'extra_chunk_tokens_bge_m3': dist(xlens) if xlens else None}
+        if a.doc_ranking:
+            npr = [len(top[q]) + len(more[q]) for q in qids]
+            st |= {'k_doc_total': a.k_doc_total, 'primary_docs_per_query': dist(npr) | {'p5': float(np.percentile(npr, 5))},
+                   'queries_short_of_k_doc_total': sum(n < a.k_doc_total for n in npr),
+                   'docs_from_ranking': sum(len(v) for v in more.values())}
         return out, n_docs, n_chunks, lens, st
 
     kc, tried = a.k_chunk, []
@@ -421,13 +464,28 @@ def main(argv=None):
             else:
                 hi_n = mid - 1
         nx = lo_n
+    if a.k_chunk_zip_budget_bytes:
+        lo_k, hi_k = kc, a.k_chunk_max                                 # largest k in [k_chunk, k_chunk_max] with real zip <= B
+        while lo_k < hi_k:
+            mid = (lo_k + hi_k + 1) // 2
+            _, zp, _ = write(mid, nx)
+            size = zp.stat().st_size
+            tried.append({'k_chunk': mid, 'zip_bytes': size})
+            print(f'k_chunk search k={mid}: zip {size} bytes', flush=True)
+            if size <= a.k_chunk_zip_budget_bytes:
+                lo_k = mid
+            else:
+                hi_k = mid - 1
+        kc = lo_k
+    budget_bytes = a.extra_zip_budget_bytes or a.k_chunk_zip_budget_bytes
     while True:
         (out, n_docs, n_chunks, lens, st), zp, js = write(kc, nx)
         mib = zp.stat().st_size / 2**20
-        tried.append({'k_chunk': kc, 'zip_mib': round(mib, 2)} | ({'extra_chunk_docs': nx, 'zip_bytes': zp.stat().st_size} if nx else {}))
+        tried.append({'k_chunk': kc, 'zip_mib': round(mib, 2)} | ({'extra_chunk_docs': nx} if nx else {})
+                     | ({'zip_bytes': zp.stat().st_size} if budget_bytes else {}))
         print(f'k_chunk={kc}: zip {mib:.2f} MiB', flush=True)
-        if a.extra_zip_budget_bytes and zp.stat().st_size > a.extra_zip_budget_bytes:
-            raise ValueError(f'zip {zp.stat().st_size} bytes > --extra-zip-budget-bytes {a.extra_zip_budget_bytes} even without extra chunks')
+        if budget_bytes and zp.stat().st_size > budget_bytes:
+            raise ValueError(f'zip {zp.stat().st_size} bytes > budget {budget_bytes} even at the lower end of the search')
         if not a.max_zip_mib or mib <= a.max_zip_mib or kc <= 1:
             break
         js.unlink()

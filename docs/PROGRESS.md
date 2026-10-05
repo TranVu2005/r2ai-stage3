@@ -1,8 +1,8 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-05 10:53 (UTC+7)
+- Cập nhật: 2026-10-05 11:43 (UTC+7)
 - Model thực hiện: Claude Opus 5.5
-- Commit HEAD đã kiểm trước cập nhật này: `cc0e51f`, nhánh `main` (hash commit chứa tài liệu này được báo ở kết quả)
+- Commit HEAD đã kiểm trước cập nhật này: `d80a882`, nhánh `main` (hash commit chứa tài liệu này được báo ở kết quả)
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - Quy ước: ✅ có bằng chứng · 🟡 làm một phần · ❌ chưa làm (đã tìm, không thấy) · ❓ không chứng minh được
 
@@ -50,7 +50,7 @@ Chưa có: zh (không có `data/raw_zh*`), `nhathuoclongchau.com.vn`, `zysjonlin
 | M6 | Scorer local theo metric | ✅ | `eval/scorer.py`, `tests/test_scorer.py`, commit `ae6b90d`. Chưa đối chiếu với điểm LB nào (không có điểm LB) |
 | M7 | Chunk + index + truy hồi baseline (BGE-M3 hybrid + reranker) | ✅ vi | NEW: `data/index/t256/` dense.npy + sparse (không FAISS), **3.909.586 chunk / 623.805 doc**; K100 exact `out/runs/vi-k100/vi_k100.parquet` (1.200 query, 119.969 dòng). Legacy OLD 818.080 chunk / 123.874 doc. Chưa có zh. Xem mục 5 |
 | M8 | Nộp thử lên leaderboard | ✅ | 03/10: 7 lượt (`Downloads/SCOREBOARD.md`), tốt nhất sub06 Final 0,0626. 05/10: `sub_new_vi_kd100_kc19_full` (index NEW) **Final 0,1748** (người dùng cung cấp). Ghi ở `submissions/LOG.md` mục Leaderboard |
-| M9 | Nộp thử A/B (chunk dài/ngắn; 1 id/cả nhóm; vi/zh) | 🟡 | Xong: chunk dài vs ngắn (c2 0,0158 → full 0,0273 ở K=5), quét K 5/20/50/100, cửa sổ 1024/2048, index cũ vs NEW (0,0626 → 0,1748). V2 thêm 1 chunk t256 ngắn cho doc hạng 20..45: **Final 0,1728 (−0,0020)**, Chunk P 0,3025 → 0,1507, Chunk R 0,1249 → 0,1411; không thêm chunk ngắn nữa. Đang làm: A (thêm chunk full), B (K doc 200/150), C (thử giới hạn upload). Cả nhóm id: mọi file đều đã trả cả nhóm (mặc định); "1 id" chưa thử. K doc 150/200: cần chạy lại truy hồi. vi vs có zh: chưa |
+| M9 | Nộp thử A/B (chunk dài/ngắn; 1 id/cả nhóm; vi/zh) | 🟡 | Xong: chunk dài vs ngắn (c2 0,0158 → full 0,0273 ở K=5), quét K 5/20/50/100, cửa sổ 1024/2048, index cũ vs NEW (0,0626 → 0,1748). V2 thêm 1 chunk t256 ngắn cho doc hạng 20..45: **Final 0,1728 (−0,0020)**, Chunk P 0,3025 → 0,1507, Chunk R 0,1249 → 0,1411; không thêm chunk ngắn nữa. Đã sinh, chưa nộp (`out/runs/ab-2026-10-05b/`): A chunk full cho hạng 20..23 (ZIP 47.277.964 byte), V3 K doc 200 / V3b K doc 150 theo thứ tự hybrid trước rerank, C chunk full hạng 20..32 (ZIP 65.062.696 byte, thử giới hạn upload). Cả nhóm id: mọi file đều đã trả cả nhóm (mặc định); "1 id" chưa thử. K doc 150/200: cần chạy lại truy hồi. vi vs có zh: chưa |
 | M10 | Mẫu 2% zh, tính yield, thứ tự crawl zh | ❌ | Không có `data/raw_zh*`, `docs_zh*`, `config/domains.yaml` chỉ có domain vi |
 | M11 | longchau qua CC columnar index; kiểm robots zysjonline | ❌ | `out/archive_*` có số đo độ phủ (bước 1), nhưng không có dữ liệu longchau đã tải. Không thấy kết luận robots zysjonline trong `out/` |
 | M12 | Crawl dữ liệu train Vinmec/MEDLATEC ngoài corpus (lọc trang trùng query test) | ❌ | Không có thư mục/dữ liệu tương ứng. `data/dev/pseudo_vi_v2.parquet` (462 dòng) sinh từ chính corpus đã crawl, không phải dữ liệu ngoài |
@@ -156,7 +156,7 @@ Hai dòng ❓ từ CONTEXT:
 
 1. **Độ phủ vẫn là nút thắt chính nhưng đã giảm**: index NEW 623.805 doc / 4.394.718 URL corpus ≈ **14,2%** (cũ 123.874, 2,8%). Doc R 0,088 → 0,2897 khi tăng độ phủ vi. Ước tính thô từ trung bình macro (không phải số đo): gold khoảng 60–70 doc/query, nên phần còn thiếu phần lớn nằm ngoài index (zh, domain chưa crawl).
 2. **Chưa có dữ liệu zh**: CONTEXT ước ~77% corpus là zh; hiện 0 doc zh. Nếu gold có nhiều zh, recall bị chặn trên.
-3. **K doc > 100 cần chạy lại bước sinh ứng viên** (encode 1.200 query + `--candidates exact`, không rerank): `vi_k100.candidates.parquet` chỉ lưu số đếm (doc phân biệt ngoài top 100: min 0, p5 69, p50 169). Đang làm (biến thể B).
+3. **K doc > 100 cần chạy lại bước sinh ứng viên** (encode 1.200 query + `--candidates exact`, không rerank): `vi_k100.candidates.parquet` chỉ lưu số đếm (doc phân biệt ngoài top 100: min 0, p5 69, p50 169). Đã chạy lại bước sinh ứng viên (`--candidates-only`, 429 s), gate tái tạo 1.200/1.200; V3/V3b đã sinh.
 3b. **Chunk ngắn hạ precision**: V2 (+26 chunk t256/query) làm Chunk P giảm một nửa, Final −0,0020. Chỉ mở rộng bằng chunk full.
 4. **Ngân sách upload**: 45,7 MiB lên được, 110 MiB không; giới hạn thật chưa rõ. Chunk cho đủ 100 doc cần ZIP khoảng 62,81 MiB (đo, cách chọn chunk cho hạng 51–100 chỉ để đo size).
 5. `youmed.vn` halted (bot_challenge); `vov.vn` và `baolangson.vn` chặn bởi robots (11.765 URL không lấy được, đúng theo quyết định tôn trọng robots).
@@ -164,8 +164,8 @@ Hai dòng ❓ từ CONTEXT:
 
 ## 8. 3 việc tiếp theo (đường găng tới 31/10)
 
-1. **A – thêm chunk full** cho doc hạng 20..k, k lớn nhất vừa ZIP 45,7 MiB (chỉ phía chunk). Nộp trước.
-2. **B – K doc 200 / 150** theo thứ tự hybrid trước rerank (chỉ phía doc), sau gate tái tạo ứng viên. **C – thử giới hạn upload** (như A, ZIP ≤ 62,81 MiB), chỉ nộp sau khi có điểm A.
+1. **Người dùng nộp lần lượt A → V3 (K200) → C → V3b (tùy kết quả)**, file trong `out/runs/ab-2026-10-05b/`, danh sách và SHA256 ở `submissions/LOG.md`. C (62,05 MiB) chỉ nộp sau khi có điểm A; nếu C không upload được thì giới hạn nằm giữa 45,7 và 62,05 MiB.
+2. Nếu A và V3 cùng tăng: ghép A + V3 thành một file (chưa sinh).
 3. **Quyết định zh**: lấy mẫu 2% mỗi domain zh, tính yield trên 1.200 query, rồi xếp thứ tự crawl.
 
 ## 9. Changelog
@@ -187,3 +187,4 @@ Hai dòng ❓ từ CONTEXT:
 | 2026-10-05 09:05 | Claude Opus 5.5 | Chạy thật NEW: embed 37.953 s; K100 exact 1.200 query 8.481 s, peak RSS 7,391 / private 7,046 GiB, VRAM 1.452 MiB; sửa `Index.texts` overflow >2 GiB và text mmap (`a76052b`, private 12,44 → 2,07 GiB ở bước ứng viên); submission sub06-config ZIP 39.237.992 byte SHA256 `1d171722…567a`, validator 1.200/22.800/0 lỗi; chưa nộp LB. Suite 299 pass / 2 deselected. |
 | 2026-10-05 10:40 | Claude Opus 5.5 | Ghi điểm LB `sub_new_vi_kd100_kc19_full` (Final 0,1748, người dùng cung cấp) vào `submissions/LOG.md` + PROGRESS (M7–M9, mục 5/7/8, đầu file, Chunking), sắp Changelog theo thời gian, đo nguyên nhân JSON nhỏ hơn sub06. `make_submission`: thêm `--extra-chunk-docs` / `--extra-zip-budget-bytes` (mặc định tắt; JSON mặc định tái tạo đúng SHA `50ac7367…`). Sinh V2 N=45 (ZIP 47.792.584 byte, validator 0 lỗi, diff ngoài phạm vi 0); V1 không cần (đã trả cả nhóm), V3/V3b/V4 không sinh (thiếu thứ tự doc ngoài top 100). 6 test mới; full suite **305 pass / 2 deselected** (232 s). Thứ tự nộp đề xuất: V2 → (V3/V3b nếu chạy lại truy hồi) → V4 sau khi có điểm. |
 | 2026-10-05 10:53 | Claude Opus 5.5 | Ghi điểm V2 (Final 0,1728, Chunk P 0,1507; người dùng cung cấp) vào `submissions/LOG.md` và PROGRESS (M9, mục 5/7/8); baseline 0,1748 vẫn tốt nhất. Hướng tiếp: A/B/C. |
+| 2026-10-05 11:43 | Claude Opus 5.5 | `run_retrieval_k100 --candidates-only` (thứ tự hybrid đủ, không rerank; 429 s, peak RSS 5,552 GiB), gate tái tạo 1.200/1.200. `make_submission`: `--k-chunk-zip-budget-bytes` / `--k-chunk-max`, `--doc-ranking` / `--k-doc-total` (mặc định tắt, JSON baseline giống byte). Sinh A (k_chunk 23), C (k_chunk 32, probe 62 MiB), V3 (K200), V3b (K150); validator 0 lỗi, diff ngoài phạm vi 0. 3 test mới; full suite 308 pass / 2 deselected (lượt đầu 1 lỗi ngắt quãng `test_index_assemble::test_build_end_to_end_with_fake_encoder_no_gpu`, pass khi chạy lại riêng và toàn bộ). |

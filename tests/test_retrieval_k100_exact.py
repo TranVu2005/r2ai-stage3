@@ -290,3 +290,69 @@ def test_second_run_on_same_out_dir_is_refused_while_first_lives(env):
         p.kill()
         p.wait()
     assert env['k100'].main(['--queries', str(env['q']), '--candidates', 'exact', '--out-dir', str(out)]) == 0   # stale lock
+
+
+def _batch_rr(monkeypatch):
+    from r2ai.index import bge_m3
+
+    class BatchRR(FakeRR):
+        def score(self, q, passages, batch_size=32):
+            return super().score(q, passages, batch_size) + np.float32(len(passages) * 1e-3)
+    monkeypatch.setattr(bge_m3, 'Reranker', BatchRR)
+
+
+def test_tier1_base_nests_base_run_scores_with_batch_dependent_reranker(env, monkeypatch):
+    """--tier1-base N0: the N0-doc run's tier-1 docs, pairs and scores are kept exactly; plain deeper tier 1 is not."""
+    _batch_rr(monkeypatch)
+    base = _run(env, 'base', '--tier1-docs', '80', '--tier2-docs', '0', '--chunk-score-docs', '0', '--pair-scores')
+    nest = _run(env, 'nest', '--tier1-docs', '160', '--tier1-base', '80', '--tier2-docs', '0', '--chunk-score-docs', '0', '--pair-scores')
+    plain = _run(env, 'plain', '--tier1-docs', '160', '--tier2-docs', '0', '--chunk-score-docs', '0', '--pair-scores')
+    old = pq.read_table(base / 'vi_k100.parquet').to_pandas()
+    new = pq.read_table(nest / 'vi_k100.parquet').to_pandas()
+    pl = pq.read_table(plain / 'vi_k100.parquet').to_pandas()
+    m = old.merge(new, on=['query_id', 'doc_id'], suffixes=('_old', '_new'))
+    assert len(m) == len(old) and (m['tier_new'] == 1).all()
+    assert np.array_equal(m['score_old'].to_numpy(), m['score_new'].to_numpy())
+    for q, g in new.groupby('query_id'):                                    # same tier-1 doc set as the plain deep run
+        assert set(g['doc_id']) == set(pl[pl.query_id == q]['doc_id'])
+        assert (np.diff(g['score'].to_numpy()) <= 0).all()
+    op = pq.read_table(base / 'vi_k100_pairs.parquet').to_pandas()
+    npairs = pq.read_table(nest / 'vi_k100_pairs.parquet').to_pandas()
+    mp = op.merge(npairs, on=['query_id', 'doc_id', 'chunk_id'], suffixes=('_old', '_new'))
+    assert len(mp) == len(op) and np.array_equal(mp['score_old'].to_numpy(), mp['score_new'].to_numpy())
+    kept = set(zip(old['query_id'], old['doc_id']))                         # no extra chunk for a base doc
+    extra = npairs[[k in kept for k in zip(npairs['query_id'], npairs['doc_id'])]]
+    assert len(extra) == len(op)
+    mpl = old.merge(pl, on=['query_id', 'doc_id'], suffixes=('_old', '_new'))
+    assert not np.array_equal(mpl['score_old'].to_numpy(), mpl['score_new'].to_numpy())   # plain run drifts
+    meta = json.loads((nest / 'vi_k100.meta.json').read_text(encoding='utf-8'))
+    assert meta['tier1_base'] == 80 and 'base_doc_chunks_not_reranked' in meta
+    cfg = json.loads((plain / '_partial.pkl.config.json').read_text(encoding='utf-8'))
+    assert 'tier1_base' not in cfg
+
+
+def test_tier1_base_argument_checks(env):
+    for bad in (['--tier1-docs', '100', '--tier1-base', '40'], ['--tier1-docs', '100', '--tier1-base', '100']):
+        with pytest.raises(SystemExit):
+            env['k100'].main(['--queries', str(env['q']), '--candidates', 'exact', '--out-dir', str(env['tmp'] / 'z'), *bad])
+
+
+def test_deep_gate_pairs_flag(env, monkeypatch):
+    from r2ai.retrieve import deep_gate
+    _batch_rr(monkeypatch)
+    base = _run(env, 'base', '--tier1-docs', '80', '--tier2-docs', '10', '--chunk-score-docs', '0', '--pair-scores')
+    nest = _run(env, 'nest', '--tier1-docs', '160', '--tier1-base', '80', '--tier2-docs', '0', '--chunk-score-docs', '0', '--pair-scores')
+    g = env['tmp'] / 'g.json'
+    assert deep_gate.main(['deep', '--old', str(base), '--new', str(nest), '--out', str(g), '--tol', '0', '--pairs']) == 0
+    r = json.loads(g.read_text(encoding='utf-8'))
+    assert r['pair_level']['old_tier1_pairs'] > 0 and r['pair_level']['missing'] == 0 and r['pair_level']['rows_over_tol'] == 0
+    assert r['doc_score_abs_delta']['max'] == 0.0
+    p = pq.read_table(nest / 'vi_k100_pairs.parquet').to_pandas()
+    old = pq.read_table(base / 'vi_k100_pairs.parquet').to_pandas()
+    i = p.index[(p.query_id == old.query_id[0]) & (p.chunk_id == old.chunk_id[0])][0]
+    p.loc[i, 'score'] = np.float32(p.loc[i, 'score'] - 5.0)                # lower one pair: doc max may hold, pair gate must not
+    pq.write_table(pa.Table.from_pandas(p, preserve_index=False), nest / 'vi_k100_pairs.parquet')
+    assert deep_gate.main(['deep', '--old', str(base), '--new', str(nest), '--out', str(g), '--tol', '0', '--pairs']) == 1
+    assert json.loads(g.read_text(encoding='utf-8'))['pair_level']['rows_over_tol'] == 1
+    plain = deep_gate.main(['deep', '--old', str(base), '--new', str(nest), '--out', str(g), '--tol', '0'])
+    assert 'pair_level' not in json.loads(g.read_text(encoding='utf-8')) and plain in (0, 1)

@@ -1,6 +1,16 @@
 # Submission log
 
-Leaderboard columns are left empty for manual entry. No file has been uploaded by the pipeline.
+The pipeline never uploads; the user uploads by hand and reports the scores. Leaderboard scores are in the
+"Leaderboard" section below (the LB columns of the first table are not used).
+
+## Leaderboard (scores provided by the user)
+
+| upload date | file | ZIP SHA256 | JSON SHA256 | config | Final | Doc F2 | Doc P | Doc R | Chunk F2 | Chunk P | Chunk R | source |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-03 | sub02 / sub03 / sub04 / sub05 / **sub06** / sub07 / sub08 (OLD index, 123,874 docs) | see sections below | | see sections below | 0.0158 / 0.0273 / 0.0551 / 0.0623 / **0.0626** / 0.0545 / 0.0507 | | | sub06: 0.088 | | | | `Downloads/SCOREBOARD.md` (user, 2026-10-03); per-metric columns other than sub06 Doc R not copied here |
+| 2026-10-05 | `out/runs/new-full/sub_new_vi_kd100_kc19_full.zip` (39,237,992 B) | `1d171722cd27636a901684778fa0120bf28baab126284d00fc9449820deb567a` | `50ac7367c671104c6ae3f0d686fe7cc40cf69478e2b0fc7d06674ace25f937ab` (156,211,418 B) | sub06 config on the NEW index (3,909,586 t256 chunks / 623,805 docs, K100 `--candidates exact`): k_doc 100 (whole doc_ids_group), k_chunk 19, chunk mode full, dedupe scope doc | **0.1748** | 0.2214 | 0.174 | 0.2897 | 0.1283 | 0.3025 | 0.1249 | provided by the user 2026-10-05 |
+
+vs sub06: Final x2.79, Doc R x3.29 (0.088 -> 0.2897). Coverage of the vi corpus was the bottleneck.
 
 | file | created | config | index | docs in index | build time | Doc F2 (LB) | Chunk F2 (LB) | Final (LB) |
 |---|---|---|---|---|---|---|---|---|
@@ -45,7 +55,7 @@ Notes
 * "full" source over the top-K docs of sub03: answer 17, body 4,916, title+description 0 (every indexed doc has a body; few have a separate answer field).
 * "full" chunks are very long (some > 8,192 tokens, max 45,518): unknown how the organisers' scorer handles that; sub05_full is 426 MiB json / 110 MiB zip, upload limit not checked.
 * Dedupe also removes near-duplicates across different docs (same text on mirrored pages); a doc whose only chunk is dropped stays in relevant_docs.
-* Leaderboard columns left for manual entry; nothing uploaded.
+* Uploaded by hand later by the user (sub03-sub05 have scores, see Leaderboard); the pipeline itself uploads nothing.
 
 ## sub04 v2 (dedupe per doc_id, optional length cap, 2026-10-03)
 
@@ -119,3 +129,28 @@ re-counted and trimmed if needed. Budget: binary search over k_chunk in [0, k_do
 * "Chunk tokens vs base" = (mean tokens x chunks) / same for sub04_vi_k20_full_v2 (stats.json means, 24,000 chunks).
 * 2048-window changes only 11.6% of docs (the rest are <= 2048 tokens), so its p50 equals the full-text p50 (1414).
 * Chunk tokens counted on scorer-normalised text; the cap holds exactly (max = N or below after re-count).
+
+## A/B variants of sub_new_vi_kd100_kc19_full (2026-10-05, not uploaded)
+
+Built without re-running embed/retrieval/rerank, from `out/runs/vi-k100/` (K100 + chunk scores) and the NEW index text
+(memory-mapped `data/index/t256/text.arrow`). Baseline = the uploaded file above. Files in `out/runs/ab-2026-10-05/`.
+
+| variant | change | built | why |
+|---|---|---|---|
+| V1 whole doc_ids_group | relevant_docs side | **no** | the baseline already returns every id of the group (1,200/1,200 queries: relevant_docs == expansion of the K100 primaries); groups are url_norm (http/https/www) groups, max 2 ids, 166 of 119,969 K100 docs have 2 |
+| V2 extra chunk for docs ranked 20..N | relevant_chunks side | **yes**, N = 45 | see below |
+| V3 / V3b K doc 200 / 150 | relevant_docs side | **no** | `vi_k100.candidates.parquet` holds only counts (`n_candidates`, `n_docs`), no doc order or hybrid score beyond rank 100; ranks 101+ need the query embeddings again (re-run) |
+| V4 = V1 + V2 + V3 | | **no** | V1 and V3 not built |
+
+V2 `sub_ab_v2_kd100_kc19_full_xchunk.zip`: `make_submission.py ... --k-doc 100 --k-chunk 19 --chunk-mode full --dedupe-scope doc
+--extra-chunk-docs 50 --extra-zip-budget-bytes 47919923`. Docs ranked 20..45 get 1 chunk each = best answer/body t256 chunk by
+the cached bge-reranker score (scores exist for ranks 1-50 only, so N <= 50). Binary search on written zips: N 35 -> 44,505,816 B,
+43 -> 47,137,420, 47 -> 48,442,791, 45 -> 47,792,584 (chosen), 46 -> 48,115,197.
+45 chunks/query (19 + 26), 31,200 extra chunks, extra chunk tokens (BGE-M3) min 2 / p50 222 / p95 253 / max 385 / mean 211.93.
+JSON 190,797,582 B SHA256 `a0de9f7a4edc83c5ce8ee30d416377429bf1c2bac3c48b10074d4aeecf7ce614`; ZIP 47,792,584 B (45.58 MiB)
+SHA256 `af1864143dff827048c6dfbc16afd664a6758341ec8ab809cde947277bf6290c`. Validator (`--max-zip-mib 45.7`): 1,200 rows,
+54,000 chunks, 0 errors. Diff vs baseline: id and relevant_docs identical for 1,200/1,200 queries (id+relevant_docs prefix
+byte-identical on every line); relevant_chunks: first 19 identical for 1,200/1,200, extras in rank order 20..45 for 1,200/1,200.
+N = 100 (size only, not built: ranks 51-100 have no chunk score, measured with their first answer/body chunk): ZIP 65,855,436 B
+(62.81 MiB), 17,935,513 B over the 45.7 MiB budget.
+Regression: the default builder after this change rebuilds the uploaded JSON byte-identically (SHA256 `50ac7367...37ab`).

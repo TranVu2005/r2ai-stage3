@@ -7,6 +7,11 @@
                   chunk_mode full: 1 chunk per doc = the whole `answer` field if present (and verbatim inside the doc
                                    text), else the whole `body`, else title + description. No length cut.
                   A chunk is attached to the primary doc_id only (never repeated for the other ids of the group).
+  extra chunks    --extra-chunk-docs N (off by default): the docs ranked k_chunk+1..N, which get no chunk above, get 1 extra
+                  chunk each = their best answer/body t256 chunk by cached reranker score (ties: lower chunk_id), verbatim
+                  from the index text (memory-mapped <index>/text.arrow). Appended after the regular chunks, rank order.
+                  N <= 50 (scores are cached for the top-50 docs). --extra-zip-budget-bytes B: largest N in
+                  [k_chunk, --extra-chunk-docs] whose real zip is <= B bytes (binary search on written zips).
   dedupe          per query, in rank order, a later chunk is dropped when its text equals an earlier one after
                   normalisation (NFKC, html.unescape, lowercase, whitespace collapsed), or when
                   LCS_tokens(BGE-M3) / len(shorter) >= 0.8 against an earlier kept chunk.
@@ -178,6 +183,10 @@ def main(argv=None):
                     help='doc: drop duplicates only within the same doc_id; query: across all chunks of the query')
     ap.add_argument('--max-chunk-tokens', type=int, default=0, help='cut longer chunks into verbatim pieces (0 = no limit)')
     ap.add_argument('--target', type=int, default=256)
+    ap.add_argument('--extra-chunk-docs', type=int, default=0,
+                    help='docs ranked k_chunk+1..N get 1 extra chunk (best reranker-scored t256 chunk); 0 = off, N <= 50')
+    ap.add_argument('--extra-zip-budget-bytes', type=int, default=0,
+                    help='with --extra-chunk-docs: largest N in [k_chunk, N] whose real zip is <= B bytes (0 = off)')
     a = ap.parse_args(argv)
     if a.k_chunk is None:
         if not a.zip_budget_mib:
@@ -189,6 +198,13 @@ def main(argv=None):
         ap.error('--chunk-mode window needs --window-tokens N')
     if a.chunk_mode == 'c2' and a.k_chunk > C2_MAX_K:
         ap.error(f'c2 needs cached chunk scores, available for the top {C2_MAX_K} docs only')
+    if a.extra_chunk_docs:
+        if not a.k_chunk <= a.extra_chunk_docs <= min(a.k_doc, C2_MAX_K):
+            ap.error(f'need k_chunk <= --extra-chunk-docs <= min(k_doc, {C2_MAX_K}) (chunk scores cached for the top {C2_MAX_K} docs only)')
+        if a.max_zip_mib or a.zip_budget_mib:
+            ap.error('--extra-chunk-docs keeps k_chunk fixed: use --extra-zip-budget-bytes, not --max-zip-mib / --zip-budget-mib')
+    elif a.extra_zip_budget_bytes:
+        ap.error('--extra-zip-budget-bytes needs --extra-chunk-docs')
     a.out = str(assert_writable(a.out))
     # ZIP, JSON and stats are independent destinations; an existing sidecar
     # may be redirected even when the ZIP path is safe. Check every possible
@@ -210,6 +226,8 @@ def main(argv=None):
             raise ValueError(f'Missing or empty parquet input: {docs_root}')
         if not any(pq.ParquetFile(source).metadata.num_rows for source in document_files):
             raise ValueError(f'Empty document input: {docs_root}')
+    if a.extra_chunk_docs:
+        required += [runs / 'vi_k100_chunk_scores.parquet', chunks_file(a.target, base=chunk_root)]
     if a.chunk_mode == 'window':
         required += [runs / 'vi_k100_chunk_scores.parquet', chunks_file(a.target, base=chunk_root), index_dir(a.target, base=Path(a.index_dir)) / 'dense.npy']
     require_inputs(*required)
@@ -241,6 +259,21 @@ def main(argv=None):
         chunk_text = {c: x for c, x in zip(t['chunk_id'], t['text']) if c in want}
     else:
         full, full_src, off = load_full_texts(need, docs_root)
+    extra_text: dict[tuple[int, int], str] = {}                        # (query, doc) -> extra chunk text
+    if a.extra_chunk_docs:
+        from r2ai.retrieve.exact import take_texts, text_mmap
+        rank = {(q, d): k for q, v in top.items() for k, d in enumerate(v, 1)}
+        bestx: dict[tuple[int, int], tuple[float, int]] = {}
+        cs = pq.read_table(runs / 'vi_k100_chunk_scores.parquet', columns=['query_id', 'doc_id', 'chunk_id', 'score'])
+        for q, d, c, sc in zip(*(cs[k].to_pylist() for k in ('query_id', 'doc_id', 'chunk_id', 'score'))):
+            if a.k_chunk < rank.get((q, d), 0) <= a.extra_chunk_docs:
+                if (q, d) not in bestx or (-sc, c) < (-bestx[(q, d)][0], bestx[(q, d)][1]):
+                    bestx[(q, d)] = (sc, c)
+        del cs
+        col, _ = text_mmap(chunks_file(a.target, base=chunk_root), assert_writable(index_dir(a.target, base=Path(a.index_dir)) / 'text.arrow'))
+        keys = sorted(bestx)
+        extra_text = dict(zip(keys, take_texts(col, [bestx[k][1] for k in keys])))
+        del col
     tok = Tokenizer()
     win = None
     if a.chunk_mode == 'window':
@@ -260,8 +293,9 @@ def main(argv=None):
             rer.setdefault((r['query_id'], r['doc_id']), {})[r['chunk_id']] = r['score']
         win = Windows(a.window_tokens, tok, full, off, rer, qd, a.target, chunks_dir=chunk_root, index_base=Path(a.index_dir))
 
-    def build(kc: int):
-        out, n_docs, n_chunks, lens = [], [], [], []
+    def build(kc: int, nx: int = 0):
+        out, n_docs, n_chunks, lens, xlens = [], [], [], [], []
+        xst = {'extra_chunk_docs': nx, 'extra_chunks': 0, 'extra_docs_without_score': 0}
         st = {'chunks_before_dedupe': 0, 'dropped_exact': 0, 'dropped_near': 0, 'chunk_docs_without_chunk': 0, 'chunk_docs': 0,
               'queries_without_any_chunk': 0, 'docs_missing_text': 0, 'chunks_cut_by_cap': 0, 'pieces_from_cut': 0,
               'window_docs_cut': 0, 'window_docs_fallback_dense': 0}
@@ -312,6 +346,17 @@ def main(argv=None):
                         for i, kk in zip(idx, k):
                             keep[i] = kk
             chunks = [{'doc_id': int(d), 'chunk_text': t} for (d, t), k in zip(cand, keep) if k]
+            xs = []
+            for d in top[q][kc:nx]:                                     # extra: 1 chunk per doc, after the regular ones
+                t = extra_text.get((q, d), '')
+                if t.strip():
+                    xs.append({'doc_id': int(d), 'chunk_text': t})
+                else:
+                    xst['extra_docs_without_score'] += 1
+            xst['extra_chunks'] += len(xs)
+            if xs:
+                xlens += count_tokens(tok, [c['chunk_text'] for c in xs])
+            chunks += xs
             st['chunks_before_dedupe'] += len(cand)
             st['dropped_exact'] += ne
             st['dropped_near'] += nn
@@ -321,8 +366,12 @@ def main(argv=None):
             out.append({'id': q, 'relevant_docs': docs, 'relevant_chunks': chunks})
             n_docs.append(len(docs))
             n_chunks.append(len(chunks))
-            lens += [wlen[(c['doc_id'], c['chunk_text'])] for c in chunks] if a.chunk_mode == 'window' else \
-                count_tokens(tok, [c['chunk_text'] for c in chunks])
+            main_chunks = chunks[:len(chunks) - len(xs)]
+            lens += [wlen[(c['doc_id'], c['chunk_text'])] for c in main_chunks] if a.chunk_mode == 'window' else \
+                count_tokens(tok, [c['chunk_text'] for c in main_chunks])
+        lens += xlens
+        if nx:
+            st |= xst | {'extra_chunk_tokens_bge_m3': dist(xlens) if xlens else None}
         return out, n_docs, n_chunks, lens, st
 
     kc, tried = a.k_chunk, []
@@ -347,17 +396,38 @@ def main(argv=None):
                 hi_k = mid - 1
         kc = max(lo_k, 1)
         a.max_zip_mib = a.zip_budget_mib                                # the real zip is checked (and shrunk) below
-    while True:
-        out, n_docs, n_chunks, lens, st = build(kc)
-        zp = assert_writable(a.out.replace('{kc}', str(kc)))
+
+    def write(k: int, nx: int):
+        res = build(k, nx)
+        zp = assert_writable(a.out.replace('{kc}', str(k)))
         zp.parent.mkdir(parents=True, exist_ok=True)
         js = assert_writable(zp.with_suffix('.json'))
-        write_submission(out, js)
+        write_submission(res[0], js)
         with zipfile.ZipFile(zp, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
             z.write(js, js.name)
+        return res, zp, js
+
+    nx = a.extra_chunk_docs
+    if a.extra_chunk_docs and a.extra_zip_budget_bytes:
+        lo_n, hi_n = kc, a.extra_chunk_docs                             # largest n in [k_chunk, N] with real zip <= B
+        while lo_n < hi_n:
+            mid = (lo_n + hi_n + 1) // 2
+            _, zp, _ = write(kc, mid)
+            size = zp.stat().st_size
+            tried.append({'extra_chunk_docs': mid, 'zip_bytes': size})
+            print(f'extra search n={mid}: zip {size} bytes', flush=True)
+            if size <= a.extra_zip_budget_bytes:
+                lo_n = mid
+            else:
+                hi_n = mid - 1
+        nx = lo_n
+    while True:
+        (out, n_docs, n_chunks, lens, st), zp, js = write(kc, nx)
         mib = zp.stat().st_size / 2**20
-        tried.append({'k_chunk': kc, 'zip_mib': round(mib, 2)})
+        tried.append({'k_chunk': kc, 'zip_mib': round(mib, 2)} | ({'extra_chunk_docs': nx, 'zip_bytes': zp.stat().st_size} if nx else {}))
         print(f'k_chunk={kc}: zip {mib:.2f} MiB', flush=True)
+        if a.extra_zip_budget_bytes and zp.stat().st_size > a.extra_zip_budget_bytes:
+            raise ValueError(f'zip {zp.stat().st_size} bytes > --extra-zip-budget-bytes {a.extra_zip_budget_bytes} even without extra chunks')
         if not a.max_zip_mib or mib <= a.max_zip_mib or kc <= 1:
             break
         js.unlink()

@@ -291,6 +291,49 @@ All ZIPs: one entry, no directory, <= 104,857,600 B (D50 97.04 MiB). Validator `
 Regression after the builder fix: baseline JSON SHA256 `50ac7367...37ab` and G `eeff96dd...9287` rebuild byte-identically (`regress/`, `regress_G/`).
 relevant_docs order differs from the control in every query (by design: ranks 1..100 reordered); the doc set is identical.
 
+## Pha 3: rerank tier 1 = 200 docs, top K by reranker -> R150 / R120 / R180 (2026-10-05, not uploaded)
+
+Agent rerank200; report `out/runs/rerank200/REPORT.md`. Retrieval `run_retrieval_k100 --candidates exact --tier1-docs 200
+--tier1-base 100 --tier2-docs 0 --chunk-score-docs 0 --pair-scores` -> `out/runs/rerank200/full/` (200 docs/query, all ordered
+by the reranker). `--tier1-base 100` (new, off by default) keeps the docs, chunks and the two reranker calls of the tier-1 = 100
+run and scores the pairs of docs 101..200 in a third call. A plain `--tier1-docs 200` trial (20 queries, seed 42) failed the
+gate: 82/2,000 old doc scores moved (max 0.0156), order changed in 2/20 queries (fp16 batch effect, see Pha 2). Nesting leaves
+145 chunks (53/1,200 queries) unscored that a plain run would add to docs met past the top-200 chunks; the 200-doc set is the same.
+
+* Trial (nested, `--sample 20`): 3.23 s/query, peak RSS 5.166 GiB, VRAM torch 1,402 MiB / nvidia-smi 2,687 MiB; gate pass.
+* Full 1,200 queries: wall 4,192 s (in-process 4,187 s), **3.212 s/query** (p95 4.62), candidates dense 84.2 s / sparse 169.5 s /
+  union 41.0 s, peak RSS 6.283 GiB, peak private 7.312 GiB, VRAM torch 1,452 MiB / nvidia-smi peak 2,933 MiB (whole GPU).
+* Gate (`deep_gate deep --old out/runs/deep-rerank-2026-10-05/full --tol 0 --pairs`): 119,969 old tier-1 (query, doc) scores and
+  188,704 (query, doc, chunk) scores |delta| = 0, relative order 1,200/1,200, 0 missing.
+
+Build: D50 chunk config with the new order, `--k-doc 100 --k-doc-total K --doc-ranking out/runs/rerank200/full/vi_k100.parquet
+--runs-dir out/runs/rerank200/full --k-chunk 50 --chunk-mode full --dedupe-scope doc --docs-dir data/docs_vi --chunks-dir data/chunks`
+(`out/runs/rerank200/build_r.sh`; checks `compare_r.py` -> `compare_r.json`, control = D50 rebuilt from its caches).
+
+| file | primary docs/query | k_chunk | JSON B | JSON SHA256 | ZIP B | ZIP SHA256 | validator | vs D50 (per query) |
+|---|---|---|---|---|---|---|---|---|
+| **R150** `R150/sub_r200_kd150_full50.zip` | 150 | 50 | 403,369,945 | `f8f304fb1ff9acf57339e5660e0b427bc4613600e8fccb897d89d954ebe46731` | 101,642,878 (96.93 MiB) | `ba7eea1a1fce0fb6c88c239be59b3548517cb23f5a24128294fd5c93d6606060` | 1,200 / 60,000 / 0 errors | new docs in top 150 mean 24.67 / p50 26 / max 42; full-chunk docs changed mean 9.13 / p50 9 / max 26 |
+| R120 `R120/sub_r200_kd120_full50.zip` | 120 | 50 | 403,090,890 | `2e607d049996ef31152034d73339a4cdd3e8322a987096a78a63708e507a3d1a` | 101,475,556 (96.77 MiB) | `6518cc12f3eefd363df3c513ee4f2e80a788f72d1496ac934fd6411c28985426` | 0 errors | new docs 15.66 / p50 17; D50 docs dropped 45.03; chunk docs as R150 |
+| R180 `R180/sub_r200_kd180_full50.zip` | 180 | 50 | 403,641,105 | `9745b242ed70ab8e8dc75a96078c2805bffdbbf0041b80764eddd1a8faaf005e` | 101,799,807 (97.08 MiB) | `db0e8aec98254fd055ee7db0e92624c20dc5184b7662c1ba08dd9eb15f7c8db0` | 0 errors | new docs 36.52 / p50 38; D50 docs dropped 8.02; chunk docs as R150 |
+
+All ZIPs <= 104,857,600 B with k_chunk 50 (no reduction); R180 is 0.04 MiB above the accepted 97.04 MiB mark. Of the 9.13
+changed full-chunk docs per query, 3.17 are docs outside D50's 150, the rest are D50 ranks 101..150 (hybrid order there)
+lifted by the reranker. Scores: not measured. Suggested order: R150 -> R180 if R150 > D50, else R120.
+
+## H1: duplicate document clusters -> H1-expand / H1-dedup (2026-10-05, not uploaded)
+
+Agent H1; report `out/runs/H1/REPORT.md`, code `src/r2ai/dupes/` (commit `8fdc426`). Summary of its measured numbers:
+623,852 ok docs -> 21,074 clusters (exact on metric-normalised body + MinHash LSH 128 perm, 5-word shingles, verified
+Jaccard >= 0.8, seed 42), 47,086 docs = 7.55 % of ok docs (26,012 redundant, 4.17 %); 83 % of clusters span several domains;
+401 boilerplate clusters (2,429 docs) excluded from the variants. On D50 (content scope, per query): slots in the 150 docs taken
+by a same-cluster doc mean 4.06 / p50 4 / p95 9 (1,144/1,200 queries); same-cluster full chunks in the top 50 mean 1.34, of
+which identical text 0.45; same-cluster docs outside the top 150 mean 1.66. Identity mode rebuilds D50 byte-identically.
+* H1-expand `out/runs/H1/expand/sub_h1_expand.zip`: D50 + 2,000 ids of same-cluster docs appended (809 queries), relevant_chunks
+  byte-identical to D50; ZIP 101,761,288 B (97.05 MiB), SHA256 `565b96add077b6458ae74d06c282db056a5a7179435bef99ecda5852e9ded9e9`; validator 0 errors.
+* H1-dedup `out/runs/H1/dedup/sub_h1_dedup.zip`: one doc per cluster, refilled to 150; 1,144 queries changed; ZIP 103,560,765 B
+  (98.76 MiB, above the accepted 97.04 MiB mark), SHA256 `08d111ce1a30f273eb28c47d56a89ecf3ce37efec83f0f84ac2100af84f46c57`; validator 0 errors.
+* Not uploaded, not scored. H1 suggests expand first (sign of Doc R change tells whether gold holds copies), dedup only if Doc R does not rise.
+
 ## Best configuration and replay (2026-10-05)
 
 `configs/submission-best.yaml` = D50. Retrieval `python scripts/run_best_retrieval.py` (candidates, then deep rerank;
@@ -302,4 +345,5 @@ JSON 405,340,395 B, SHA256 `2f10b78a...6c36544` = uploaded D50 (match), builder 
 
 ## Pending uploads
 
-None. D32 / D40 (`out/runs/deep-rerank-2026-10-05/`) and G stay unuploaded (D50 > K50 > K40 > C).
+Candidates, none uploaded yet (scores not measured): R150 (`out/runs/rerank200/R150/`, first), then R180 if R150 > D50 else R120;
+H1-expand (`out/runs/H1/expand/`), then H1-dedup only if Doc R does not rise. D32 / D40 and G stay unuploaded (D50 > K50 > K40 > C).

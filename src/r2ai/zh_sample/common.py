@@ -64,12 +64,13 @@ def exclusive(name: str):
     path = guard_owned(RUN / f'{name}.lock')
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open('a+b') as f:
-        f.seek(0)
-        if not f.read(1):
-            f.write(b'0')
-            f.flush()
-        f.seek(0)
         try:
+            # A competing Windows byte lock forbids even reading byte zero.
+            f.seek(0, os.SEEK_END)
+            if f.tell() == 0:
+                f.write(b'0')
+                f.flush()
+            f.seek(0)
             msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
         except OSError as e:
             raise RuntimeError(f'{name} already running') from e

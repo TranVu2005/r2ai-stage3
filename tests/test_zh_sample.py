@@ -31,6 +31,18 @@ def test_output_guard_rejects_vi_and_old():
                 guard_owned(p)
 
 
+def test_native_exclusive_reports_contention_and_releases(tmp_path, monkeypatch):
+    import r2ai.zh_sample.common as common
+    monkeypatch.setattr(common, 'RUN', tmp_path)
+    monkeypatch.setattr(common, 'OWNED', (*common.OWNED, tmp_path))
+    with common.exclusive('extract'):
+        with pytest.raises(RuntimeError, match='extract already running'):
+            with common.exclusive('extract'):
+                pass
+    with common.exclusive('extract'):
+        pass
+
+
 @pytest.mark.parametrize('encoding', ['gbk', 'gb2312', 'gb18030'])
 def test_zh_charset(encoding):
     from r2ai.zh_sample.crawl import decode_zh

@@ -103,9 +103,12 @@ def report():
     chunk_report = read_json(CHUNKS / 'chunk_report.json', {})
     qa_chunk_report = read_json(RUN / 'qa_chunks/chunk_report.json', {})
     qa_summary = read_json(RUN / 'qa_summary.json', {})
+    qa_final = read_json(RUN / 'qa_final_summary.json', {})
     qa_recheck = read_json(RUN / 'qa_recheck.json', {})
     qa_review = read_json(RUN / 'qa_review_notes.json', {})
     baseline_gate = read_json(RUN / 'd50_replay/stats.json', {})
+    baseline_current = read_json(RUN / 'd50_current_code_gate.json', {})
+    overlap_gate = read_json(RUN / 'zh_vi_doc_id_overlap.json', {})
     model_snapshots = read_json(RUN / 'model_snapshots.json', {})
     noop_parity = read_json(RUN / 'noop_vi_parity.json', {})
     embed_rows = []
@@ -122,6 +125,8 @@ def report():
     variant = read_json(RUN / 'Z/stats.json', {})
     pytest_log = (RUN / 'pytest_full.log').read_text('utf-8', errors='replace') if (RUN / 'pytest_full.log').exists() else 'chưa đo'
     test_summary = next((line for line in reversed(pytest_log.splitlines()) if 'passed' in line or 'failed' in line), 'đang chạy / chưa đo')
+    slow_log = (RUN / 'pytest_slow.log').read_text('utf-8', errors='replace') if (RUN / 'pytest_slow.log').exists() else ''
+    slow_summary = next((line for line in reversed(slow_log.splitlines()) if 'passed' in line or 'failed' in line), 'chưa đo')
     eligible = [r for r in records if r['yield_proxy'].get('hits_per_1k_extracted_docs') is not None and not r['excluded']]
     eligible.sort(key=lambda r: -r['yield_proxy']['hits_per_1k_extracted_docs'])
     order = ', '.join(r['domain'] for r in eligible) if eligible else 'chưa đo yield; chưa chốt thứ tự crawl toàn bộ'
@@ -150,10 +155,13 @@ def report():
         'QA snapshot kiểm cấu trúc (input cố định tại qa_chunk_input; khác QA cập nhật sau full extract):' if qa_summary else 'QA kiểm cấu trúc: chưa đo.',
         '', *(qa_table if qa_summary else []), '',
         f'QA sửa extractor, đối chiếu lại đúng raw của snapshot: `{json.dumps(qa_recheck.get("summary", {}), ensure_ascii=False)}`' if qa_recheck else 'QA đối chiếu raw sau sửa extractor: chưa đo.',
+        f'QA bundle cuối, lấy từ qa/<domain>.json: `{json.dumps(qa_final, ensure_ascii=False)}`' if qa_final else 'QA bundle cuối: chưa tổng hợp; xem qa/<domain>.json.',
         'Extractor riêng zh bỏ audio/video fallback và chọn .detailc/#endText cho bài cnkang; version hash gồm cả quy tắc cleanup để re-extract checkpoint cũ. Answer lặp/boilerplate có sẵn trong nội dung nguồn không được dedupe.',
         f'Review nội dung/giới hạn QA: `{json.dumps(qa_review, ensure_ascii=False)}`' if qa_review else 'Review nội dung QA: chưa đo.',
         f'Chunk smoke trên snapshot QA (khác bundle index đầy đủ): `{json.dumps(qa_chunk_report, ensure_ascii=False)}`' if qa_chunk_report else 'Chunk smoke QA: chưa đo.',
         f'D50 replay gate: `{json.dumps(baseline_gate, ensure_ascii=False)}`' if baseline_gate else 'D50 replay gate: xem d50_replay.log; stats.json chưa ghi.',
+        f'D50 pin replay trên code mới: `{json.dumps(baseline_current, ensure_ascii=False)}`' if baseline_current else 'D50 pin replay trên code mới: chưa đo.',
+        f'Đối chiếu ID zh/vi trước index: `{json.dumps(overlap_gate, ensure_ascii=False)}`' if overlap_gate else 'ID zh/vi overlap: chưa đo.',
         f'Đối chiếu đường dựng Z khi không chọn zh (không phải kết quả Z): `{json.dumps(noop_parity, ensure_ascii=False)}`' if noop_parity else 'Z no-op đối chiếu D50: chưa đo.',
         f'Chunk report: `{json.dumps(chunk_report, ensure_ascii=False)}`',
         'Chunker hiện có giữ nguyên thuật toán; mọi chunk là substring doc_text. Theo dõi dropped_whitespace_free_blobs cho đoạn CJK dài, không tự đổi chunker.',
@@ -162,7 +170,7 @@ def report():
         '', *(branch_table if measured else []), '',
         'Yield là PROXY: số cặp query-doc zh trong top 150 khi trộn logits reranker với đúng tập doc D50, trên 1.000 doc extract của domain (gồm thin). Không có nhãn. Membership so logits trực tiếp; giữ thứ tự tương đối vi của D50; fp16 batch padding giữa cache vi và lượt zh có thể lệch ULP.',
         f'Z: `{json.dumps(variant, ensure_ascii=False)}`' if variant else 'Z: chưa đo; chưa có artifact hoàn tất. LB chưa đo, chưa kết luận zh có lợi.',
-        f'Full suite: {test_summary}. Log: pytest_full.log. Slow suite: xem pytest_slow.log nếu có.',
+        f'Full suite: {test_summary}. Slow suite: {slow_summary}. Log: pytest_full.log, pytest_slow.log.',
         f'Thứ tự crawl toàn bộ đề xuất theo proxy giảm dần: {order}.',
         'Mốc cắt tỉa đề xuất: 27/10 chốt các domain/nhánh URL có proxy đo được; 28/10 23:59 ngừng nhận crawl mới; 29–30/10 dành cho embed/rerank/build/validator, ZIP thực ≤104.857.600 byte; 31/10 public do người dùng quyết định nộp. Đây là lịch đề xuất, không phải thời gian pipeline đã đo.',
         '', 'Resume: `.venv/Scripts/python.exe -X utf8 -B -m r2ai.zh_sample.pipeline`; trạng thái riêng pipeline_state.json. Ctrl+C một lần để flush; chạy lại cùng lệnh. Không đổi raw root hoặc input hash khi đã có index checkpoint.',

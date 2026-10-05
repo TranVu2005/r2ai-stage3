@@ -8,7 +8,7 @@ import sqlite3
 import time
 from collections import defaultdict
 from vicrawl.extractors import generic_extract
-from vicrawl.extractors.base import Doc, parse_html, blocks, first_text
+from vicrawl.extractors.base import Doc, parse_html, blocks, first_text, ALWAYS_DROP
 from vicrawl.shards import list_shards, read_shard
 
 # Selectors are opt-in and inspected against smoke HTML before the full sample.
@@ -22,6 +22,14 @@ SELECTORS = {
     'familydoctor.com.cn': (['.question', '.question-content', '.ask-content', '.q-cont'],
                    ['.answer', '.answer-content', '.answer_text', '.a-cont']),
 }
+ARTICLE_SELECTORS = {'cnkang.com': ['.detailc', '#endText']}
+DROP_TAGS = (*ALWAYS_DROP, 'footer')
+
+
+def extractor_version():
+    rules = {'qa': SELECTORS, 'article': ARTICLE_SELECTORS, 'drop_tags': DROP_TAGS,
+             'question_only': True}
+    return hashlib.sha256(json.dumps(rules, sort_keys=True).encode()).hexdigest()
 
 
 def selected_blocks(tree, selectors):
@@ -37,15 +45,17 @@ def extract_zh(raw: str, domain: str) -> Doc:
     if domain not in SELECTORS:
         return generic
     tree = parse_html(raw)
-    for node in tree.xpath('//script|//style|//nav|//footer|//aside'):
-        node.drop_tree()
+    for node in tree.xpath('|'.join('//' + tag for tag in DROP_TAGS)):
+        if node.getparent() is not None:
+            node.drop_tree()
     q, a = (selected_blocks(tree, selectors) for selectors in SELECTORS[domain])
-    if not a:
+    article = selected_blocks(tree, ARTICLE_SELECTORS.get(domain, [])) if not q and not a else []
+    if not q and not a and not article:
         return generic
-    paras = q + a
+    paras = q + a if q or a else article
     return Doc(title=first_text(tree, ['h1']) or generic.title, description=generic.description,
                question='\n\n'.join(q), answer='\n\n'.join(a), paragraphs=paras,
-               extractor='zh_' + domain)
+               extractor='zh_' + domain + ('_article' if article else ''))
 
 
 def extract_all():
@@ -61,7 +71,7 @@ def extract_all():
         db.execute('CREATE TABLE IF NOT EXISTS shards(path TEXT PRIMARY KEY, output TEXT)')
         if 'version' not in {r[1] for r in db.execute('PRAGMA table_info(shards)')}:
             db.execute('ALTER TABLE shards ADD COLUMN version TEXT')
-        version = hashlib.sha256(json.dumps(SELECTORS, sort_keys=True).encode()).hexdigest()
+        version = extractor_version()
         done = {r[0] for r in db.execute('SELECT path FROM shards WHERE version=?', (version,))}
         tok = default_tokenizer()
         try:

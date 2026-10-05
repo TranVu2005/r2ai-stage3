@@ -65,6 +65,25 @@ def test_120ask_smoke_selectors_exclude_doctor_metadata():
     assert '我要投诉' not in doc.body
 
 
+def test_120ask_audio_only_is_not_an_answer():
+    from r2ai.zh_sample.extract import extract_zh
+    raw = '<h1>宝宝舌头黑斑</h1><div class="b_askcont">宝宝舌头有黑斑怎么办？</div><div class="b_anscont_cont"><audio controls><source src="answer.mp3">您的浏览器不支持 audio 元素。</source></audio></div>'
+    doc = extract_zh(raw, '120ask.com')
+    assert doc.question == '宝宝舌头有黑斑怎么办？'
+    assert doc.answer == ''
+    assert 'audio' not in doc.body
+
+
+@pytest.mark.parametrize('container', ['<div id="endText">{text}</div>', '<div class="detailc">{text}</div>'])
+def test_cnkang_article_ignores_outer_menu_and_previous_links(container):
+    from r2ai.zh_sample.extract import extract_zh
+    article = '患者需要及时检查病因，再根据检查结果选择治疗。' * 20
+    raw = '<h1>疾病治疗</h1><table><tr><td>导航菜单 男性 健身 休闲</td></tr></table>' + container.format(text='<p>'+article+'</p>') + '<div>上一篇 下一篇 免费咨询</div>'
+    doc = extract_zh(raw, 'cnkang.com')
+    assert doc.body == article
+    assert doc.answer == ''
+
+
 def test_merge_uses_direct_scores_and_stable_vi_ties():
     from r2ai.zh_sample.evaluate import merge_scores, yield_proxy
     merged = merge_scores([(1, 2.0), (2, 1.0)], [(3, 1.5), (4, 1.0)], k=3)

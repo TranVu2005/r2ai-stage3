@@ -103,6 +103,8 @@ def report():
     chunk_report = read_json(CHUNKS / 'chunk_report.json', {})
     qa_chunk_report = read_json(RUN / 'qa_chunks/chunk_report.json', {})
     qa_summary = read_json(RUN / 'qa_summary.json', {})
+    qa_recheck = read_json(RUN / 'qa_recheck.json', {})
+    qa_review = read_json(RUN / 'qa_review_notes.json', {})
     baseline_gate = read_json(RUN / 'd50_replay/stats.json', {})
     model_snapshots = read_json(RUN / 'model_snapshots.json', {})
     noop_parity = read_json(RUN / 'noop_vi_parity.json', {})
@@ -147,6 +149,9 @@ def report():
         'Extract ok dùng ngưỡng body ≥200 ký tự; thin gồm cả câu trả lời ngắn có nội dung thật. Tỷ lệ extract/answer chia trên doc đã extract, không chia trên URL bị robots chặn hoặc fetch lỗi.',
         'QA snapshot kiểm cấu trúc (input cố định tại qa_chunk_input; khác QA cập nhật sau full extract):' if qa_summary else 'QA kiểm cấu trúc: chưa đo.',
         '', *(qa_table if qa_summary else []), '',
+        f'QA sửa extractor, đối chiếu lại đúng raw của snapshot: `{json.dumps(qa_recheck.get("summary", {}), ensure_ascii=False)}`' if qa_recheck else 'QA đối chiếu raw sau sửa extractor: chưa đo.',
+        'Extractor riêng zh bỏ audio/video fallback và chọn .detailc/#endText cho bài cnkang; version hash gồm cả quy tắc cleanup để re-extract checkpoint cũ. Answer lặp/boilerplate có sẵn trong nội dung nguồn không được dedupe.',
+        f'Review nội dung/giới hạn QA: `{json.dumps(qa_review, ensure_ascii=False)}`' if qa_review else 'Review nội dung QA: chưa đo.',
         f'Chunk smoke trên snapshot QA (khác bundle index đầy đủ): `{json.dumps(qa_chunk_report, ensure_ascii=False)}`' if qa_chunk_report else 'Chunk smoke QA: chưa đo.',
         f'D50 replay gate: `{json.dumps(baseline_gate, ensure_ascii=False)}`' if baseline_gate else 'D50 replay gate: xem d50_replay.log; stats.json chưa ghi.',
         f'Đối chiếu đường dựng Z khi không chọn zh (không phải kết quả Z): `{json.dumps(noop_parity, ensure_ascii=False)}`' if noop_parity else 'Z no-op đối chiếu D50: chưa đo.',

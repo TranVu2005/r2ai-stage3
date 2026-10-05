@@ -1,0 +1,43 @@
+# Best leaderboard configuration (D50, Final 0.2107, 2026-10-05; score provided by the user).
+# Read by r2ai.submit.best (scripts/run_best_retrieval.py, scripts/build_best_submission.py); code defaults are unchanged.
+# Relative paths are relative to the repo root.
+run_id: best-d50
+leaderboard:
+  file: out/runs/deep-rerank-2026-10-05/D50/sub_deepD50_kd150_full50.zip
+  final: 0.2107
+  doc_f2: 0.2283
+  chunk_f2: 0.1932
+  source: provided by the user 2026-10-05
+queries: D:/GitHub/r2ai-stage3-old/data/raw/query.parquet
+
+retrieval:
+  # index: data/index/t256 (BGE-M3 dense + sparse, 3,909,586 chunks / 623,805 docs), chunks data/chunks/chunks_t256.parquet
+  target: 256
+  seed: 42                      # fixed inside run_retrieval_k100
+  dense_weight: 0.7             # hybrid = 0.7 minmax(dense) + 0.3 minmax(sparse) over dense top-200 U sparse top-200
+  aggregate: max
+  reranker: BAAI/bge-reranker-v2-m3   # fp16, max_len 512, batch 32 (r2ai.index.bge_m3.Reranker defaults)
+  reranker_snapshot: 953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e
+  # step 1: full hybrid candidate ranking (no rerank); gives the doc order after the top 100
+  candidates:
+    out_dir: out/runs/best/cand
+    args: [--candidates, exact, --candidates-only]
+  # step 2: deep rerank, tier 1 = 100 docs reranked together, tier 2 = next 50 by hybrid; resumable
+  rerank:
+    out_dir: out/runs/best/rerank
+    args: [--candidates, exact, --tier1-docs, '100', --tier2-docs, '50', --chunk-score-docs, '0', --pair-scores]
+
+submission:
+  # caches the uploaded D50 was built from (replay); after a fresh retrieval pass --from-retrieval
+  runs_dir: out/runs/deep-rerank-2026-10-05/full
+  doc_ranking: out/runs/ab-2026-10-05b/cand/vi_cand.docs.parquet
+  chunks_dir: data/chunks
+  docs_dir: data/docs_vi
+  out: out/runs/best/submission/sub_best_kd150_full50.zip
+  # K doc 150 primary docs (ranks 1..100 deep-rerank order, 101..150 hybrid order), each expanded to its whole
+  # doc_ids_group; full chunks (whole answer if inside the body, else whole body; no cut) for the top 50 docs.
+  args: [--k-doc, '100', --k-doc-total, '150', --k-chunk, '50', --chunk-mode, full, --dedupe-scope, doc]
+  max_zip_bytes: 104857600      # 100 MiB ceiling; LB accepted 97.04 MiB, 110 MiB never finished uploading
+  expected_json_sha256: 2f10b78ac17f4eafdd5fe1b0b207260b062f17b29f4fcc3ee1a4b364b3c36544
+  expected_json_bytes: 405340395
+  uploaded_zip_sha256: 0ab1983d41100a6d429bd3b1938034d7534020ff6ea9822955f874e4e2fde127

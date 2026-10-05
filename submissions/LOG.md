@@ -8,19 +8,35 @@ The pipeline never uploads; the user uploads by hand and reports the scores. Lea
 | upload date | file | ZIP SHA256 | JSON SHA256 | config | Final | Doc F2 | Doc P | Doc R | Chunk F2 | Chunk P | Chunk R | source |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 2026-10-03 | sub02 / sub03 / sub04 / sub05 / **sub06** / sub07 / sub08 (OLD index, 123,874 docs) | see sections below | | see sections below | 0.0158 / 0.0273 / 0.0551 / 0.0623 / **0.0626** / 0.0545 / 0.0507 | | | sub06: 0.088 | | | | `Downloads/SCOREBOARD.md` (user, 2026-10-03); per-metric columns other than sub06 Doc R not copied here |
-| 2026-10-05 | `out/runs/new-full/sub_new_vi_kd100_kc19_full.zip` (39,237,992 B) | `1d171722cd27636a901684778fa0120bf28baab126284d00fc9449820deb567a` | `50ac7367c671104c6ae3f0d686fe7cc40cf69478e2b0fc7d06674ace25f937ab` (156,211,418 B) | sub06 config on the NEW index (3,909,586 t256 chunks / 623,805 docs, K100 `--candidates exact`): k_doc 100 (whole doc_ids_group), k_chunk 19, chunk mode full, dedupe scope doc | **0.1748** (best so far) | 0.2214 | 0.174 | 0.2897 | 0.1283 | 0.3025 | 0.1249 | provided by the user 2026-10-05 |
+| 2026-10-05 | `out/runs/new-full/sub_new_vi_kd100_kc19_full.zip` (39,237,992 B) | `1d171722cd27636a901684778fa0120bf28baab126284d00fc9449820deb567a` | `50ac7367c671104c6ae3f0d686fe7cc40cf69478e2b0fc7d06674ace25f937ab` (156,211,418 B) | sub06 config on the NEW index (3,909,586 t256 chunks / 623,805 docs, K100 `--candidates exact`): k_doc 100 (whole doc_ids_group), k_chunk 19, chunk mode full, dedupe scope doc | 0.1748 | 0.2214 | 0.174 | 0.2897 | 0.1283 | 0.3025 | 0.1249 | provided by the user 2026-10-05 |
 | 2026-10-05 | V2 `out/runs/ab-2026-10-05/v2/sub_ab_v2_kd100_kc19_full_xchunk.zip` (47,792,584 B) | `af1864143dff827048c6dfbc16afd664a6758341ec8ab809cde947277bf6290c` | `a0de9f7a4edc83c5ce8ee30d416377429bf1c2bac3c48b10074d4aeecf7ce614` (190,797,582 B) | baseline + 1 extra t256 chunk (best reranker score) for docs ranked 20..45; relevant_docs unchanged | 0.1728 | 0.2214 | 0.174 | 0.2897 | 0.1243 | 0.1507 | 0.1411 | provided by the user 2026-10-05 |
 
-| 2026-10-05 | C `out/runs/ab-2026-10-05b/C/sub_abC_kd100_fullk_probe63mib.zip` (65,062,696 B = 62.05 MiB) | `3d1b045f00245fe5421a1fbb363ae0656d6ea3f5066e8f341d2b23dcbf676bdf` | `e588e7bf49c7f64147d8c65505949dd685fd1537373915c405f44ea638498d17` (260,260,224 B) | baseline + full chunks for docs ranked 20..32 (k_chunk 32); relevant_docs unchanged | **0.1929** (best so far) | 0.2214 | 0.174 | 0.2897 | 0.1644 | 0.2669 | 0.1713 | provided by the user 2026-10-05 |
+| 2026-10-05 | C `out/runs/ab-2026-10-05b/C/sub_abC_kd100_fullk_probe63mib.zip` (65,062,696 B = 62.05 MiB) | `3d1b045f00245fe5421a1fbb363ae0656d6ea3f5066e8f341d2b23dcbf676bdf` | `e588e7bf49c7f64147d8c65505949dd685fd1537373915c405f44ea638498d17` (260,260,224 B) | baseline + full chunks for docs ranked 20..32 (k_chunk 32); relevant_docs unchanged | 0.1929 | 0.2214 | 0.174 | 0.2897 | 0.1644 | 0.2669 | 0.1713 | provided by the user 2026-10-05 |
 | 2026-10-05 | V3 `out/runs/ab-2026-10-05b/V3/sub_abV3_kd200_kc19_full.zip` (39,775,610 B) | `fa73bf9fb387e056fa2220b935cca94182f28c82fb617c97e21530cc2d96ead8` | `984e1cce0f666ff2c9785e4937d069645988aff8374fb10bbb12b3e91afcd844` (157,121,008 B) | baseline + relevant_docs to 200 primary docs (ranks 101+ in hybrid order); chunks unchanged | 0.1758 | 0.2233 | 0.1209 | 0.36 | 0.1283 | 0.3025 | 0.1249 | provided by the user 2026-10-05 |
 | 2026-10-05 | V3b `out/runs/ab-2026-10-05b/V3b/sub_abV3b_kd150_kc19_full.zip` (39,519,425 B) | `fe0f217a2343b3b7985e93cabc030307cb00a7290810daaf4eebd1a00116ec1c` | `42a641204d1ed986e89e2a376a400963ab7c440baec57b5d92aadd28ebb6ef97` (156,679,502 B) | baseline + relevant_docs to 150 primary docs (ranks 101+ in hybrid order); chunks unchanged | 0.1783 | 0.2283 | 0.1422 | 0.3359 | 0.1283 | 0.3025 | 0.1249 | provided by the user 2026-10-05 |
+| 2026-10-05 | K40 `out/runs/ab-2026-10-05c/K40/sub_abK40_kd150_full40.zip` (81,164,810 B) | `7e64874b158d89bc93a1e29119920b546105dad1088c8ae6e6c18c572da3f65a` | `79bdcf65b29716dda743555019f6564863f3905dddd28a6eab35e99626b0a900` (323,820,612 B) | G (V3b docs K150 + C chunks) + full chunks for ranks 33..40 (k_chunk 40) | 0.2035 | 0.2283 | 0.1422 | 0.3359 | 0.1786 | 0.2485 | 0.1938 | provided by the user 2026-10-05 |
+| 2026-10-05 | K50 `out/runs/ab-2026-10-05c/K50/sub_abK50_kd150_full50.zip` (100,135,221 B = 95.50 MiB) | `843e96d9934672e01d568c4a2e8d7396e972aadacf2d91c1d5649d987be3ee32` | `f9844fa2325dbc52883aba08bfca3c35cd3e65e4b894d9c461307d900a222383` (398,880,639 B) | G + full chunks for ranks 33..50 (k_chunk 50) | 0.2083 | 0.2283 | 0.1422 | 0.3359 | 0.1883 | 0.2263 | 0.2122 | provided by the user 2026-10-05 |
+| 2026-10-05 | **D50** `out/runs/deep-rerank-2026-10-05/D50/sub_deepD50_kd150_full50.zip` (101,751,549 B = 97.04 MiB) | `0ab1983d41100a6d429bd3b1938034d7534020ff6ea9822955f874e4e2fde127` | `2f10b78ac17f4eafdd5fe1b0b207260b062f17b29f4fcc3ee1a4b364b3c36544` (405,340,395 B) | K50 with doc ranks 1..100 from the deep rerank (tier 1 = 100 docs); config `configs/submission-best.yaml` | **0.2107 (BEST)** | 0.2283 | 0.1422 | 0.3359 | 0.1932 | 0.2294 | 0.2167 | provided by the user 2026-10-05 |
+| — | G `out/runs/ab-2026-10-05c/G/sub_abG_kd150_full32.zip` | `3cf7112f…78dc` | `eeff96dd…9287` | V3b + C | not uploaded, not needed (K50 > C) | | | | | | | |
 
 C / V3 / V3b vs baseline (each changes one side only, and the other side's metrics are identical to the baseline, as designed):
 * **Upload limit**: the LB accepted the 62.05 MiB ZIP (C). The limit is between 62.05 MiB (accepted) and 110 MiB (sub05_full never finished uploading); exact value unknown. New ceiling used for files: 100 MiB = 104,857,600 B.
 * **Full chunks for ranks 20..32 still pay**: Chunk F2 0.1283 -> 0.1644 (+0.036), Chunk R 0.1249 -> 0.1713, Chunk P 0.3025 -> 0.2669. Not saturated at rank 32.
 * **Doc K**: Doc F2 K150 0.2283 > K200 0.2233 > K100 0.2214; K150 kept (K200 loses more precision, 0.1209, than it gains recall).
 * **C + V3b (predicted, not measured)**: Final = (Doc F2 + Chunk F2) / 2 and each variant moves only one F2, so (0.2283 + 0.1644) / 2 = 0.19635. Built as G (see "Pha 1" below).
-* Best scored file: **C, Final 0.1929**.
+* Best scored file at that point: C, Final 0.1929 (superseded, see below).
+
+K40 / K50 / D50 (Final = (Doc F2 + Chunk F2) / 2: K40 0.20345, K50 0.2083, D50 0.21075; all match):
+* **Best file: D50, Final 0.2107** (sub06 0.0626 -> x3.37 on 2026-10-05). Contributions (Final differences between
+  uploaded files, each changing one factor): vi coverage (sub06 -> NEW index baseline) +0.1122; full chunks 19 -> 50
+  (V3b -> K50) +0.0300; K doc 100 -> 150 (baseline -> V3b) +0.0035; deep rerank choosing the full-chunk docs (K50 -> D50) +0.0024.
+* Full chunks: diminishing returns, Chunk F2 per added rank 19 -> 32 +0.0028, 32 -> 40 +0.0018, 40 -> 50 +0.0010. Short t256
+  chunks for ranks 20..45 (V2) lost: no short chunks.
+* Doc: K150 > K200 > K100; K150 kept.
+* Deep rerank tier 1 = 100 only reorders the top 100 (the 150-doc set is unchanged, Doc F2 stays 0.2283) but picks better
+  docs for the 50 full chunks: Chunk F2 0.1883 -> 0.1932 (+0.0049). Deep rerank is part of the best configuration.
+* Upload limit: a 97.04 MiB ZIP was accepted; 110 MiB never finished. The limit is between 97 and 110 MiB.
+* Uploads on 2026-10-05: 8 (baseline, V2, C, V3, V3b, K40, K50, D50).
 
 vs sub06: Final x2.79, Doc R x3.29 (0.088 -> 0.2897). Coverage of the vi corpus was the bottleneck.
 
@@ -275,9 +291,15 @@ All ZIPs: one entry, no directory, <= 104,857,600 B (D50 97.04 MiB). Validator `
 Regression after the builder fix: baseline JSON SHA256 `50ac7367...37ab` and G `eeff96dd...9287` rebuild byte-identically (`regress/`, `regress_G/`).
 relevant_docs order differs from the control in every query (by design: ranks 1..100 reordered); the doc set is identical.
 
-## Pending uploads (suggested order)
+## Best configuration and replay (2026-10-05)
 
-1. K40 `out/runs/ab-2026-10-05c/K40/sub_abK40_kd150_full40.zip` (81,164,810 B)
-2. K50 `out/runs/ab-2026-10-05c/K50/sub_abK50_kd150_full50.zip` (100,135,221 B; also probes the upload limit)
-3. D_k of the best k after the Pha 1 scores (D32 / D40 / D50, `out/runs/deep-rerank-2026-10-05/`): compare with the Pha 1 file of the same k
-4. G `out/runs/ab-2026-10-05c/G/sub_abG_kd150_full32.zip` only if K40 / K50 do not beat C
+`configs/submission-best.yaml` = D50. Retrieval `python scripts/run_best_retrieval.py` (candidates, then deep rerank;
+resumable), build `python scripts/build_best_submission.py [--from-retrieval]` (checks the JSON SHA256).
+Replay from the existing caches (no GPU), PowerShell:
+`python scripts/build_best_submission.py --out out/runs/replay-best-2026-10-05/sub_best_kd150_full50.zip` ->
+JSON 405,340,395 B, SHA256 `2f10b78a...6c36544` = uploaded D50 (match), builder 222.2 s (wall 225 s). ZIP 101,751,543 B
+(6 B less than D50: the entry name `sub_best_kd150_full50.json` is 3 characters shorter and is stored twice).
+
+## Pending uploads
+
+None. D32 / D40 (`out/runs/deep-rerank-2026-10-05/`) and G stay unuploaded (D50 > K50 > K40 > C).

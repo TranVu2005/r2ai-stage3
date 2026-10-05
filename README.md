@@ -58,6 +58,22 @@ python scripts/validate_submission.py D:/GitHub/r2ai-stage3/out/runs/new-full/su
 
 Rerank sâu (mặc định tắt): `run_retrieval_k100 ... --tier1-docs 100 --tier2-docs 50 --chunk-score-docs 0 --pair-scores --out-dir <thư mục mới>`; chạy lại đúng lệnh để resume (checkpoint atomic, Ctrl+C an toàn, khóa chặn lần chạy thứ hai cùng `--out-dir`). Gate: `python -m r2ai.retrieve.deep_gate --help`. Trong PowerShell gọi `python` trực tiếp hoặc Git Bash (`& "C:\Program Files\Git\bin\bash.exe"`); `bash` của WSL không thấy `/d/...`. Builder luôn truyền `--docs-dir data/docs_vi --chunks-dir data/chunks` (mặc định docs-dir có thể trỏ legacy).
 
+## Tái tạo bản tốt nhất (D50)
+
+D50 (Final 0,2107, 05/10) được mô tả trong `configs/submission-best.yaml`. Mặc định trong code không đổi; hai script dưới đây đọc file cấu hình đó. Chạy trong PowerShell ở root repo, không cần bash/WSL:
+
+```powershell
+# 1. Truy hồi (GPU, khoảng 1,2 h đo 05/10): candidates-only -> out/runs/best/cand, rerank sâu tier 1 = 100 doc -> out/runs/best/rerank.
+#    Bị ngắt (Ctrl+C, sleep, crash) thì chạy lại đúng lệnh này để resume từ checkpoint; một --out-dir chỉ cho 1 tiến trình.
+python scripts/run_best_retrieval.py
+if ($LASTEXITCODE -ne 0) { throw 'Retrieval failed' }
+# 2. Build (CPU, khoảng 4 phút): K doc 150, chunk full top 50; so SHA256 JSON với bản đã nộp, ZIP <= 104.857.600 byte.
+python scripts/build_best_submission.py --from-retrieval --out out/runs/best/submission/sub_best_kd150_full50.zip --no-check
+python scripts/validate_submission.py out/runs/best/submission/sub_best_kd150_full50.zip --queries D:/GitHub/r2ai-stage3-old/data/raw/query.parquet --corpus D:/GitHub/r2ai-stage3-old/data/raw/links_corpus.parquet --docs-dir data/docs_vi --max-zip-mib 100
+```
+
+Replay từ cache của D50 (không GPU, JSON phải giống byte bản đã nộp, lệch thì exit 1): `python scripts/build_best_submission.py --out out/runs/<thư mục mới>/sub_best_kd150_full50.zip`. Khi build với `--from-retrieval` sau một lượt truy hồi mới, `--no-check` bỏ yêu cầu SHA phải khớp (lượt truy hồi mới chưa được kiểm là giống byte); kết quả SHA vẫn được in ra.
+
 Retrieval dev (có guard, cần index/chunks NEW và dev legacy): `python scripts/retrieve.py dev --target 256 --dev D:/GitHub/r2ai-stage3-old/data/dev/pseudo_vi_v2.parquet`. Output OUT_DIR/retrieval. Index build giữ nguyên nhánh FAISS theo flat-max-gb, không ép thuật toán corpus mở rộng.
 
 Crawl thật sau duyệt riêng: `python scripts/crawl.py run --raw-dir D:/GitHub/r2ai-stage3/data/raw_vi --state-dir D:/GitHub/r2ai-stage3/state --no-report`. Youmed halted, pending rank13–7188; --limit 5 là rank<5, không phải 5 pending tiếp theo. Không tự reset-errors hay chạy smoke thật.

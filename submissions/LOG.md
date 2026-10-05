@@ -8,9 +8,12 @@ The pipeline never uploads; the user uploads by hand and reports the scores. Lea
 | upload date | file | ZIP SHA256 | JSON SHA256 | config | Final | Doc F2 | Doc P | Doc R | Chunk F2 | Chunk P | Chunk R | source |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 2026-10-03 | sub02 / sub03 / sub04 / sub05 / **sub06** / sub07 / sub08 (OLD index, 123,874 docs) | see sections below | | see sections below | 0.0158 / 0.0273 / 0.0551 / 0.0623 / **0.0626** / 0.0545 / 0.0507 | | | sub06: 0.088 | | | | `Downloads/SCOREBOARD.md` (user, 2026-10-03); per-metric columns other than sub06 Doc R not copied here |
-| 2026-10-05 | `out/runs/new-full/sub_new_vi_kd100_kc19_full.zip` (39,237,992 B) | `1d171722cd27636a901684778fa0120bf28baab126284d00fc9449820deb567a` | `50ac7367c671104c6ae3f0d686fe7cc40cf69478e2b0fc7d06674ace25f937ab` (156,211,418 B) | sub06 config on the NEW index (3,909,586 t256 chunks / 623,805 docs, K100 `--candidates exact`): k_doc 100 (whole doc_ids_group), k_chunk 19, chunk mode full, dedupe scope doc | **0.1748** | 0.2214 | 0.174 | 0.2897 | 0.1283 | 0.3025 | 0.1249 | provided by the user 2026-10-05 |
+| 2026-10-05 | `out/runs/new-full/sub_new_vi_kd100_kc19_full.zip` (39,237,992 B) | `1d171722cd27636a901684778fa0120bf28baab126284d00fc9449820deb567a` | `50ac7367c671104c6ae3f0d686fe7cc40cf69478e2b0fc7d06674ace25f937ab` (156,211,418 B) | sub06 config on the NEW index (3,909,586 t256 chunks / 623,805 docs, K100 `--candidates exact`): k_doc 100 (whole doc_ids_group), k_chunk 19, chunk mode full, dedupe scope doc | **0.1748** (best so far) | 0.2214 | 0.174 | 0.2897 | 0.1283 | 0.3025 | 0.1249 | provided by the user 2026-10-05 |
+| 2026-10-05 | V2 `out/runs/ab-2026-10-05/v2/sub_ab_v2_kd100_kc19_full_xchunk.zip` (47,792,584 B) | `af1864143dff827048c6dfbc16afd664a6758341ec8ab809cde947277bf6290c` | `a0de9f7a4edc83c5ce8ee30d416377429bf1c2bac3c48b10074d4aeecf7ce614` (190,797,582 B) | baseline + 1 extra t256 chunk (best reranker score) for docs ranked 20..45; relevant_docs unchanged | 0.1728 | 0.2214 | 0.174 | 0.2897 | 0.1243 | 0.1507 | 0.1411 | provided by the user 2026-10-05 |
 
 vs sub06: Final x2.79, Doc R x3.29 (0.088 -> 0.2897). Coverage of the vi corpus was the bottleneck.
+
+V2 vs baseline: doc side identical (by design). Chunk P 0.3025 -> 0.1507, Chunk R 0.1249 -> 0.1411, Chunk F2 0.1283 -> 0.1243, Final -0.0020. The 26 short chunks are right only ~4 % of the time (estimate from the macro means, vs ~30 % for the 19 full chunks): precision halves and cancels the recall gain. **The baseline stays the best file.** Lesson: the value is in full chunks (one full chunk covers several reference chunks); no more short extra chunks.
 
 | file | created | config | index | docs in index | build time | Doc F2 (LB) | Chunk F2 (LB) | Final (LB) |
 |---|---|---|---|---|---|---|---|---|
@@ -130,7 +133,7 @@ re-counted and trimmed if needed. Budget: binary search over k_chunk in [0, k_do
 * 2048-window changes only 11.6% of docs (the rest are <= 2048 tokens), so its p50 equals the full-text p50 (1414).
 * Chunk tokens counted on scorer-normalised text; the cap holds exactly (max = N or below after re-count).
 
-## A/B variants of sub_new_vi_kd100_kc19_full (2026-10-05, not uploaded)
+## A/B variants of sub_new_vi_kd100_kc19_full (2026-10-05; V2 uploaded, score in Leaderboard)
 
 Built without re-running embed/retrieval/rerank, from `out/runs/vi-k100/` (K100 + chunk scores) and the NEW index text
 (memory-mapped `data/index/t256/text.arrow`). Baseline = the uploaded file above. Files in `out/runs/ab-2026-10-05/`.

@@ -1,8 +1,8 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-05 10:40 (UTC+7)
+- Cập nhật: 2026-10-05 10:53 (UTC+7)
 - Model thực hiện: Claude Opus 5.5
-- Commit HEAD đã kiểm trước cập nhật này: `6c666a6`, nhánh `main` (hash commit chứa tài liệu này được báo ở kết quả)
+- Commit HEAD đã kiểm trước cập nhật này: `cc0e51f`, nhánh `main` (hash commit chứa tài liệu này được báo ở kết quả)
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - Quy ước: ✅ có bằng chứng · 🟡 làm một phần · ❌ chưa làm (đã tìm, không thấy) · ❓ không chứng minh được
 
@@ -50,7 +50,7 @@ Chưa có: zh (không có `data/raw_zh*`), `nhathuoclongchau.com.vn`, `zysjonlin
 | M6 | Scorer local theo metric | ✅ | `eval/scorer.py`, `tests/test_scorer.py`, commit `ae6b90d`. Chưa đối chiếu với điểm LB nào (không có điểm LB) |
 | M7 | Chunk + index + truy hồi baseline (BGE-M3 hybrid + reranker) | ✅ vi | NEW: `data/index/t256/` dense.npy + sparse (không FAISS), **3.909.586 chunk / 623.805 doc**; K100 exact `out/runs/vi-k100/vi_k100.parquet` (1.200 query, 119.969 dòng). Legacy OLD 818.080 chunk / 123.874 doc. Chưa có zh. Xem mục 5 |
 | M8 | Nộp thử lên leaderboard | ✅ | 03/10: 7 lượt (`Downloads/SCOREBOARD.md`), tốt nhất sub06 Final 0,0626. 05/10: `sub_new_vi_kd100_kc19_full` (index NEW) **Final 0,1748** (người dùng cung cấp). Ghi ở `submissions/LOG.md` mục Leaderboard |
-| M9 | Nộp thử A/B (chunk dài/ngắn; 1 id/cả nhóm; vi/zh) | 🟡 | Xong: chunk dài vs ngắn (c2 0,0158 → full 0,0273 ở K=5), quét K 5/20/50/100, cửa sổ 1024/2048, index cũ vs NEW (0,0626 → 0,1748). Đã sinh chưa nộp: V2 thêm 1 chunk cho doc hạng 20..45 (`out/runs/ab-2026-10-05/`). Cả nhóm id: mọi file đều đã trả cả nhóm (mặc định); "1 id" chưa thử. K doc 150/200: cần chạy lại truy hồi. vi vs có zh: chưa |
+| M9 | Nộp thử A/B (chunk dài/ngắn; 1 id/cả nhóm; vi/zh) | 🟡 | Xong: chunk dài vs ngắn (c2 0,0158 → full 0,0273 ở K=5), quét K 5/20/50/100, cửa sổ 1024/2048, index cũ vs NEW (0,0626 → 0,1748). V2 thêm 1 chunk t256 ngắn cho doc hạng 20..45: **Final 0,1728 (−0,0020)**, Chunk P 0,3025 → 0,1507, Chunk R 0,1249 → 0,1411; không thêm chunk ngắn nữa. Đang làm: A (thêm chunk full), B (K doc 200/150), C (thử giới hạn upload). Cả nhóm id: mọi file đều đã trả cả nhóm (mặc định); "1 id" chưa thử. K doc 150/200: cần chạy lại truy hồi. vi vs có zh: chưa |
 | M10 | Mẫu 2% zh, tính yield, thứ tự crawl zh | ❌ | Không có `data/raw_zh*`, `docs_zh*`, `config/domains.yaml` chỉ có domain vi |
 | M11 | longchau qua CC columnar index; kiểm robots zysjonline | ❌ | `out/archive_*` có số đo độ phủ (bước 1), nhưng không có dữ liệu longchau đã tải. Không thấy kết luận robots zysjonline trong `out/` |
 | M12 | Crawl dữ liệu train Vinmec/MEDLATEC ngoài corpus (lọc trang trùng query test) | ❌ | Không có thư mục/dữ liệu tương ứng. `data/dev/pseudo_vi_v2.parquet` (462 dòng) sinh từ chính corpus đã crawl, không phải dữ liệu ngoài |
@@ -99,7 +99,7 @@ Các số bên dưới lưu snapshot OLD ngày 03/10.
 | Truy hồi | 🟡 hybrid w=0.7, `max`, rerank `bge-reranker-v2-m3` fp16, seed 42. Thêm `--candidates exact` (block-scan dense.npy + CSR mmap, không FAISS/CSC); gate legacy 1.199/1.200 (99,917%) K100 trước rerank giống hệt | `src/r2ai/retrieve/exact.py`, `exact_gate.py`, `out/runs/exact-gate/*.json`; `retrieve/run.py`, `data/runs/vi_k100.meta.json` (1.200 query, 13.083 s = 10,9 s/query), `vi_k100.parquet` 119.934 dòng (≥74, p50 100 doc/query) |
 | Dev set | ⚠ pseudo-dev, **bão hòa và lệch xa LB** (dev chunk F2 0,358 so với LB Final 0,0158 cùng cấu hình c2) | `data/dev/pseudo_vi_v2.parquet` 462 dòng (400 A tiêu đề-làm-query + B hỏi đáp). `out/retrieval/ablation_t256.md`: A R@5 0,9975, B R@1 1,0; chunk-level B F2 0,358. Trang nguồn nằm trong index nên số này **không dự báo điểm LB** (chính `out/submissions/LOG.md` nêu điều này) |
 | File nộp | Legacy sub01–sub10 (`OLD/out/submissions/`) · ✅ NEW `sub_new_vi_kd100_kc19_full` **đã nộp 05/10** · 🟡 A/B V2 đã sinh, chưa nộp | NEW: `out/runs/new-full/sub_new_vi_kd100_kc19_full.zip` 39.237.992 byte, SHA256 `1d171722…567a`; JSON 156.211.418 byte, SHA256 `50ac7367…37ab`; validator 1.200 / 22.800 / 0 lỗi. V2: `out/runs/ab-2026-10-05/v2/sub_ab_v2_kd100_kc19_full_xchunk.zip` 47.792.584 byte, SHA256 `af186414…290c`, 45 chunk/query, validator 0 lỗi. `scripts/make_submission.py`, `tests/test_make_submission*.py` |
-| Điểm leaderboard | ✅ 8 lượt (người dùng cung cấp) | 05/10 `sub_new_vi_kd100_kc19_full`: **Final 0,1748** · Doc F2 0,2214 · Doc P 0,174 · Doc R 0,2897 · Chunk F2 0,1283 · Chunk P 0,3025 · Chunk R 0,1249 (Final = trung bình hai F2: (0,2214+0,1283)/2 = 0,17485, khớp). 03/10 (`Downloads/SCOREBOARD.md`) Final: sub02 0,0158 · sub03 0,0273 · sub04 0,0551 · sub05 0,0623 · sub06 0,0626 · sub07 0,0545 · sub08 0,0507 |
+| Điểm leaderboard | ✅ 9 lượt (người dùng cung cấp) | 05/10 V2 (`sub_ab_v2_kd100_kc19_full_xchunk`, +1 chunk t256 cho hạng 20..45): Final 0,1728 · Doc F2 0,2214 · Doc P 0,174 · Doc R 0,2897 · Chunk F2 0,1243 · Chunk P 0,1507 · Chunk R 0,1411 ((0,2214+0,1243)/2 = 0,17285, khớp). 05/10 `sub_new_vi_kd100_kc19_full` (**tốt nhất hiện tại**): **Final 0,1748** · Doc F2 0,2214 · Doc P 0,174 · Doc R 0,2897 · Chunk F2 0,1283 · Chunk P 0,3025 · Chunk R 0,1249 (Final = trung bình hai F2: (0,2214+0,1283)/2 = 0,17485, khớp). 03/10 (`Downloads/SCOREBOARD.md`) Final: sub02 0,0158 · sub03 0,0273 · sub04 0,0551 · sub05 0,0623 · sub06 0,0626 · sub07 0,0545 · sub08 0,0507 |
 
 JSON NEW 156.211.418 byte < sub06 181.960.105 byte dù corpus lớn hơn (đo trên hai file JSON): cùng 22.800 chunk và gần cùng số id (120.135 vs 120.662); khác ở độ dài chunk_text = độ dài văn bản của doc top 19 (chế độ full). Tổng ký tự chunk_text 116.158.508 vs 135.525.792 (−14,3%), UTF-8 153.019.613 vs 178.513.823 byte (−25.494.210, ≈ toàn bộ chênh JSON 25.748.687). Ký tự/chunk p5 1.030 vs 1.955, p50 4.917 vs 5.369, p95 9.119 vs 10.149, max 57.173 vs 162.200; token BGE-M3 mean 1.340 vs 1.570. Nguồn: `answer` 993 chunk vs 29 ở sub06 (trường answer ngắn hơn body). Tỉ lệ nén ZIP NEW 3,98 (sub06 3,95).
 
@@ -156,15 +156,16 @@ Hai dòng ❓ từ CONTEXT:
 
 1. **Độ phủ vẫn là nút thắt chính nhưng đã giảm**: index NEW 623.805 doc / 4.394.718 URL corpus ≈ **14,2%** (cũ 123.874, 2,8%). Doc R 0,088 → 0,2897 khi tăng độ phủ vi. Ước tính thô từ trung bình macro (không phải số đo): gold khoảng 60–70 doc/query, nên phần còn thiếu phần lớn nằm ngoài index (zh, domain chưa crawl).
 2. **Chưa có dữ liệu zh**: CONTEXT ước ~77% corpus là zh; hiện 0 doc zh. Nếu gold có nhiều zh, recall bị chặn trên.
-3. **K doc > 100 cần chạy lại truy hồi**: `vi_k100.candidates.parquet` chỉ lưu số đếm, không lưu thứ tự/điểm hybrid ngoài top 100 (doc phân biệt ngoài top 100: min 0, p5 69, p50 169). Điểm reranker chunk chỉ có cho top 50 doc.
+3. **K doc > 100 cần chạy lại bước sinh ứng viên** (encode 1.200 query + `--candidates exact`, không rerank): `vi_k100.candidates.parquet` chỉ lưu số đếm (doc phân biệt ngoài top 100: min 0, p5 69, p50 169). Đang làm (biến thể B).
+3b. **Chunk ngắn hạ precision**: V2 (+26 chunk t256/query) làm Chunk P giảm một nửa, Final −0,0020. Chỉ mở rộng bằng chunk full.
 4. **Ngân sách upload**: 45,7 MiB lên được, 110 MiB không; giới hạn thật chưa rõ. Chunk cho đủ 100 doc cần ZIP khoảng 62,81 MiB (đo, cách chọn chunk cho hạng 51–100 chỉ để đo size).
 5. `youmed.vn` halted (bot_challenge); `vov.vn` và `baolangson.vn` chặn bởi robots (11.765 URL không lấy được, đúng theo quyết định tôn trọng robots).
 6. Pseudo-dev không dự báo được LB; chỉ LB đo thật (tối đa 5 lượt private).
 
 ## 8. 3 việc tiếp theo (đường găng tới 31/10)
 
-1. **Người dùng nộp V2** `out/runs/ab-2026-10-05/v2/sub_ab_v2_kd100_kc19_full_xchunk.zip` (45,58 MiB, chỉ thêm 1 chunk cho doc hạng 20..45) và ghi điểm vào `submissions/LOG.md`. V1 (cả nhóm id) không cần vì đã là mặc định; V3/V3b (K doc 200/150) và V4 chưa sinh.
-2. **Nếu muốn K doc > 100 hoặc chunk cho hạng 51–100**: chạy lại K100 với lưu thứ tự hybrid đầy đủ của ứng viên và điểm chunk cho top 100 (cần GPU, khoảng 2,4 h theo lượt 05/10); cần người dùng duyệt.
+1. **A – thêm chunk full** cho doc hạng 20..k, k lớn nhất vừa ZIP 45,7 MiB (chỉ phía chunk). Nộp trước.
+2. **B – K doc 200 / 150** theo thứ tự hybrid trước rerank (chỉ phía doc), sau gate tái tạo ứng viên. **C – thử giới hạn upload** (như A, ZIP ≤ 62,81 MiB), chỉ nộp sau khi có điểm A.
 3. **Quyết định zh**: lấy mẫu 2% mỗi domain zh, tính yield trên 1.200 query, rồi xếp thứ tự crawl.
 
 ## 9. Changelog
@@ -185,3 +186,4 @@ Hai dòng ❓ từ CONTEXT:
 | 2026-10-04 15:40 | Claude Opus 5.5 | Exact block-scan candidates: `retrieve/exact.py` (dense.npy đọc theo khối căn ranh giới doc, CSR mmap cache tách từ `sparse.npz` mỗi lần 1 mảng, running top-k tie theo id giảm như IndexFlatIP), `--candidates exact` trong `run_retrieval_k100` (mặc định `faiss`), log `vi_k100.candidates.parquet` + cảnh báo < 100 doc, peak RSS/private trong meta. `index.build`: sửa thiếu import `save_npz` (crash shard 0) và `flat_gb` không định nghĩa (crash khi ghi meta), thêm `--no-ann` và subcommand `assemble`. Gate legacy 99,917% K100 trước rerank giống hệt; full suite **296 pass / 2 deselected**. Embed NEW không chạy; chưa có K100/submission 3,9M. |
 | 2026-10-05 09:05 | Claude Opus 5.5 | Chạy thật NEW: embed 37.953 s; K100 exact 1.200 query 8.481 s, peak RSS 7,391 / private 7,046 GiB, VRAM 1.452 MiB; sửa `Index.texts` overflow >2 GiB và text mmap (`a76052b`, private 12,44 → 2,07 GiB ở bước ứng viên); submission sub06-config ZIP 39.237.992 byte SHA256 `1d171722…567a`, validator 1.200/22.800/0 lỗi; chưa nộp LB. Suite 299 pass / 2 deselected. |
 | 2026-10-05 10:40 | Claude Opus 5.5 | Ghi điểm LB `sub_new_vi_kd100_kc19_full` (Final 0,1748, người dùng cung cấp) vào `submissions/LOG.md` + PROGRESS (M7–M9, mục 5/7/8, đầu file, Chunking), sắp Changelog theo thời gian, đo nguyên nhân JSON nhỏ hơn sub06. `make_submission`: thêm `--extra-chunk-docs` / `--extra-zip-budget-bytes` (mặc định tắt; JSON mặc định tái tạo đúng SHA `50ac7367…`). Sinh V2 N=45 (ZIP 47.792.584 byte, validator 0 lỗi, diff ngoài phạm vi 0); V1 không cần (đã trả cả nhóm), V3/V3b/V4 không sinh (thiếu thứ tự doc ngoài top 100). 6 test mới; full suite **305 pass / 2 deselected** (232 s). Thứ tự nộp đề xuất: V2 → (V3/V3b nếu chạy lại truy hồi) → V4 sau khi có điểm. |
+| 2026-10-05 10:53 | Claude Opus 5.5 | Ghi điểm V2 (Final 0,1728, Chunk P 0,1507; người dùng cung cấp) vào `submissions/LOG.md` và PROGRESS (M9, mục 5/7/8); baseline 0,1748 vẫn tốt nhất. Hướng tiếp: A/B/C. |

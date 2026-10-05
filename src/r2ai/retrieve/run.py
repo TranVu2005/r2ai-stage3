@@ -118,8 +118,8 @@ def minmax(x: np.ndarray) -> np.ndarray:
     return (x - lo) / (hi - lo) if hi > lo else np.zeros_like(x)
 
 
-def rank_docs(index: Index, cand, dsc, ssc, w: float, agg: str):
-    """-> top chunk ids (<=200, by hybrid), their hybrid scores, top-50 doc ids (ranked), doc scores."""
+def rank_docs(index: Index, cand, dsc, ssc, w: float, agg: str, top_docs: int = TOP_DOCS):
+    """-> top chunk ids (<=200, by hybrid), their hybrid scores, top-`top_docs` doc ids (ranked), doc scores."""
     h = w * minmax(dsc) + (1 - w) * minmax(ssc)
     top = np.argsort(-h, kind='stable')[:TOP_CHUNKS]
     ch, hs = cand[top], h[top]
@@ -127,7 +127,7 @@ def rank_docs(index: Index, cand, dsc, ssc, w: float, agg: str):
     for c, s in zip(ch, hs):
         docs.setdefault(int(index.doc_id[c]), []).append(float(s))   # already in descending order
     score = {d: (v[0] if agg == 'max' else sum(v[:3])) for d, v in docs.items()}
-    ranked = sorted(score, key=lambda d: -score[d])[:TOP_DOCS]
+    ranked = sorted(score, key=lambda d: -score[d])[:top_docs]
     return ch, hs, ranked, score
 
 

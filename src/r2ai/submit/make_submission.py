@@ -16,7 +16,8 @@
                   (binary search on written zips; same chunk rule, so the first --k-chunk chunks stay identical).
   docs > 100      --doc-ranking P --k-doc-total K (needs --k-doc 100): relevant_docs = the K100 docs as above, then the
                   next docs of P (query_id, rank, doc_id; vi_cand.docs.parquet of run_retrieval_k100 --candidates-only)
-                  that are not in the K100 cache, in rank order, until K primary docs; each expanded to its doc_ids_group.
+                  that are not among the top-100 cached docs, in rank order, until K primary docs; each expanded to its
+                  doc_ids_group. Cached rows ranked > 100 (a deeper cache) are ignored here.
                   relevant_chunks unchanged.
   dedupe          per query, in rank order, a later chunk is dropped when its text equals an earlier one after
                   normalisation (NFKC, html.unescape, lowercase, whitespace collapsed), or when
@@ -272,9 +273,7 @@ def main(argv=None):
     need = {d for v in top.values() for d in v[:max(a.k_chunk, a.k_chunk_max)]}
     more: dict[int, list[int]] = {q: [] for q in qids}                 # --doc-ranking docs after the K100 cache
     if a.doc_ranking:
-        cached = {q: set() for q in qids}
-        for r in run:
-            cached.setdefault(r['query_id'], set()).add(r['doc_id'])
+        cached = {q: set(v) for q, v in top.items()}                   # docs already taken (rank <= k_doc)
         rk = pq.read_table(a.doc_ranking, columns=['query_id', 'rank', 'doc_id']).to_pandas().sort_values(['query_id', 'rank'], kind='stable')
         for q, d in zip(rk['query_id'].tolist(), rk['doc_id'].tolist()):
             if q in more and d not in cached[q] and len(top[q]) + len(more[q]) < a.k_doc_total:

@@ -234,9 +234,9 @@ def cmd_build(a):
         os.replace(sh / f'{i:05d}.dense.tmp.npy', sh / f'{i:05d}.dense.npy')
         save_npz(sh / f'{i:05d}.sparse.tmp.npz', to_csr(sparse, enc.vocab))
         os.replace(sh / f'{i:05d}.sparse.tmp.npz', sp)
-        el = time.time() - t0
-        print(f'shard {i + 1}/{n_shards}: {hi - lo} chunks in {time.time() - ts:.0f}s '
-              f'({(hi - lo) / (time.time() - ts):.1f}/s), elapsed {el / 60:.1f} min', flush=True)
+        el, dt = time.time() - t0, time.time() - ts
+        print(f'shard {i + 1}/{n_shards}: {hi - lo} chunks in {dt:.0f}s '
+              f'({(hi - lo) / max(dt, 1e-6):.1f}/s), elapsed {el / 60:.1f} min', flush=True)   # dt can be 0 within one clock tick
     t_embed = time.time() - t0
     peak = round(torch.cuda.max_memory_allocated() / 2**20)
     del enc

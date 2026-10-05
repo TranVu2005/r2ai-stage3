@@ -56,6 +56,8 @@ python scripts/validate_submission.py D:/GitHub/r2ai-stage3/out/runs/new-full/su
 
 `--candidates exact` quét chính xác theo khối `dense.npy` và cache CSR mmap `<index>/sparse_mmap` (tạo từ `sparse.npz`, không sửa file gốc), không cần `faiss.index`; mặc định `faiss` giữ nguyên. Nếu đã có shard mà thiếu dense/sparse/meta: `python scripts/build_index.py assemble --target 256 --no-ann`. Gate tương đương: `python -m r2ai.retrieve.exact_gate --help`.
 
+Rerank sâu (mặc định tắt): `run_retrieval_k100 ... --tier1-docs 100 --tier2-docs 50 --chunk-score-docs 0 --pair-scores --out-dir <thư mục mới>`; chạy lại đúng lệnh để resume (checkpoint atomic, Ctrl+C an toàn, khóa chặn lần chạy thứ hai cùng `--out-dir`). Gate: `python -m r2ai.retrieve.deep_gate --help`. Trong PowerShell gọi `python` trực tiếp hoặc Git Bash (`& "C:\Program Files\Git\bin\bash.exe"`); `bash` của WSL không thấy `/d/...`. Builder luôn truyền `--docs-dir data/docs_vi --chunks-dir data/chunks` (mặc định docs-dir có thể trỏ legacy).
+
 Retrieval dev (có guard, cần index/chunks NEW và dev legacy): `python scripts/retrieve.py dev --target 256 --dev D:/GitHub/r2ai-stage3-old/data/dev/pseudo_vi_v2.parquet`. Output OUT_DIR/retrieval. Index build giữ nguyên nhánh FAISS theo flat-max-gb, không ép thuật toán corpus mở rộng.
 
 Crawl thật sau duyệt riêng: `python scripts/crawl.py run --raw-dir D:/GitHub/r2ai-stage3/data/raw_vi --state-dir D:/GitHub/r2ai-stage3/state --no-report`. Youmed halted, pending rank13–7188; --limit 5 là rank<5, không phải 5 pending tiếp theo. Không tự reset-errors hay chạy smoke thật.

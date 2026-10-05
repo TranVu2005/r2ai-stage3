@@ -231,3 +231,53 @@ Each ZIP has exactly one entry (`<stem>.json`), no directory.
 * Regression: the default builder still rebuilds the uploaded baseline JSON byte-identically (SHA256 `50ac7367...37ab`, `regress/`).
 * Predicted (extrapolation, not measured): G Final ~0.1964 (C chunk side + V3b doc side).
 * **Suggested upload order: K40 -> K50 -> G** (G only if K40 / K50 do not beat C).
+
+## Pha 2: deep rerank, tier 1 = 100 docs -> D32 / D40 / D50 (2026-10-05, not uploaded)
+
+Files in `out/runs/deep-rerank-2026-10-05/` (ignored). Same index, models, seed 42 and first stage as `vi-k100`.
+
+Retrieval: `run_retrieval_k100 --tier1-docs 100 --tier2-docs 50 --chunk-score-docs 0 --pair-scores` -> `full/`
+(`vi_k100.parquet` 150 docs/query except 40 short queries, min 79; `vi_k100_pairs.parquet` 258,117 reranked pairs: tier 1
+188,704, tier 2 69,413). Tier 1 = the top-100 docs by max hybrid over the top-200 chunks, all reranked together on their
+top-200 chunks; for the 86 queries whose top-200 chunks cover < 100 docs the hybrid order is followed past rank 200 and a doc
+first met there is scored on its chunks up to that point (docs already in the top 200 keep exactly their top-200 chunks).
+The top-50 docs' pairs are scored in a reranker call of their own (see gate). Tier 2 = next 50 docs by hybrid, reranked among
+themselves. `--chunk-score-docs 0`: the c2 per-chunk scores of the top-50 docs are skipped (full mode does not use them).
+
+* Measured: 3,743 s for 1,200 queries (candidates: dense 64.3 s, sparse 143.0 s, union 10.4 s), 2.915 s/query mean, p95 4.09 s;
+  rerank pairs/query tier 1 157.25, tier 2 57.84; peak RSS 7.466 GiB, private 7.120 GiB; VRAM torch max allocated 1,452 MiB,
+  nvidia-smi peak 2,836 MiB (14 samples at 3,938 MiB are excluded: a duplicate run started by mistake on the same out dir
+  for ~30 s, killed; it wrote no checkpoint). Trial (50 queries, seed 42): 2.80 s/query; with `--chunk-score-docs 50` 7.79 s/query.
+* Gate deep (`python -m r2ai.retrieve.deep_gate deep --old out/runs/vi-k100 --new .../full`): old tier-1 (query, doc) pairs
+  60,000/60,000 with |delta| = 0 (max 0.0); relative order of the old 50 docs identical in 1,200/1,200 queries; chunk level
+  93,775 common rows, |delta| 0. A first trial scoring all 100 docs in one call failed (50 queries: 93.8 % pairs within 1e-3,
+  max 0.0117, order changed in 3/50): fp16 reranker logits move by 1-3 ULP with the batch/padding composition, and one ULP
+  is >= 0.00195 for |score| >= 2. Fix: the top-50 docs' pair list is scored in its own call (same batches as the default run).
+* Gate same (`--tier1-docs 50 --sample 20`): rank / doc_id / tier identical 20/20 queries, doc and chunk scores |delta| = 0
+  (2,000 doc rows, 7,927 chunk rows).
+* Deep top-100 doc set == old K100 set for 1,200/1,200 queries (only the order changes). Old tier-2 docs inside the new top-k:
+  mean 8.4 (k 32) / 12.0 (k 40) / 17.0 (k 50).
+
+Build: Pha 1 args with `--runs-dir out/runs/deep-rerank-2026-10-05/full` (ranks 1..100 = deep order; ranks 101..150 from
+`vi_cand.docs.parquet`, hybrid order, as in G). Builder fix in this change: `--doc-ranking` skipped every doc present in the
+cache file, so a 150-doc cache would have hidden ranks 101..150 and pulled hybrid ranks 151..200; it now skips only the top
+k_doc cached docs (identical for the 100-row `vi-k100` cache: baseline and G rebuild byte-identically, see below).
+
+| file | control | change | primary docs/query | chunk/query | JSON B | ZIP B | ZIP SHA256 | validator | out-of-scope diff |
+|---|---|---|---|---|---|---|---|---|---|
+| D32 `D32/sub_deepD32_kd150_full32.zip` | G | doc order 1..100 from deep rerank | = G | 32 | 261,441,816 | 65,717,360 | `4ee026a5068ce378f481963dbc41e85bbd1c3c3e386836fa8b1675292e0a93bc` | 1,200 / 38,400 / 0 errors | 150-doc set differs in 0/1,200 queries; chunk docs changed mean 8.40 / p50 8 / max 21 per query (1,196 queries); same doc -> same chunk text |
+| D40 `D40/sub_deepD40_kd150_full40.zip` | K40 | same | = K40 | 40 | 325,781,533 | 81,757,628 | `b4604c9e5fd4dda623370641cb2428cbab73e6fab31931b2ee4ed6b048be8d88` | 1,200 / 48,000 / 0 errors | set differs 0/1,200; chunk docs changed mean 11.99 / p50 12 / max 27 (1,200 queries) |
+| D50 `D50/sub_deepD50_kd150_full50.zip` | K50 | same | = K50 | 50 | 405,340,395 | 101,751,549 | `0ab1983d41100a6d429bd3b1938034d7534020ff6ea9822955f874e4e2fde127` | 1,200 / 60,000 / 0 errors | set differs 0/1,200; chunk docs changed mean 17.04 / p50 17 / max 32 (1,200 queries) |
+
+JSON SHA256: D32 `f99476fc6b5e43a3a5ccf249969e738453070fda46049df6a9924509b8171fc8`, D40
+`8fff4b51d11f07f463ef736ea0224efb33bbba1be479e17fab72f6181317e313`, D50 `2f10b78ac17f4eafdd5fe1b0b207260b062f17b29f4fcc3ee1a4b364b3c36544`.
+All ZIPs: one entry, no directory, <= 104,857,600 B (D50 97.04 MiB). Validator `--max-zip-mib 100`. Checks: `compare_d.py` -> `compare_d.json`.
+Regression after the builder fix: baseline JSON SHA256 `50ac7367...37ab` and G `eeff96dd...9287` rebuild byte-identically (`regress/`, `regress_G/`).
+relevant_docs order differs from the control in every query (by design: ranks 1..100 reordered); the doc set is identical.
+
+## Pending uploads (suggested order)
+
+1. K40 `out/runs/ab-2026-10-05c/K40/sub_abK40_kd150_full40.zip` (81,164,810 B)
+2. K50 `out/runs/ab-2026-10-05c/K50/sub_abK50_kd150_full50.zip` (100,135,221 B; also probes the upload limit)
+3. D_k of the best k after the Pha 1 scores (D32 / D40 / D50, `out/runs/deep-rerank-2026-10-05/`): compare with the Pha 1 file of the same k
+4. G `out/runs/ab-2026-10-05c/G/sub_abG_kd150_full32.zip` only if K40 / K50 do not beat C

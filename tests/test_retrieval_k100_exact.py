@@ -149,3 +149,144 @@ def test_candidates_only_full_ranking_matches_k100(env, monkeypatch):
         k100.main(base + ['--out-dir', str(out), '--candidates-only'])
     with pytest.raises(SystemExit):
         k100.main(['--queries', str(env['q']), '--out-dir', str(env['tmp'] / 'y'), '--candidates-only'])
+
+
+def _run(env, name, *extra):
+    out = env['tmp'] / name
+    assert env['k100'].main(['--queries', str(env['q']), '--candidates', 'exact', '--out-dir', str(out), *extra]) == 0
+    return out
+
+
+def test_tier_flags_default_values_reproduce_default(env):
+    base = _run(env, 'base')
+    same = _run(env, 'same', '--tier1-docs', '50', '--tier2-docs', '50', '--chunk-score-docs', '50', '--checkpoint-every', '7')
+    for f in ('vi_k100.parquet', 'vi_k100_chunk_scores.parquet', 'vi_k100.candidates.parquet'):
+        assert pq.read_table(base / f).equals(pq.read_table(same / f)), f
+    assert not (base / 'vi_k100_pairs.parquet').exists()
+    assert 'tier1_docs' not in json.loads((base / 'vi_k100.meta.json').read_text(encoding='utf-8'))
+
+
+def test_deep_tier1_keeps_old_tier1_scores_and_takes_next_docs(env):
+    base = _run(env, 'base')
+    cand = _run(env, 'cand', '--candidates-only')
+    deep = _run(env, 'deep', '--tier1-docs', '180', '--tier2-docs', '20', '--chunk-score-docs', '0', '--pair-scores')
+    old = pq.read_table(base / 'vi_k100.parquet').to_pandas()
+    new = pq.read_table(deep / 'vi_k100.parquet').to_pandas()
+    hyb = pq.read_table(cand / 'vi_cand.docs.parquet').to_pandas()
+    chunks = pq.read_table(cand / 'vi_cand.chunks.parquet').to_pandas()
+    pairs = pq.read_table(deep / 'vi_k100_pairs.parquet').to_pandas()
+    assert pq.read_table(deep / 'vi_k100_chunk_scores.parquet').num_rows == 0
+    extended = 0
+    for q, g in new.groupby('query_id'):
+        h = hyb[hyb.query_id == q].sort_values('rank')['doc_id'].tolist()
+        t1 = g[g.tier == 1]
+        assert set(t1['doc_id']) == set(h[:180]) and set(g[g.tier == 2]['doc_id']) == set(h[180:200])
+        assert list(g['rank']) == list(range(1, len(g) + 1)) and (np.diff(t1['score'].to_numpy()) <= 0).all()
+        o = old[(old.query_id == q) & (old.tier == 1)]
+        sc = dict(zip(t1['doc_id'], t1['score']))
+        assert np.array_equal([sc[d] for d in o['doc_id']], o['score'].to_numpy())          # same pairs, same scores
+        assert [d for d in t1['doc_id'] if d in set(o['doc_id'])] == o['doc_id'].tolist()   # same relative order
+        c = chunks[chunks.query_id == q].sort_values('hybrid', ascending=False, kind='stable')
+        top200 = c.iloc[:200]
+        p1 = pairs[(pairs.query_id == q) & (pairs.tier == 1)]
+        for d, pg in p1.groupby('doc_id'):
+            mine = set(top200[top200.doc_id == d]['chunk_id'])
+            if mine:
+                assert set(pg['chunk_id']) == mine
+            else:
+                extended += 1
+            assert np.isclose(pg['score'].max(), sc[d])
+        assert set(p1['doc_id']) == set(t1['doc_id'])
+    assert extended > 0                                                     # the fixture exercises the extension
+
+
+def test_checkpoint_resume_after_interrupt_and_config_guard(env, monkeypatch):
+    from r2ai.index import bge_m3
+    full = _run(env, 'full', '--tier1-docs', '60', '--pair-scores')
+    calls = {'n': 0}
+
+    class StopRR(FakeRR):
+        def score(self, q, passages, batch_size=32):
+            calls['n'] += 1
+            if calls['n'] == 400:
+                raise KeyboardInterrupt
+            return super().score(q, passages, batch_size)
+    monkeypatch.setattr(bge_m3, 'Reranker', StopRR)
+    out = env['tmp'] / 'cut'
+    common = ['--queries', str(env['q']), '--candidates', 'exact', '--out-dir', str(out), '--pair-scores']
+    args = common + ['--tier1-docs', '60', '--checkpoint-every', '4']
+    assert env['k100'].main(args) == 130
+    import pickle
+    saved = pickle.load(open(out / '_partial.pkl', 'rb'))
+    assert 0 < len(saved) < 30 and not (out / 'vi_k100.parquet').exists()
+    monkeypatch.setattr(bge_m3, 'Reranker', FakeRR)
+    with pytest.raises(ValueError, match='config'):
+        env['k100'].main(common + ['--tier1-docs', '70', '--checkpoint-every', '4'])
+    assert env['k100'].main(args) == 0
+    for f in ('vi_k100.parquet', 'vi_k100_chunk_scores.parquet', 'vi_k100_pairs.parquet', 'vi_k100.candidates.parquet'):
+        assert pq.read_table(full / f).equals(pq.read_table(out / f)), f
+
+
+def test_sample_draws_seed42_queries(env):
+    import random
+    out = _run(env, 's', '--sample', '7')
+    random.seed(42)
+    want = sorted(random.sample(range(30), 7))
+    got = sorted(set(pq.read_table(out / 'vi_k100_sample.parquet')['query_id'].to_pylist()))
+    assert got == want
+    meta = json.loads((out / 'vi_k100_sample.meta.json').read_text(encoding='utf-8'))
+    assert meta['query_ids'] == want and meta['sample'] == 7
+    with pytest.raises(SystemExit):
+        env['k100'].main(['--queries', str(env['q']), '--out-dir', str(out), '--sample', '3', '--limit', '3'])
+
+
+def test_deep_gate_passes_on_fixture_and_flags_changes(env):
+    from r2ai.retrieve import deep_gate
+    base = _run(env, 'base')
+    deep = _run(env, 'deep', '--tier1-docs', '120', '--pair-scores')
+    same = _run(env, 'same', '--sample', '9')
+    assert deep_gate.main(['deep', '--old', str(base), '--new', str(deep), '--out', str(env['tmp'] / 'g1.json')]) == 0
+    g1 = json.loads((env['tmp'] / 'g1.json').read_text(encoding='utf-8'))
+    assert g1['pairs_within_tol_share'] == 1.0 and g1['same_order_share'] == 1.0 and g1['chunk_level']['common_rows'] > 0
+    assert deep_gate.main(['same', '--old', str(base), '--new', str(same), '--tag', '_sample',
+                           '--out', str(env['tmp'] / 'g2.json')]) == 0
+    g2 = json.loads((env['tmp'] / 'g2.json').read_text(encoding='utf-8'))
+    assert g2['queries'] == 9 and g2['rank_doc_tier_identical'] and g2['chunk_rows_identical']
+    t = pq.read_table(deep / 'vi_k100.parquet').to_pandas()
+    t.loc[t.index[0], 'score'] += 0.01                                    # one changed old tier-1 score -> gate fails
+    pq.write_table(pa.Table.from_pandas(t, preserve_index=False), deep / 'vi_k100.parquet')
+    assert deep_gate.main(['deep', '--old', str(base), '--new', str(deep), '--out', str(env['tmp'] / 'g3.json'),
+                           '--min-score-share', '1.0']) == 1
+
+
+def test_deep_tier1_keeps_default_scores_with_batch_dependent_reranker(env, monkeypatch):
+    """fp16 scores move with the batch composition; the top-50 pairs must still see the default run's batches."""
+    from r2ai.index import bge_m3
+
+    class BatchRR(FakeRR):
+        def score(self, q, passages, batch_size=32):
+            return super().score(q, passages, batch_size) + np.float32(len(passages) * 1e-3)
+    monkeypatch.setattr(bge_m3, 'Reranker', BatchRR)
+    base = _run(env, 'base')
+    deep = _run(env, 'deep', '--tier1-docs', '120', '--chunk-score-docs', '0')
+    old = pq.read_table(base / 'vi_k100.parquet').to_pandas()
+    new = pq.read_table(deep / 'vi_k100.parquet').to_pandas()
+    m = old[old.tier == 1].merge(new, on=['query_id', 'doc_id'], suffixes=('_old', '_new'))
+    assert len(m) == (old.tier == 1).sum() and (m['tier_new'] == 1).all()
+    assert np.array_equal(m['score_old'].to_numpy(), m['score_new'].to_numpy())
+
+
+def test_second_run_on_same_out_dir_is_refused_while_first_lives(env):
+    import subprocess
+    import sys
+    out = env['tmp'] / 'locked'
+    out.mkdir()
+    p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)', 'run_retrieval_k100'])
+    try:
+        (out / '_partial.pkl.lock').write_text(str(p.pid), encoding='utf-8')
+        with pytest.raises(RuntimeError, match='already using'):
+            env['k100'].main(['--queries', str(env['q']), '--candidates', 'exact', '--out-dir', str(out)])
+    finally:
+        p.kill()
+        p.wait()
+    assert env['k100'].main(['--queries', str(env['q']), '--candidates', 'exact', '--out-dir', str(out)]) == 0   # stale lock

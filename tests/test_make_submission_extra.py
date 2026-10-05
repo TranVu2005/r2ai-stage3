@@ -167,3 +167,25 @@ def test_doc_ranking_and_full_k_chunk_combine_independently(env):
         assert [ch['doc_id'] for ch in y['relevant_chunks'][3:]] == order[x['id']][3:5]
         assert all(ch['chunk_text'] == _body(ch['doc_id']) for ch in y['relevant_chunks'])
     assert gst['k_chunk'] == 3 and gst['docs_from_ranking'] == 4
+
+
+def test_doc_ranking_ignores_cached_rows_beyond_k_doc(env):
+    """A deeper cache (ranks > 100, e.g. --tier1-docs 100) must not hide docs 101.. of --doc-ranking."""
+    build, _, _ = env
+    dd = build.dirs
+    groups = dict(dd['groups']) | {d: [d] for d in range(1000, 1100)}
+    pq.write_table(pa.table({'doc_id': list(groups), 'doc_ids_group': list(groups.values())}), dd['chunks'] / 'docs.parquet')
+    deep = dd['tmp'] / 'deep'
+    deep.mkdir()
+    q = list(range(10, 10 + N_DOCS)) + list(range(1000, 1095))                      # 102 cached docs, ranks 101-102 deep
+    run = [(qq, k, d) for qq in (1, 2) for k, d in enumerate(q, 1)]
+    pq.write_table(pa.table({'query_id': [r[0] for r in run], 'rank': pa.array([r[1] for r in run], pa.int32()),
+                             'doc_id': [r[2] for r in run], 'score': pa.array([0.0] * len(run), pa.float32()),
+                             'tier': pa.array([1] * len(run), pa.int8())}), deep / 'vi_k100.parquet')
+    rk = [(qq, d) for qq in (1, 2) for d in (1000, 1093, 1094, 1095, 1096)]           # 1093/1094 = cached ranks 101/102
+    pq.write_table(pa.table({'query_id': [x for x, _ in rk], 'rank': [1, 2, 3, 4, 5] * 2, 'doc_id': [d for _, d in rk]}),
+                   dd['tmp'] / 'rank_deep.parquet')
+    sub, _, _ = build('deep', '--k-doc', '100', '--runs-dir', str(deep), '--doc-ranking', str(dd['tmp'] / 'rank_deep.parquet'),
+                      '--k-doc-total', '103')
+    for r in sub:
+        assert r['relevant_docs'] == list(dict.fromkeys(x for d in q[:100] + [1093, 1094, 1095] for x in groups[d]))

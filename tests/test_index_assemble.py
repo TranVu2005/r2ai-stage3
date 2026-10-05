@@ -1,3 +1,4 @@
+import pytest
 import numpy as np
 from scipy.sparse import csr_matrix, load_npz, random as sprandom, save_npz, vstack
 
@@ -86,8 +87,10 @@ def test_assemble_cli_writes_meta_from_shards(tmp_path, monkeypatch):
     assert meta['n_chunks'] == 6 and meta['faiss'] is None and not (out / 'faiss.index').exists()
 
 
-def test_build_end_to_end_with_fake_encoder_no_gpu(tmp_path, monkeypatch):
-    """cmd_build shard loop + assemble on CPU: fake encoder, torch.cuda calls stubbed (no GPU touched)."""
+@pytest.mark.parametrize('frozen_clock', [False, True])
+def test_build_end_to_end_with_fake_encoder_no_gpu(tmp_path, monkeypatch, frozen_clock):
+    """cmd_build shard loop + assemble on CPU: fake encoder, torch.cuda calls stubbed (no GPU touched).
+    frozen_clock: a shard finishing within one timer tick (Windows ~15.6 ms) must not break the speed log line."""
     import json
     import pyarrow as pa
     import pyarrow.parquet as pq
@@ -119,6 +122,8 @@ def test_build_end_to_end_with_fake_encoder_no_gpu(tmp_path, monkeypatch):
     monkeypatch.setattr(build, 'index_dir', lambda t: out)
     monkeypatch.setattr(build, 'INDEX_DIR', tmp_path)
     monkeypatch.setattr(build, 'assert_writable', lambda p: p)
+    if frozen_clock:
+        monkeypatch.setattr(build.time, 'time', lambda: 1000.0)
     assert build.main(['build', '--shard-size', '2', '--batch-size', '2', '--no-ann']) == 0
     meta = json.loads((out / 'meta.json').read_text(encoding='utf-8'))
     assert meta['n_chunks'] == 5 and meta['faiss'] is None and meta['sparse_nnz'] == 5

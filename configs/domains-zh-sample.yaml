@@ -1,0 +1,14 @@
+# Separate opt-in config. No Vietnamese group or default changes.
+groups:
+  zh_sample: {rate_cap: 4, max_conns: 2}
+defaults:
+  lang: zh
+  group: zh_sample
+  start_rate: 1.0
+  qa_gate: false
+  extractor: generic
+domains:
+  120ask.com: {extractor: zh_120ask}
+  ask.39.net: {extractor: zh_39}
+  cnkang.com: {extractor: zh_cnkang}
+  familydoctor.com.cn: {extractor: zh_familydoctor}

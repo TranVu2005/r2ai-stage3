@@ -56,23 +56,29 @@ python scripts/validate_submission.py D:/GitHub/r2ai-stage3/out/runs/new-full/su
 
 `--candidates exact` quét chính xác theo khối `dense.npy` và cache CSR mmap `<index>/sparse_mmap` (tạo từ `sparse.npz`, không sửa file gốc), không cần `faiss.index`; mặc định `faiss` giữ nguyên. Nếu đã có shard mà thiếu dense/sparse/meta: `python scripts/build_index.py assemble --target 256 --no-ann`. Gate tương đương: `python -m r2ai.retrieve.exact_gate --help`.
 
-Rerank sâu (mặc định tắt): `run_retrieval_k100 ... --tier1-docs 100 --tier2-docs 50 --chunk-score-docs 0 --pair-scores --out-dir <thư mục mới>`; chạy lại đúng lệnh để resume (checkpoint atomic, Ctrl+C an toàn, khóa chặn lần chạy thứ hai cùng `--out-dir`). Gate: `python -m r2ai.retrieve.deep_gate --help`. Trong PowerShell gọi `python` trực tiếp hoặc Git Bash (`& "C:\Program Files\Git\bin\bash.exe"`); `bash` của WSL không thấy `/d/...`. Builder luôn truyền `--docs-dir data/docs_vi --chunks-dir data/chunks` (mặc định docs-dir có thể trỏ legacy).
+Rerank sâu (mặc định tắt): `run_retrieval_k100 ... --tier1-docs 100 --tier2-docs 50 --chunk-score-docs 0 --pair-scores --out-dir <thư mục mới>`; chạy lại đúng lệnh để resume (checkpoint atomic, Ctrl+C an toàn, khóa chặn lần chạy thứ hai cùng `--out-dir`). Tier 1 sâu hơn mà giữ điểm lượt cũ bit-identical: thêm `--tier1-base N0` (ví dụ `--tier1-docs 200 --tier1-base 100`; gate `deep_gate deep --tol 0 --pairs`). Gate: `python -m r2ai.retrieve.deep_gate --help`. Trong PowerShell gọi `python` trực tiếp hoặc Git Bash (`& "C:\Program Files\Git\bin\bash.exe"`); `bash` của WSL không thấy `/d/...`. Builder luôn truyền `--docs-dir data/docs_vi --chunks-dir data/chunks` (mặc định docs-dir có thể trỏ legacy).
 
-## Tái tạo bản tốt nhất (D50)
+## Tái tạo bản tốt nhất (D50 + expand)
 
-D50 (Final 0,2107, 05/10) được mô tả trong `configs/submission-best.yaml`. Mặc định trong code không đổi; hai script dưới đây đọc file cấu hình đó. Chạy trong PowerShell ở root repo, không cần bash/WSL:
+Bản tốt nhất (Final 0,2109, 05/10) = D50 + bước hậu xử lý expand theo cụm doc trùng, mô tả trong `configs/submission-best.yaml`. D50 thuần (Final 0,2107) giữ ở `configs/submission-d50.yaml` (nội dung cũ của submission-best). Expand nối vào cuối `relevant_docs` các id (cả `doc_ids_group`) của doc cùng cụm `content` với 150 doc chính; `relevant_chunks` giữ nguyên D50. Bật/tắt bằng `postprocess.expand_clusters.enabled`; thiếu key = tắt. Mặc định trong code không đổi. Chạy trong PowerShell ở root repo, không cần bash/WSL:
 
 ```powershell
+# 0. Cụm doc trùng (CPU, đo 05/10: features 329,5 s + cluster 43,6 s, RSS đỉnh 1,37 GiB) -> out/runs/H1/clusters.parquet.
+#    Bắt buộc chạy lại khi corpus đổi (thêm zh, extract/chunk lại): cụm cũ không phủ doc mới và doc_id có thể đổi.
+python -m r2ai.dupes.scan features --docs-dir data/docs_vi --out-dir out/runs/H1 --workers 3
+python -m r2ai.dupes.scan cluster  --docs-dir data/docs_vi --out-dir out/runs/H1 --workers 3
+python -m r2ai.dupes.report --out-dir out/runs/H1
 # 1. Truy hồi (GPU, khoảng 1,2 h đo 05/10): candidates-only -> out/runs/best/cand, rerank sâu tier 1 = 100 doc -> out/runs/best/rerank.
 #    Bị ngắt (Ctrl+C, sleep, crash) thì chạy lại đúng lệnh này để resume từ checkpoint; một --out-dir chỉ cho 1 tiến trình.
 python scripts/run_best_retrieval.py
 if ($LASTEXITCODE -ne 0) { throw 'Retrieval failed' }
-# 2. Build (CPU, khoảng 4 phút): K doc 150, chunk full top 50; so SHA256 JSON với bản đã nộp, ZIP <= 104.857.600 byte.
-python scripts/build_best_submission.py --from-retrieval --out out/runs/best/submission/sub_best_kd150_full50.zip --no-check
-python scripts/validate_submission.py out/runs/best/submission/sub_best_kd150_full50.zip --queries D:/GitHub/r2ai-stage3-old/data/raw/query.parquet --corpus D:/GitHub/r2ai-stage3-old/data/raw/links_corpus.parquet --docs-dir data/docs_vi --max-zip-mib 100
+# 2. Build (CPU): make_submission (K doc 150, chunk full top 50) -> <out>_base.zip, rồi expand (r2ai.dupes) -> <out>;
+#    so SHA256 JSON (builder và sau expand) với bản đã nộp, ZIP <= 104.857.600 byte.
+python scripts/build_best_submission.py --from-retrieval --out out/runs/best/submission/sub_best_d50_expand.zip --no-check
+python scripts/validate_submission.py out/runs/best/submission/sub_best_d50_expand.zip --queries D:/GitHub/r2ai-stage3-old/data/raw/query.parquet --corpus D:/GitHub/r2ai-stage3-old/data/raw/links_corpus.parquet --docs-dir data/docs_vi --max-zip-mib 100
 ```
 
-Replay từ cache của D50 (không GPU, JSON phải giống byte bản đã nộp, lệch thì exit 1): `python scripts/build_best_submission.py --out out/runs/<thư mục mới>/sub_best_kd150_full50.zip`. Khi build với `--from-retrieval` sau một lượt truy hồi mới, `--no-check` bỏ yêu cầu SHA phải khớp (lượt truy hồi mới chưa được kiểm là giống byte); kết quả SHA vẫn được in ra.
+Replay từ cache (không GPU, JSON phải giống byte bản đã nộp, lệch thì exit 1): `python scripts/build_best_submission.py --out out/runs/<thư mục mới>/sub_best_d50_expand.zip` (best = H1-expand đã nộp) hoặc thêm `--config configs/submission-d50.yaml` cho D50 thuần. Khi build với `--from-retrieval` sau một lượt truy hồi mới, hoặc sau khi dựng lại cụm, `--no-check` bỏ yêu cầu SHA phải khớp; kết quả SHA vẫn được in ra.
 
 Retrieval dev (có guard, cần index/chunks NEW và dev legacy): `python scripts/retrieve.py dev --target 256 --dev D:/GitHub/r2ai-stage3-old/data/dev/pseudo_vi_v2.parquet`. Output OUT_DIR/retrieval. Index build giữ nguyên nhánh FAISS theo flat-max-gb, không ép thuật toán corpus mở rộng.
 

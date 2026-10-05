@@ -8,6 +8,9 @@ retrieve: step 1 run_retrieval_k100 --candidates-only into retrieval.candidates.
 build:    make_submission with submission.args, runs_dir / doc_ranking from the config (the caches the uploaded file
           was built from) or, with --from-retrieval, from the two retrieval out dirs; then compares the JSON SHA256 with
           submission.expected_json_sha256 (exit 1 on mismatch, unless --no-check) and the ZIP size with max_zip_bytes.
+          With postprocess.expand_clusters.enabled (off when the key is absent), make_submission writes <out stem>_base.zip
+          and r2ai.dupes.postprocess.expand_submission appends the duplicate-cluster mates (H1-expand) into <out>;
+          submission.base_json_sha256 (optional) is then checked on the builder JSON, expected_json_sha256 on the final one.
 """
 from __future__ import annotations
 
@@ -71,9 +74,18 @@ def cmd_retrieve(a, cfg) -> int:
     return 0
 
 
+def expand_config(cfg: dict) -> dict | None:
+    """postprocess.expand_clusters of the config when enabled, else None (key absent = off)."""
+    e = (cfg.get('postprocess') or {}).get('expand_clusters') or {}
+    return e if e.get('enabled') else None
+
+
 def cmd_build(a, cfg) -> int:
     from r2ai.submit import make_submission
-    argv = build_argv(cfg, a.from_retrieval, a.out)
+    exp = expand_config(cfg)
+    s = cfg['submission']
+    final = Path(_p(a.out or s['out']))
+    argv = build_argv(cfg, a.from_retrieval, str(final.with_name(final.stem + '_base.zip')) if exp else a.out)
     print(f'make_submission {" ".join(argv)}', flush=True)
     t0 = time.time()
     rc = make_submission.main(argv)
@@ -81,11 +93,25 @@ def cmd_build(a, cfg) -> int:
         return rc
     zp = Path(argv[argv.index('--out') + 1])
     js = zp.with_suffix('.json')
-    s = cfg['submission']
+    base = {}
+    if exp:
+        from r2ai.dupes.postprocess import expand_submission
+        base = {'base_json': str(js), 'base_json_bytes': js.stat().st_size, 'base_json_sha256': sha256(js),
+                'builder_elapsed_s': round(time.time() - t0, 1)}
+        arg = lambda k: argv[argv.index(k) + 1]
+        print(f'expand_clusters: {json.dumps(exp)}', flush=True)
+        st = expand_submission(js, final, runs_dir=arg('--runs-dir'), doc_ranking=arg('--doc-ranking'), queries=arg('--queries'),
+                               chunks_dir=arg('--chunks-dir'), clusters=_p(exp['clusters']), scope=exp.get('scope', 'content'),
+                               k_cache=int(arg('--k-doc')), k_total=int(arg('--k-doc-total')))
+        base |= {'expand': {k: st[k] for k in ('queries_changed', 'ids_added_total', 'scope', 'clusters')}}
+        zp, js = final, final.with_suffix('.json')
     res = {'elapsed_s': round(time.time() - t0, 1), 'json': str(js), 'json_bytes': js.stat().st_size, 'json_sha256': sha256(js),
            'zip_bytes': zp.stat().st_size, 'zip_sha256': sha256(zp), 'expected_json_sha256': s['expected_json_sha256'],
-           'max_zip_bytes': s['max_zip_bytes']}
+           'max_zip_bytes': s['max_zip_bytes']} | base
     res['json_matches'] = res['json_sha256'] == s['expected_json_sha256']
+    if exp and s.get('base_json_sha256'):
+        res['base_json_matches'] = res['base_json_sha256'] == s['base_json_sha256']
+        res['json_matches'] = res['json_matches'] and res['base_json_matches']
     res['zip_within_ceiling'] = res['zip_bytes'] <= s['max_zip_bytes']
     print(json.dumps(res, indent=1), flush=True)
     if not res['zip_within_ceiling']:

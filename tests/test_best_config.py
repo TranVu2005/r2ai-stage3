@@ -1,16 +1,17 @@
-"""configs/submission-best.yaml -> the exact CLI args of the uploaded D50 run; build fails on a JSON SHA256 mismatch."""
+"""configs/submission-d50.yaml (D50, formerly submission-best.yaml) -> the exact CLI args of the uploaded D50 run; build fails
+on a JSON SHA256 mismatch. The current best config (D50 + expand) is covered by test_best_expand.py."""
 import hashlib
 import zipfile
 
 import pytest
 
-from r2ai.paths import resolve_path
+from r2ai.paths import ROOT, resolve_path
 from r2ai.submit import best
 
 
 @pytest.fixture
 def cfg():
-    return best.load_config(best.DEFAULT_CONFIG)
+    return best.load_config(ROOT / 'configs' / 'submission-d50.yaml')
 
 
 def _flags(argv):

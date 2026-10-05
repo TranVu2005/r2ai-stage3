@@ -94,18 +94,30 @@ def report():
             return f'{value:.{digits}f}' if value is not None else 'chưa đo'
         extract_pct = 100*e['ok']/e['n_docs'] if e.get('n_docs') else None
         answer_pct = 100*e['answer']/e['n_docs'] if e.get('n_docs') else None
+        proxy_pair = ' / '.join(number(measured.get(b, {}).get('yield', {}).get(d, {}).get('hits_per_1k_extracted_docs')) for b in ('hybrid', 'dense'))
         status = 'loại theo yêu cầu' if inv['excluded'] else ('HALTED: mẫu bị cắt bởi policy' if domain_states.get(d) == 'halted' else ('robots/chưa truy cập được' if not page_attempts[d] else 'đã fetch'))
-        table.append(f'| {d} | {inv["n_sample"]:,}/{inv["n_unique"]:,} | {number(record["crawl_ok_pct_of_finished_sample"])} | {number(rate)} | {number(extract_pct)} / {number(answer_pct)} | {record["chunks"] if record["chunks"] is not None else "chưa đo"} | {number(y.get("hits_per_1k_extracted_docs"))} | {number(hours)} | {number(raw_est/2**30 if raw_est is not None else None)} / {number(idx_est/2**30 if idx_est is not None else None)} | {status} |')
+        table.append(f'| {d} | {inv["n_sample"]:,}/{inv["n_unique"]:,} | {number(record["crawl_ok_pct_of_finished_sample"])} | {number(rate)} | {number(extract_pct)} / {number(answer_pct)} | {record["chunks"] if record["chunks"] is not None else "chưa đo"} | {proxy_pair} | {number(hours)} | {number(raw_est/2**30 if raw_est is not None else None)} / {number(idx_est/2**30 if idx_est is not None else None)} | {status} |')
     atomic_json(RUN / 'domain_metrics.json', records)
     head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip()
     now = datetime.now(timezone(timedelta(hours=7))).isoformat(timespec='seconds')
     chunk_report = read_json(CHUNKS / 'chunk_report.json', {})
+    qa_chunk_report = read_json(RUN / 'qa_chunks/chunk_report.json', {})
+    qa_summary = read_json(RUN / 'qa_summary.json', {})
+    baseline_gate = read_json(RUN / 'd50_replay/stats.json', {})
     variant = read_json(RUN / 'Z/stats.json', {})
     pytest_log = (RUN / 'pytest_full.log').read_text('utf-8', errors='replace') if (RUN / 'pytest_full.log').exists() else 'chưa đo'
     test_summary = next((line for line in reversed(pytest_log.splitlines()) if 'passed' in line or 'failed' in line), 'đang chạy / chưa đo')
     eligible = [r for r in records if r['yield_proxy'].get('hits_per_1k_extracted_docs') is not None and not r['excluded']]
     eligible.sort(key=lambda r: -r['yield_proxy']['hits_per_1k_extracted_docs'])
     order = ', '.join(r['domain'] for r in eligible) if eligible else 'chưa đo yield; chưa chốt thứ tự crawl toàn bộ'
+    qa_table = ['| Domain QA snapshot | Doc | Body chars p50 | Answer | Thin | Body rỗng / answer ngoài body / U+FFFD |',
+                '|---|---:|---:|---:|---:|---:|']
+    for d, q in sorted(qa_summary.items()):
+        qa_table.append(f'| {d} | {q["n"]} | {q["body_chars_p50"]} | {q["answer_present"]} | {q["thin"]} | {q["body_empty"]} / {q["answer_outside_body"]} / {q["replacement_chars"]} |')
+    branch_table = ['| Nhánh | Query có zh trong top150 trộn | Query-doc zh hit |', '|---|---:|---:|']
+    for b in ('hybrid', 'dense'):
+        if b in measured:
+            branch_table.append(f'| {b} | {measured[b]["queries_with_zh"]} | {measured[b]["zh_hits"]} |')
     text = '\n'.join([
         '# zh-sample REPORT', f'UTC+7: {now}; HEAD đã đọc: `{head}`; seed 42.',
         'Mô hình chạy inference: BAAI/bge-m3 + BAAI/bge-reranker-v2-m3 (cache local, fp16, max_len 512).',
@@ -114,13 +126,18 @@ def report():
         'Egress VN kiểm bằng HTTP trực tiếp, trust_env=False; robots kiểm mỗi origin và đích redirect, crawl-delay/request-rate được áp dụng; mặc định nhóm zh cap 4 req/s, 2 connection, khởi đầu 1 req/s, tự giảm khi lỗi/429/503/latency. Không fetch nếu robots lỗi/chặn.',
         'Chỉ ghi bundle zh và out/runs/zh-sample. Không sửa PROGRESS/LOG (agent rerank200 phụ trách). Không nộp LB.',
         'Retry trang theo StateDB hiện có: tối đa 3 lần, cách 1 giờ; không chốt bundle khi còn retry đến hạn trong tương lai. Halt an toàn được giữ khi resume và ghi rõ mẫu bị cắt; không tự vượt halt để hoàn tất số URL.',
-        '', '| Domain | Mẫu/URL unique | Crawl ok % trên URL đã xử lý | req/s trang | Extract ok % / answer % | Chunk t256 | Proxy hit/1k extract doc | Giờ toàn domain* | Raw / index GiB* | Trạng thái |',
+        '', '| Domain | Mẫu/URL unique | Crawl ok % trên URL đã xử lý | req/s trang | Extract ok % / answer % | Chunk t256 | Proxy H / D hit/1k extract doc | Giờ toàn domain* | Raw / index GiB* | Trạng thái |',
         '|---|---:|---:|---:|---:|---:|---:|---:|---:|---|', *table,
         '', '* Ngoại suy từ đo thực mẫu; giờ dùng URL attempt/s (đã tính redirect trong thời gian), không giả định 1 request = 1 URL. Không dự báo được thay đổi rate/lỗi/robots về sau. Index phân bổ dung lượng dense+sparse thực theo tỷ trọng chunk; không gồm ANN, query cache, shard checkpoint. Rate chỉ dùng request và thời gian của các phiên đã kết thúc; không lấy tử số của phiên đang chạy/hard-kill.',
         'QA: qa/<domain>.json lưu tối đa 50 doc đã extract, số thực có trong extract_stats.json. Domain bị robots chặn hoặc mẫu nhỏ có ít hơn 50; chưa đo QA nội dung tại các domain đó. Charset/replacement và soft-404 lưu trong domain_metrics.json; các tỷ lệ answer của trang bài viết 0% không đồng nghĩa extractor lỗi.',
+        'QA snapshot kiểm cấu trúc (input cố định tại qa_chunk_input; khác QA cập nhật sau full extract):' if qa_summary else 'QA kiểm cấu trúc: chưa đo.',
+        '', *(qa_table if qa_summary else []), '',
+        f'Chunk smoke trên snapshot QA (khác bundle index đầy đủ): `{json.dumps(qa_chunk_report, ensure_ascii=False)}`' if qa_chunk_report else 'Chunk smoke QA: chưa đo.',
+        f'D50 replay gate: `{json.dumps(baseline_gate, ensure_ascii=False)}`' if baseline_gate else 'D50 replay gate: xem d50_replay.log; stats.json chưa ghi.',
         f'Chunk report: `{json.dumps(chunk_report, ensure_ascii=False)}`',
         'Chunker hiện có giữ nguyên thuật toán; mọi chunk là substring doc_text. Theo dõi dropped_whitespace_free_blobs cho đoạn CJK dài, không tự đổi chunker.',
-        f'Hybrid/dense-only: `{json.dumps(measured, ensure_ascii=False)}`' if measured else 'Hybrid/dense-only: chưa đo.',
+        f'Hybrid/dense-only: `{json.dumps(measured.get("measurement", {}), ensure_ascii=False)}`' if measured else 'Hybrid/dense-only: chưa đo.',
+        '', *(branch_table if measured else []), '',
         'Yield là PROXY: số cặp query-doc zh trong top 150 khi trộn logits reranker với đúng tập doc D50, trên 1.000 doc extract của domain (gồm thin). Không có nhãn. Membership so logits trực tiếp; giữ thứ tự tương đối vi của D50; fp16 batch padding giữa cache vi và lượt zh có thể lệch ULP.',
         f'Z: `{json.dumps(variant, ensure_ascii=False)}`' if variant else 'Z: chưa đo; chưa có artifact hoàn tất. LB chưa đo, chưa kết luận zh có lợi.',
         f'Full suite: {test_summary}. Log: pytest_full.log. Slow suite: xem pytest_slow.log nếu có.',

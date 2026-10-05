@@ -197,7 +197,7 @@ def test_geo_refresh_does_not_burst_http():
     import time
     from types import SimpleNamespace
     from r2ai.zh_sample.crawl import PoliteClient
-    from vicrawl.tuner import Tuner
+    from r2ai.zh_sample.crawl import ZhTuner
     starts = []
     class Net:
         def __init__(self):
@@ -210,7 +210,7 @@ def test_geo_refresh_does_not_burst_http():
     class Response:
         status_code, headers = 200, {}
         async def __aenter__(self):
-            starts.append(time.monotonic())
+            starts.append(time.perf_counter())
             return self
         async def __aexit__(self, *args): pass
         async def aiter_bytes(self):
@@ -220,11 +220,19 @@ def test_geo_refresh_does_not_burst_http():
     async def run():
         c = object.__new__(PoliteClient)
         c.domain, c.net, c.stop, c.audit = 'a.cn', Net(), asyncio.Event(), io.StringIO()
-        c.tuner = Tuner(4, 2, rate=4)
+        c.tuner = ZhTuner(4, 2, rate=4)
         c.next_at, c.pace_lock, c.client = 0, asyncio.Lock(), Transport()
-        await asyncio.gather(c.hop('https://a.cn/1','page'), c.hop('https://a.cn/2','page'))
+        await asyncio.gather(*(c.hop(f'https://a.cn/{i}','page') for i in range(6)))
     asyncio.run(run())
-    assert starts[1] - starts[0] >= .24
+    assert min(b-a for a,b in zip(starts,starts[1:])) >= .249
+
+
+def test_zh_pacing_clock_has_submillisecond_resolution():
+    # Windows Python 3.12 monotonic is GetTickCount64 (15.625ms); it cannot enforce 250ms precisely.
+    import time
+    from r2ai.zh_sample.crawl import ZhTuner
+    tuner = ZhTuner(4,2,rate=4)
+    assert time.get_clock_info(tuner.clock.__name__).resolution <= .001
 
 
 def test_pending_retry_is_not_finished():

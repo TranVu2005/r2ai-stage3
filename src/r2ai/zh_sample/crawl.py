@@ -52,6 +52,10 @@ def next_retry_at(db, domain, limit):
 
 class ZhTuner(Tuner):
     """Opt-in zh slow-server cap, without changing the default vi tuner."""
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault('clock', time.perf_counter)
+        super().__init__(*args, **kwargs)
+
     def record(self, latency, http_status, error):
         events = super().record(latency, http_status, error)
         if self.p50 > 3 and self.cap > 1:
@@ -110,15 +114,21 @@ class PoliteClient:
 
     async def hop(self, url, kind):
         async with self.pace_lock:
-            while time.monotonic() < max(self.next_at, self.tuner.paused_until):
+            clock = self.tuner.clock
+            while True:
+                while clock() < max(self.next_at, self.tuner.paused_until):
+                    if self.stop.is_set():
+                        raise asyncio.CancelledError
+                    await asyncio.sleep(min(1, max(self.next_at, self.tuner.paused_until) - clock()))
                 if self.stop.is_set():
                     raise asyncio.CancelledError
-                await asyncio.sleep(min(1, max(self.next_at, self.tuner.paused_until) - time.monotonic()))
-            if self.stop.is_set():
-                raise asyncio.CancelledError
-            # Hold the pacing lock through geo refresh, then reserve the actual send time.
-            await self.net.check()
-            self.next_at = time.monotonic() + self.tuner.interval()
+                # Geo refresh can await while another response sets a pause or Ctrl+C arrives.
+                await self.net.check()
+                if self.stop.is_set():
+                    raise asyncio.CancelledError
+                if clock() >= max(self.next_at, self.tuner.paused_until):
+                    break
+            self.next_at = clock() + self.tuner.interval()
         t0 = time.time()
         code, headers, body, error = None, {}, b'', ''
         try:
@@ -203,7 +213,7 @@ class PoliteClient:
         if status in ('bot_challenge', 'cookie_challenge'):
             self.consecutive_challenges += 1
             self.tuner.rate = max(.25, self.tuner.rate / 2)
-            self.tuner.paused_until = time.monotonic() + 60
+            self.tuner.paused_until = self.tuner.clock() + 60
             if self.consecutive_challenges >= 12:
                 self.tuner.halted, self.tuner.halt_reason = True, '12 consecutive challenges; no bypass attempted'
         else:

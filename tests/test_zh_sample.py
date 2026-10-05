@@ -132,6 +132,8 @@ def test_interrupt_flushes_private_checkpoint_and_resumes(tmp_path, monkeypatch)
     import sqlite3
     from vicrawl.state import StateDB
     m = importlib.import_module('r2ai.zh_sample.crawl')
+    common = importlib.import_module('r2ai.zh_sample.common')
+    monkeypatch.setattr(common, 'OWNED', (*common.OWNED, tmp_path))
     run, raw, db_path = tmp_path / 'run', tmp_path / 'raw', tmp_path / 'crawl.db'
     run.mkdir()
     groups = [{'url': f'https://a.cn/q/{i}', 'url_norm': f'a.cn/q/{i}', 'domain': 'a.cn', 'doc_ids': [i], 'rank': i} for i in range(10)]
@@ -260,3 +262,12 @@ def test_zh_slow_server_rate_cap():
     assert tuner.rate <= 1
     assert tuner.cap <= 1
     assert tuner.interval() >= 1
+
+
+def test_d50_config_is_pinned_when_best_changes():
+    from r2ai.zh_sample.evaluate import choose_d50_config, D50_SHA256
+    baseline = {'submission': {'expected_json_sha256':D50_SHA256}, 'run_id':'best-d50'}
+    expanded = {'submission': {'expected_json_sha256':'new-best'}, 'run_id':'best-expanded'}
+    assert choose_d50_config([expanded,baseline]) == baseline
+    with pytest.raises(ValueError,match='D50'):
+        choose_d50_config([expanded])

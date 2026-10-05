@@ -11,6 +11,27 @@ import pickle
 import time
 from collections import defaultdict
 
+D50_SHA256 = '2f10b78ac17f4eafdd5fe1b0b207260b062f17b29f4fcc3ee1a4b364b3c36544'
+
+
+def choose_d50_config(configs):
+    for cfg in configs:
+        if cfg.get('submission', {}).get('expected_json_sha256') == D50_SHA256:
+            return cfg
+    raise ValueError('No exact D50 configuration; refusing mutable best baseline')
+
+
+def load_d50_config():
+    snapshot = RUN / 'd50_config.json'
+    if snapshot.exists():
+        return choose_d50_config([json.loads(snapshot.read_text('utf-8'))])
+    import yaml
+    configs = [yaml.safe_load(p.read_text('utf-8')) for p in
+               (ROOT / 'configs/submission-d50.yaml', ROOT / 'configs/submission-best.yaml') if p.exists()]
+    cfg = choose_d50_config(configs)
+    atomic_json(snapshot, cfg)
+    return cfg
+
 
 def merge_scores(vi, zh, k=150):
     # Membership uses direct logits. Preserve D50's vi order across its tier boundary.
@@ -45,8 +66,7 @@ def yield_proxy(merged, domain_for, sampled_docs):
 
 def vi_rankings():
     import pyarrow.parquet as pq
-    from r2ai.submit.best import load_config
-    cfg = load_config(ROOT / 'configs/submission-best.yaml')
+    cfg = load_d50_config()
     cache = ROOT / cfg['submission']['runs_dir'] / 'vi_k100.parquet'
     candidates = ROOT / cfg['submission']['doc_ranking']
     require_inputs(cache, candidates)

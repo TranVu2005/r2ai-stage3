@@ -104,6 +104,19 @@ def report():
     qa_chunk_report = read_json(RUN / 'qa_chunks/chunk_report.json', {})
     qa_summary = read_json(RUN / 'qa_summary.json', {})
     baseline_gate = read_json(RUN / 'd50_replay/stats.json', {})
+    model_snapshots = read_json(RUN / 'model_snapshots.json', {})
+    noop_parity = read_json(RUN / 'noop_vi_parity.json', {})
+    embed_rows = []
+    if (RUN / 'embed_sessions.jsonl').exists():
+        for line in (RUN / 'embed_sessions.jsonl').open(encoding='utf-8'):
+            try:
+                embed_rows.append(json.loads(line))
+            except ValueError:
+                continue
+    embed_stats = {'completed_shard_runs': len(embed_rows), 'encoded_chunks': sum(r['chunks'] for r in embed_rows),
+                   'encode_and_checkpoint_seconds': sum(r['seconds'] for r in embed_rows),
+                   'last_successful_run': read_json(INDEX / 'meta.json', {}),
+                   'note': 'shard timing includes encode and checkpoint writes; unfinished shards excluded'} if embed_rows else {}
     variant = read_json(RUN / 'Z/stats.json', {})
     pytest_log = (RUN / 'pytest_full.log').read_text('utf-8', errors='replace') if (RUN / 'pytest_full.log').exists() else 'chưa đo'
     test_summary = next((line for line in reversed(pytest_log.splitlines()) if 'passed' in line or 'failed' in line), 'đang chạy / chưa đo')
@@ -121,6 +134,7 @@ def report():
     text = '\n'.join([
         '# zh-sample REPORT', f'UTC+7: {now}; HEAD đã đọc: `{head}`; seed 42.',
         'Mô hình chạy inference: BAAI/bge-m3 + BAAI/bge-reranker-v2-m3 (cache local, fp16, max_len 512).',
+        f'Snapshot cache đã xác minh: `{json.dumps(model_snapshots, ensure_ascii=False)}`' if model_snapshots else 'Snapshot model: chưa xác minh.',
         f'Mẫu: {sum(r["n_sample"] for r in inventory):,} nhóm URL trên {sum(not r["excluded"] for r in inventory)} domain zh; gộp http/https/www, giữ doc_ids cả nhóm. ceil(2% URL unique), tối thiểu 200 nếu đủ.',
         'Nguồn phân loại zh là snapshot legacy có lang=zh; domain chưa xác minh ngôn ngữ được ghi trong sample_manifest.json, chưa tự coi là zh.',
         'Egress VN kiểm bằng HTTP trực tiếp, trust_env=False; robots kiểm mỗi origin và đích redirect, crawl-delay/request-rate được áp dụng; mặc định nhóm zh cap 4 req/s, 2 connection, khởi đầu 1 req/s, tự giảm khi lỗi/429/503/latency. Không fetch nếu robots lỗi/chặn.',
@@ -130,12 +144,15 @@ def report():
         '|---|---:|---:|---:|---:|---:|---:|---:|---:|---|', *table,
         '', '* Ngoại suy từ đo thực mẫu; giờ dùng URL attempt/s (đã tính redirect trong thời gian), không giả định 1 request = 1 URL. Không dự báo được thay đổi rate/lỗi/robots về sau. Index phân bổ dung lượng dense+sparse thực theo tỷ trọng chunk; không gồm ANN, query cache, shard checkpoint. Rate chỉ dùng request và thời gian của các phiên đã kết thúc; không lấy tử số của phiên đang chạy/hard-kill.',
         'QA: qa/<domain>.json lưu tối đa 50 doc đã extract, số thực có trong extract_stats.json. Domain bị robots chặn hoặc mẫu nhỏ có ít hơn 50; chưa đo QA nội dung tại các domain đó. Charset/replacement và soft-404 lưu trong domain_metrics.json; các tỷ lệ answer của trang bài viết 0% không đồng nghĩa extractor lỗi.',
+        'Extract ok dùng ngưỡng body ≥200 ký tự; thin gồm cả câu trả lời ngắn có nội dung thật. Tỷ lệ extract/answer chia trên doc đã extract, không chia trên URL bị robots chặn hoặc fetch lỗi.',
         'QA snapshot kiểm cấu trúc (input cố định tại qa_chunk_input; khác QA cập nhật sau full extract):' if qa_summary else 'QA kiểm cấu trúc: chưa đo.',
         '', *(qa_table if qa_summary else []), '',
         f'Chunk smoke trên snapshot QA (khác bundle index đầy đủ): `{json.dumps(qa_chunk_report, ensure_ascii=False)}`' if qa_chunk_report else 'Chunk smoke QA: chưa đo.',
         f'D50 replay gate: `{json.dumps(baseline_gate, ensure_ascii=False)}`' if baseline_gate else 'D50 replay gate: xem d50_replay.log; stats.json chưa ghi.',
+        f'Đối chiếu đường dựng Z khi không chọn zh (không phải kết quả Z): `{json.dumps(noop_parity, ensure_ascii=False)}`' if noop_parity else 'Z no-op đối chiếu D50: chưa đo.',
         f'Chunk report: `{json.dumps(chunk_report, ensure_ascii=False)}`',
         'Chunker hiện có giữ nguyên thuật toán; mọi chunk là substring doc_text. Theo dõi dropped_whitespace_free_blobs cho đoạn CJK dài, không tự đổi chunker.',
+        f'Embed đo thực: `{json.dumps(embed_stats, ensure_ascii=False)}`' if embed_stats else 'Embed đo thực: chưa đo.',
         f'Hybrid/dense-only: `{json.dumps(measured.get("measurement", {}), ensure_ascii=False)}`' if measured else 'Hybrid/dense-only: chưa đo.',
         '', *(branch_table if measured else []), '',
         'Yield là PROXY: số cặp query-doc zh trong top 150 khi trộn logits reranker với đúng tập doc D50, trên 1.000 doc extract của domain (gồm thin). Không có nhãn. Membership so logits trực tiếp; giữ thứ tự tương đối vi của D50; fp16 batch padding giữa cache vi và lượt zh có thể lệch ULP.',

@@ -16,11 +16,12 @@ def run():
     from .crawl import run_crawl
     from .extract import extract_all
     from .index import chunk, embed, digest
-    from .evaluate import retrieve
+    from .evaluate import retrieve, load_d50_config
     from .variant import build_z, EXPECTED
     from .report import report
     preflight()
     with exclusive('pipeline'):
+        load_d50_config()
         state_path = RUN / 'pipeline_state.json'
         state = json.loads(state_path.read_text('utf-8')) if state_path.exists() else {'done': [], 'started_at': time.time()}
         def stage(name, fn, gpu=False):
@@ -67,6 +68,7 @@ def run():
             if output.exists() and digest(output) == EXPECTED:
                 return
             return subprocess.run([sys.executable, '-X', 'utf8', '-B', str(ROOT / 'scripts/build_best_submission.py'),
+                                   '--config', str(RUN / 'd50_config.json'),
                                    '--out', str(RUN / 'd50_replay/D50.zip')], cwd=ROOT).returncode
         try:
             stage('sample', prepare)

@@ -77,11 +77,12 @@ def report():
         url_rate = page_attempts[d] / seconds[d] if seconds[d] and page_attempts[d] else None
         hours = inv['n_unique'] / url_rate / 3600 if url_rate else None
         raw_est = raw_bytes[d] * inv['n_unique'] / len(seen[d]) if seen[d] else None
-        idx_est = index_bytes * chunk_counts[d] / max(1, sum(chunk_counts.values())) * inv['n_unique'] / indexed_docs[d] if index_bytes and indexed_docs[d] else None
+        idx_est = index_bytes * chunk_counts[d] / max(1, sum(chunk_counts.values())) * inv['n_unique'] / len(seen[d]) if index_bytes and indexed_docs[d] and seen[d] else None
         y = measured.get(chosen, {}).get('yield', {}).get(d, {})
         record = {**inv, 'crawl_status': dict(c), 'finished': finished,
             'crawl_ok_pct_of_finished_sample': 100*c['ok']/finished if finished else None,
             'http_page_requests': req[d]['page'], 'http_robots_requests': req[d]['robots'],
+            'unique_urls_attempted': len(seen[d]),
             'page_requests_per_second': rate, 'url_attempts_per_second': url_rate,
             'crawl_wall_seconds_completed_sessions': seconds[d], 'extract': e,
             'encoding': dict(encoding[d]), 'unicode_replacement_chars': replacements[d],
@@ -149,7 +150,7 @@ def report():
         'Retry trang theo StateDB hiện có: tối đa 3 lần, cách 1 giờ; không chốt bundle khi còn retry đến hạn trong tương lai. Halt an toàn được giữ khi resume và ghi rõ mẫu bị cắt; không tự vượt halt để hoàn tất số URL.',
         '', '| Domain | Mẫu/URL unique | Crawl ok % trên URL đã xử lý | req/s trang | Extract ok % / answer % | Chunk t256 | Proxy H / D hit/1k extract doc | Giờ toàn domain* | Raw / index GiB* | Trạng thái |',
         '|---|---:|---:|---:|---:|---:|---:|---:|---:|---|', *table,
-        '', '* Ngoại suy từ đo thực mẫu; giờ dùng URL attempt/s (đã tính redirect trong thời gian), không giả định 1 request = 1 URL. Không dự báo được thay đổi rate/lỗi/robots về sau. Index phân bổ dung lượng dense+sparse thực theo tỷ trọng chunk; không gồm ANN, query cache, shard checkpoint. Rate chỉ dùng request và thời gian của các phiên đã kết thúc; không lấy tử số của phiên đang chạy/hard-kill.',
+        '', '* Ngoại suy từ đo thực mẫu; giờ dùng URL attempt/s (đã tính redirect trong thời gian), không giả định 1 request = 1 URL. Không dự báo được thay đổi rate/lỗi/robots về sau. Index phân bổ dung lượng dense+sparse thực theo tỷ trọng chunk, rồi nhân URL toàn domain / URL unique đã thử fetch (gồm fetch/extract lỗi và doc không đủ điều kiện index); không gồm ANN, query cache, shard checkpoint. Rate chỉ dùng request và thời gian của các phiên đã kết thúc; không lấy tử số của phiên đang chạy/hard-kill.',
         'QA: qa/<domain>.json lưu tối đa 50 doc đã extract, số thực có trong extract_stats.json. Domain bị robots chặn hoặc mẫu nhỏ có ít hơn 50; chưa đo QA nội dung tại các domain đó. Charset/replacement và soft-404 lưu trong domain_metrics.json; các tỷ lệ answer của trang bài viết 0% không đồng nghĩa extractor lỗi.',
         'Extract ok dùng ngưỡng body ≥200 ký tự; thin gồm cả câu trả lời ngắn có nội dung thật. Tỷ lệ extract/answer chia trên doc đã extract, không chia trên URL bị robots chặn hoặc fetch lỗi.',
         'QA snapshot kiểm cấu trúc (input cố định tại qa_chunk_input; khác QA cập nhật sau full extract):' if qa_summary else 'QA kiểm cấu trúc: chưa đo.',

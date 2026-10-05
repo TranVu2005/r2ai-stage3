@@ -11,6 +11,17 @@ The pipeline never uploads; the user uploads by hand and reports the scores. Lea
 | 2026-10-05 | `out/runs/new-full/sub_new_vi_kd100_kc19_full.zip` (39,237,992 B) | `1d171722cd27636a901684778fa0120bf28baab126284d00fc9449820deb567a` | `50ac7367c671104c6ae3f0d686fe7cc40cf69478e2b0fc7d06674ace25f937ab` (156,211,418 B) | sub06 config on the NEW index (3,909,586 t256 chunks / 623,805 docs, K100 `--candidates exact`): k_doc 100 (whole doc_ids_group), k_chunk 19, chunk mode full, dedupe scope doc | **0.1748** (best so far) | 0.2214 | 0.174 | 0.2897 | 0.1283 | 0.3025 | 0.1249 | provided by the user 2026-10-05 |
 | 2026-10-05 | V2 `out/runs/ab-2026-10-05/v2/sub_ab_v2_kd100_kc19_full_xchunk.zip` (47,792,584 B) | `af1864143dff827048c6dfbc16afd664a6758341ec8ab809cde947277bf6290c` | `a0de9f7a4edc83c5ce8ee30d416377429bf1c2bac3c48b10074d4aeecf7ce614` (190,797,582 B) | baseline + 1 extra t256 chunk (best reranker score) for docs ranked 20..45; relevant_docs unchanged | 0.1728 | 0.2214 | 0.174 | 0.2897 | 0.1243 | 0.1507 | 0.1411 | provided by the user 2026-10-05 |
 
+| 2026-10-05 | C `out/runs/ab-2026-10-05b/C/sub_abC_kd100_fullk_probe63mib.zip` (65,062,696 B = 62.05 MiB) | `3d1b045f00245fe5421a1fbb363ae0656d6ea3f5066e8f341d2b23dcbf676bdf` | `e588e7bf49c7f64147d8c65505949dd685fd1537373915c405f44ea638498d17` (260,260,224 B) | baseline + full chunks for docs ranked 20..32 (k_chunk 32); relevant_docs unchanged | **0.1929** (best so far) | 0.2214 | 0.174 | 0.2897 | 0.1644 | 0.2669 | 0.1713 | provided by the user 2026-10-05 |
+| 2026-10-05 | V3 `out/runs/ab-2026-10-05b/V3/sub_abV3_kd200_kc19_full.zip` (39,775,610 B) | `fa73bf9fb387e056fa2220b935cca94182f28c82fb617c97e21530cc2d96ead8` | `984e1cce0f666ff2c9785e4937d069645988aff8374fb10bbb12b3e91afcd844` (157,121,008 B) | baseline + relevant_docs to 200 primary docs (ranks 101+ in hybrid order); chunks unchanged | 0.1758 | 0.2233 | 0.1209 | 0.36 | 0.1283 | 0.3025 | 0.1249 | provided by the user 2026-10-05 |
+| 2026-10-05 | V3b `out/runs/ab-2026-10-05b/V3b/sub_abV3b_kd150_kc19_full.zip` (39,519,425 B) | `fe0f217a2343b3b7985e93cabc030307cb00a7290810daaf4eebd1a00116ec1c` | `42a641204d1ed986e89e2a376a400963ab7c440baec57b5d92aadd28ebb6ef97` (156,679,502 B) | baseline + relevant_docs to 150 primary docs (ranks 101+ in hybrid order); chunks unchanged | 0.1783 | 0.2283 | 0.1422 | 0.3359 | 0.1283 | 0.3025 | 0.1249 | provided by the user 2026-10-05 |
+
+C / V3 / V3b vs baseline (each changes one side only, and the other side's metrics are identical to the baseline, as designed):
+* **Upload limit**: the LB accepted the 62.05 MiB ZIP (C). The limit is between 62.05 MiB (accepted) and 110 MiB (sub05_full never finished uploading); exact value unknown. New ceiling used for files: 100 MiB = 104,857,600 B.
+* **Full chunks for ranks 20..32 still pay**: Chunk F2 0.1283 -> 0.1644 (+0.036), Chunk R 0.1249 -> 0.1713, Chunk P 0.3025 -> 0.2669. Not saturated at rank 32.
+* **Doc K**: Doc F2 K150 0.2283 > K200 0.2233 > K100 0.2214; K150 kept (K200 loses more precision, 0.1209, than it gains recall).
+* **C + V3b (predicted, not measured)**: Final = (Doc F2 + Chunk F2) / 2 and each variant moves only one F2, so (0.2283 + 0.1644) / 2 = 0.19635. Built as G (see "Pha 1" below).
+* Best scored file: **C, Final 0.1929**.
+
 vs sub06: Final x2.79, Doc R x3.29 (0.088 -> 0.2897). Coverage of the vi corpus was the bottleneck.
 
 V2 vs baseline: doc side identical (by design). Chunk P 0.3025 -> 0.1507, Chunk R 0.1249 -> 0.1411, Chunk F2 0.1283 -> 0.1243, Final -0.0020. The 26 short chunks are right only ~4 % of the time (estimate from the macro means, vs ~30 % for the 19 full chunks): precision halves and cancels the recall gain. **The baseline stays the best file.** Lesson: the value is in full chunks (one full chunk covers several reference chunks); no more short extra chunks.
@@ -191,3 +202,32 @@ Suggested upload order: **A -> V3 -> C -> V3b** (depending on the scores).
   Gate: n_candidates and n_docs equal `vi_k100.candidates.parquet` for 1,200/1,200 queries; K100 docs within the candidate docs
   1,200/1,200; tier-1 set (top-200 chunks -> top-50 docs by hybrid) and tier-2 set (next docs by hybrid order) reproduced 1,200/1,200.
 * Default builder after this change still rebuilds the uploaded JSON byte-identically (SHA256 `50ac7367...37ab`).
+
+## Pha 1: G / K40 / K50 (C + V3b combined, deeper full chunks; 2026-10-05, not uploaded)
+
+Files in `out/runs/ab-2026-10-05c/` (ignored). No GPU, no rerank, no corpus embedding; builder code unchanged (the flags
+already existed). Common args: `--k-doc 100 --chunk-mode full --dedupe-scope doc --runs-dir out/runs/vi-k100
+--chunks-dir data/chunks --docs-dir data/docs_vi --queries D:/GitHub/r2ai-stage3-old/data/raw/query.parquet
+--doc-ranking out/runs/ab-2026-10-05b/cand/vi_cand.docs.parquet --k-doc-total 150`, plus `--k-chunk 32 / 40 / 50`.
+`--docs-dir` / `--chunks-dir` must be given: a first attempt with the default docs dir read the legacy docs (29,333 of
+38,400 chunk docs without text); its outputs are kept apart in `_invalid_default_docs_dir/` and not used.
+
+| file | control | change | primary docs/query min/p5/p50/max | chunks/query | JSON B | ZIP B | ZIP SHA256 | validator | out-of-scope diff |
+|---|---|---|---|---|---|---|---|---|---|
+| G `G/sub_abG_kd150_full32.zip` | V3b (docs), C (chunks) | relevant_docs of V3b + relevant_chunks of C | 79 / 150 / 150 / 150 | 32 | 260,728,308 | 65,344,576 | `3cf7112f011567cc9da4654d3c45400224fde4c03628d1ccd6236c07b04178dc` | 1,200 rows / 38,400 chunks / 0 errors (`--max-zip-mib 100`) | relevant_docs byte-identical to V3b 1,200/1,200; relevant_chunks byte-identical to C 1,200/1,200 |
+| K40 `K40/sub_abK40_kd150_full40.zip` | G | full chunks for ranks 33..40 | = G | 40 | 323,820,612 | 81,164,810 | `7e64874b158d89bc93a1e29119920b546105dad1088c8ae6e6c18c572da3f65a` | 1,200 / 48,000 / 0 errors (`--max-zip-mib 100`) | relevant_docs byte-identical 1,200/1,200; first 32 chunks identical 1,200/1,200; added chunks in K100 rank order 33..40 1,200/1,200 |
+| K50 `K50/sub_abK50_kd150_full50.zip` | G | full chunks for ranks 33..50 | = G | 50 | 398,880,639 | 100,135,221 | `843e96d9934672e01d568c4a2e8d7396e972aadacf2d91c1d5649d987be3ee32` | 1,200 / 60,000 / 0 errors (`--max-zip-mib 100`) | as K40, added ranks 33..50 |
+
+JSON SHA256: G `eeff96dddfb75ffb517ff83870dceec1c114ad7eadaaf67d8c1d19bef8129287`, K40
+`79bdcf65b29716dda743555019f6564863f3905dddd28a6eab35e99626b0a900`, K50 `f9844fa2325dbc52883aba08bfca3c35cd3e65e4b894d9c461307d900a222383`.
+Each ZIP has exactly one entry (`<stem>.json`), no directory.
+
+* K50 at k=50 is 100,135,221 B (95.50 MiB) <= the 104,857,600 B ceiling, so no k search was needed (k=50 reached).
+  ZIP grows ~2.0 MB per rank (K40 -> K50: +18,970,411 B for 10 ranks).
+* Added full chunks (same rule as the baseline: whole answer if inside the body, else whole body; no cut):
+  K40 vs G 9,600 chunks, chars min 196 / p50 4,752.5 / p95 8,982 / max 162,183; BGE-M3 tokens min 50 / p50 1,256 / p95 2,358 / max 45,514.
+  K50 vs G 21,600 chunks, chars min 196 / p50 4,631 / p95 8,789 / max 162,183; tokens min 50 / p50 1,221 / p95 2,306 / max 45,514.
+* Checks: `out/runs/ab-2026-10-05c/verify.py` -> `verify.json` (line-level byte diff of the JSON files); `check_all.sh` runs it, the validators (`--corpus D:/GitHub/r2ai-stage3-old/data/raw/links_corpus.parquet --docs-dir data/docs_vi --max-zip-mib 100`) and the regression.
+* Regression: the default builder still rebuilds the uploaded baseline JSON byte-identically (SHA256 `50ac7367...37ab`, `regress/`).
+* Predicted (extrapolation, not measured): G Final ~0.1964 (C chunk side + V3b doc side).
+* **Suggested upload order: K40 -> K50 -> G** (G only if K40 / K50 do not beat C).

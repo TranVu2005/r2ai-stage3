@@ -141,3 +141,29 @@ def test_doc_ranking_appends_docs_after_k100(env):
                 ['--k-doc', '50', '--doc-ranking', 'x', '--k-doc-total', '150']):
         with pytest.raises(SystemExit):
             build('bad', '--runs-dir', str(runs2), *(['--k-doc', '100'] if '--k-doc' not in bad else []), *bad)
+
+
+def test_doc_ranking_and_full_k_chunk_combine_independently(env):
+    """G = docs of the --doc-ranking file (V3b) + chunks of the larger k_chunk file (C); K40 = G + chunks for later ranks."""
+    build, order, _ = env
+    dd = build.dirs
+    rk = [(q, k, d) for q in (1, 2) for k, d in enumerate([5000 + q, 5010 + q], 1)]
+    groups = dict(dd['groups']) | {5001: [5001], 5002: [5002], 5011: [5011, 5111], 5012: [5012]}
+    pq.write_table(pa.table({'doc_id': list(groups), 'doc_ids_group': list(groups.values())}), dd['chunks'] / 'docs.parquet')
+    pq.write_table(pa.table({'query_id': [r[0] for r in rk], 'rank': [r[1] for r in rk], 'doc_id': [r[2] for r in rk]}),
+                   dd['tmp'] / 'rank.parquet')
+    runs100 = dd['tmp'] / 'runs100'
+    runs100.mkdir()
+    pq.write_table(pq.read_table(dd['runs'] / 'vi_k100.parquet'), runs100 / 'vi_k100.parquet')
+    rank_args = ['--k-doc', '100', '--runs-dir', str(runs100), '--doc-ranking', str(dd['tmp'] / 'rank.parquet'),
+                 '--k-doc-total', '102']
+    docs_only, _, _ = build('v3b', *rank_args)                                   # chunks of k_chunk 2
+    chunks_only, _, _ = build('c', '--k-doc', '100', '--runs-dir', str(runs100), '--k-chunk', '3')
+    g, gst, _ = build('g', *rank_args, '--k-chunk', '3')
+    k5, _, _ = build('k5', *rank_args, '--k-chunk', '5')
+    for v, c, x, y in zip(docs_only, chunks_only, g, k5):
+        assert x['relevant_docs'] == v['relevant_docs'] and x['relevant_chunks'] == c['relevant_chunks']
+        assert y['relevant_docs'] == x['relevant_docs'] and y['relevant_chunks'][:3] == x['relevant_chunks']
+        assert [ch['doc_id'] for ch in y['relevant_chunks'][3:]] == order[x['id']][3:5]
+        assert all(ch['chunk_text'] == _body(ch['doc_id']) for ch in y['relevant_chunks'])
+    assert gst['k_chunk'] == 3 and gst['docs_from_ranking'] == 4

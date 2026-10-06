@@ -36,6 +36,9 @@ Deep rerank (off by default; the defaults reproduce the outputs above):
                  --tier1-docs N run) get their tier-1 chunks except those of the first N0 docs, scored in a third call.
                  Without it, a doc first met past the top-200 chunks can gain chunks met later, and the pairs of docs
                  51..N0 share fp16 batches with the new pairs. All N docs are then ordered together.
+                 Several levels N0,N1,... (increasing, each >= 50 and < N) nest a nested run: --tier1-base 100,200
+                 --tier1-docs 300 keeps the calls of a --tier1-docs 200 --tier1-base 100 run (50 | 51..100 | 101..200)
+                 and scores docs 201..300 in a fourth call.
   --tier2-docs M (default 50) tier 2 = the next M docs by max hybrid over all candidates, reranked among themselves.
                  The cache keeps N + M docs per query (default 100).
   --chunk-score-docs C (default 50) every answer/body chunk of the final top-C docs is scored (c2/window/extra modes).
@@ -89,6 +92,34 @@ def tier1_pairs(index, cand, dsc, ssc, n_docs: int = TIER1_DOCS):
             if len(ranked) == n_docs:
                 break
     return ranked, pairs
+
+
+def parse_levels(s: str) -> tuple[int, ...]:
+    """--tier1-base value: '0' (off), 'N0' or 'N0,N1,...'."""
+    try:
+        v = tuple(int(x) for x in s.split(','))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f'need N0 or N0,N1,... (integers), got {s!r}') from None
+    return () if v == (0,) else v
+
+
+def nested_tier1(index, cand, dsc, ssc, n_docs: int, levels: tuple[int, ...] = ()):
+    """Tier-1 docs of --tier1-docs n_docs and their pairs split into reranker calls (see --tier1-base): the pairs of the
+    first level (all pairs without levels), then per further level the pairs of the docs that level adds. Also returns
+    the tier-1 chunks of earlier-level docs that a plain run would add (not scored)."""
+    ranked, pairs = tier1_pairs(index, cand, dsc, ssc, n_docs)
+    if not levels:
+        return ranked, pairs, [pairs], 0
+    groups, prev = [], []
+    for n in (*levels, n_docs):
+        r, p = (ranked, pairs) if n == n_docs else tier1_pairs(index, cand, dsc, ssc, n)
+        if r[:len(prev)] != prev:
+            raise RuntimeError(f'tier-1 order of --tier1-docs {len(prev)} is not a prefix of --tier1-docs {n}')
+        seen = set(prev)
+        groups.append([c for c in p if int(index.doc_id[c]) not in seen])
+        prev = r
+    nested = [c for g in groups for c in g]
+    return ranked, nested, groups, len(pairs) - len(nested)
 
 
 def take_lock(lock: Path) -> None:
@@ -193,8 +224,9 @@ def main(argv=None):
     ap.add_argument('--candidates-only', action='store_true',
                     help='exact only: write the full hybrid candidate ranking (vi_cand.*), no rerank')
     ap.add_argument('--tier1-docs', type=int, default=TIER1_DOCS, help='docs reranked together in tier 1 (default 50)')
-    ap.add_argument('--tier1-base', type=int, default=0,
-                    help='nested tier 1: keep a --tier1-docs N0 run exactly, add docs N0+1..N (default 0 = off)')
+    ap.add_argument('--tier1-base', type=parse_levels, default=(),
+                    help='nested tier 1: keep a --tier1-docs N0 run exactly, add docs N0+1..N (default 0 = off); '
+                         'N0,N1,... nests a nested run')
     ap.add_argument('--tier2-docs', type=int, default=TIER2_DOCS, help='next docs by hybrid, reranked among themselves')
     ap.add_argument('--chunk-score-docs', type=int, default=CHUNK_DOCS, help='score every answer/body chunk of the top-C docs')
     ap.add_argument('--pair-scores', action='store_true', help='also write vi_k100_pairs.parquet (every reranked pair)')
@@ -203,8 +235,9 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.tier1_docs < 1 or a.tier2_docs < 0 or a.chunk_score_docs < 0 or a.checkpoint_every < 1:
         ap.error('need --tier1-docs >= 1, --tier2-docs >= 0, --chunk-score-docs >= 0, --checkpoint-every >= 1')
-    if a.tier1_base and not TIER1_DOCS <= a.tier1_base < a.tier1_docs:
-        ap.error(f'need {TIER1_DOCS} <= --tier1-base < --tier1-docs')
+    lv = a.tier1_base
+    if lv and not (TIER1_DOCS <= lv[0] and all(x < y for x, y in zip(lv, lv[1:])) and lv[-1] < a.tier1_docs):
+        ap.error(f'need {TIER1_DOCS} <= --tier1-base levels (increasing) < --tier1-docs')
     if a.limit and a.sample:
         ap.error('--limit and --sample exclude each other')
     if a.candidates_only and a.candidates != 'exact':
@@ -233,8 +266,9 @@ def main(argv=None):
     run_cfg = {'tier1_docs': a.tier1_docs, 'tier2_docs': a.tier2_docs, 'chunk_score_docs': a.chunk_score_docs,
                'pair_scores': a.pair_scores, 'candidates': a.candidates, 'target': a.target, 'queries': a.queries,
                'query_ids': [int(r['id']) for r in qs_rows]}
-    if a.tier1_base:
-        run_cfg['tier1_base'] = a.tier1_base
+    tier1_base = (lv[0] if len(lv) == 1 else list(lv)) if lv else None        # one level: same config as before
+    if lv:
+        run_cfg['tier1_base'] = tier1_base
     cfg_path = assert_writable(partial.with_name(partial.name + '.config.json'))
     if a.candidates_only:
         cand_files = [assert_writable(out_dir / f'vi_cand{x}') for x in CAND_SUFFIXES]
@@ -297,23 +331,18 @@ def main(argv=None):
         if nd < k_max:
             print(f'WARNING query {qid}: {nd} distinct docs among {len(cand)} candidates (< {k_max})', flush=True)
         # ---- tier 1: identical to submission/build.py with --rerank (default --tier1-docs 50)
-        ranked, pairs = tier1_pairs(index, cand, dsc, ssc, a.tier1_docs)
-        p_c = []
-        if a.tier1_base:                                                   # nested: the --tier1-docs N0 run, then the rest
-            b_ranked, b_pairs = tier1_pairs(index, cand, dsc, ssc, a.tier1_base)
-            if ranked[:len(b_ranked)] != b_ranked:
-                raise RuntimeError(f'query {qid}: tier-1 order of --tier1-base {a.tier1_base} is not a prefix')
-            bset = set(b_ranked)
-            n_unscored.append(sum(int(index.doc_id[c]) in bset for c in pairs) - len(b_pairs))
-            p_c = [c for c in pairs if int(index.doc_id[c]) not in bset]
-            pairs = b_pairs + p_c
+        try:                                                               # nested: the --tier1-docs N0 run, then the rest
+            ranked, pairs, groups, n_un = nested_tier1(index, cand, dsc, ssc, a.tier1_docs, lv)
+        except RuntimeError as e:
+            raise RuntimeError(f'query {qid}: {e}') from None
+        if lv:
+            n_unscored.append(n_un)
         first = set(ranked[:TIER1_DOCS])
-        p_c_set = set(p_c)
-        p_a = [c for c in pairs if int(index.doc_id[c]) in first]          # == pairs when tier1_docs <= 50
-        p_b = [c for c in pairs if int(index.doc_id[c]) not in first and c not in p_c_set]
+        p_a = [c for c in groups[0] if int(index.doc_id[c]) in first]      # == pairs when tier1_docs <= 50
+        p_b = [c for c in groups[0] if int(index.doc_id[c]) not in first]
         # the default top-50 pair list is scored in a call of its own: same fp16 batches, so the same scores as a default run
         s = dict(zip(p_a, rr.score(q, index.texts(p_a)).tolist()))
-        for p_x in (p_b, p_c):                                             # p_c: --tier1-base pairs past doc N0
+        for p_x in (p_b, *groups[1:]):                                     # groups[1:]: --tier1-base pairs past each level
             if p_x:
                 s.update(zip(p_x, rr.score(q, index.texts(p_x)).tolist()))
         tier1 = rerank_order(index, pairs, ranked, s)
@@ -427,9 +456,9 @@ def main(argv=None):
                                                           'tier2': round(float(npairs[:, 1].mean()), 2),
                                                           'chunk_scores': round(float(npairs[:, 2].mean()), 2)},
                  'seconds_per_query_p95_this_run': round(float(np.percentile(t_q, 95)), 3) if t_q else None}
-    if a.tier1_base:
+    if lv:
         nu = np.array(n_unscored) if n_unscored else np.zeros(1)
-        meta |= {'tier1_base': a.tier1_base,
+        meta |= {'tier1_base': tier1_base,
                  'base_doc_chunks_not_reranked': {'note': 'tier-1 chunks of the first N0 docs that a plain --tier1-docs N '
                                                           'run would add (met past the N0-th doc); this run only',
                                                   'total': int(nu.sum()), 'mean': round(float(nu.mean()), 3),

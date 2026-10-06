@@ -331,8 +331,43 @@ def test_tier1_base_nests_base_run_scores_with_batch_dependent_reranker(env, mon
     assert 'tier1_base' not in cfg
 
 
+def test_tier1_base_levels_nest_a_nested_run(env, monkeypatch):
+    """--tier1-base N0,N1: the reranker calls of a --tier1-docs N1 --tier1-base N0 run are kept (50 | 51..N0 | N0+1..N1),
+    docs N1+1..N go to a call of their own; a single level N1 merges two of those calls and drifts."""
+    _batch_rr(monkeypatch)
+    args = ('--tier2-docs', '0', '--chunk-score-docs', '0', '--pair-scores')
+    cache = _run(env, 'cache', '--tier1-docs', '120', '--tier1-base', '60', *args)
+    multi = _run(env, 'multi', '--tier1-docs', '180', '--tier1-base', '60,120', *args)
+    single = _run(env, 'single', '--tier1-docs', '180', '--tier1-base', '120', *args)
+    plain = _run(env, 'plain', '--tier1-docs', '180', *args)
+    old = pq.read_table(cache / 'vi_k100_pairs.parquet').to_pandas()
+    key = ['query_id', 'doc_id', 'chunk_id']
+    for d, same in ((multi, True), (single, False)):
+        m = old.merge(pq.read_table(d / 'vi_k100_pairs.parquet').to_pandas(), on=key, suffixes=('_old', '_new'))
+        assert len(m) == len(old)
+        assert np.array_equal(m['score_old'].to_numpy(), m['score_new'].to_numpy()) == same
+    od = pq.read_table(cache / 'vi_k100.parquet').to_pandas()
+    nd = pq.read_table(multi / 'vi_k100.parquet').to_pandas()
+    m = od.merge(nd, on=['query_id', 'doc_id'], suffixes=('_old', '_new'))
+    assert len(m) == len(od) and np.array_equal(m['score_old'].to_numpy(), m['score_new'].to_numpy())
+    pl = pq.read_table(plain / 'vi_k100.parquet').to_pandas()
+    assert (nd.groupby('query_id').size() > 120).any()                     # docs past the second level exist
+    for q, g in nd.groupby('query_id'):                                     # same tier-1 doc set as the plain run
+        assert set(g['doc_id']) == set(pl[pl.query_id == q]['doc_id'])
+    np_ = pq.read_table(multi / 'vi_k100_pairs.parquet').to_pandas()
+    kept = set(zip(od['query_id'], od['doc_id']))                           # no extra chunk for a cache doc
+    assert sum(k in kept for k in zip(np_['query_id'], np_['doc_id'])) == len(old)
+    meta = json.loads((multi / 'vi_k100.meta.json').read_text(encoding='utf-8'))
+    assert meta['tier1_base'] == [60, 120]
+    assert json.loads((multi / '_partial.pkl.config.json').read_text(encoding='utf-8'))['tier1_base'] == [60, 120]
+    assert json.loads((cache / '_partial.pkl.config.json').read_text(encoding='utf-8'))['tier1_base'] == 60
+
+
 def test_tier1_base_argument_checks(env):
-    for bad in (['--tier1-docs', '100', '--tier1-base', '40'], ['--tier1-docs', '100', '--tier1-base', '100']):
+    for bad in (['--tier1-docs', '100', '--tier1-base', '40'], ['--tier1-docs', '100', '--tier1-base', '100'],
+                ['--tier1-docs', '180', '--tier1-base', '60,60'], ['--tier1-docs', '180', '--tier1-base', '120,60'],
+                ['--tier1-docs', '180', '--tier1-base', '40,120'], ['--tier1-docs', '180', '--tier1-base', '60,180'],
+                ['--tier1-docs', '180', '--tier1-base', '60,x']):
         with pytest.raises(SystemExit):
             env['k100'].main(['--queries', str(env['q']), '--candidates', 'exact', '--out-dir', str(env['tmp'] / 'z'), *bad])
 

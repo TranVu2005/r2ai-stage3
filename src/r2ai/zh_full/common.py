@@ -65,3 +65,21 @@ def exclusive(name):
         finally:
             f.seek(0)
             msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+
+
+ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+
+
+@contextmanager
+def keep_awake(kernel32=None):
+    """Block idle sleep while held. Explicit SetSuspendState/lid close still sleep: the watchdog covers those."""
+    if kernel32 is None and os.name == 'nt':
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+    if kernel32 is not None:
+        kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
+    try:
+        yield
+    finally:
+        if kernel32 is not None:
+            kernel32.SetThreadExecutionState(ES_CONTINUOUS)

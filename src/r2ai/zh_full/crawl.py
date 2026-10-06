@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from r2ai.paths import CORPUS_FILE, CONFIG_DIR, RUNS_DIR, require_inputs
-from .common import RUN, RAW, DB, STATE, guard, preflight, atomic_json, exclusive
+from .common import RUN, RAW, DB, STATE, guard, preflight, atomic_json, exclusive, keep_awake
 
 import argparse
 import asyncio
@@ -523,8 +523,14 @@ def main(argv=None):
     if args.step == 'prepare':
         prepare()
         return 0
-    with exclusive('crawl'):
-        return asyncio.run(run())
+    with exclusive('crawl'), keep_awake():
+        code = None
+        try:
+            code = asyncio.run(run())
+            return code
+        finally:
+            # The watchdog reads this to tell "all lanes finished" (0) from stop/crash; a hard kill writes nothing.
+            atomic_json(RUN / 'last_exit.json', {'pid': os.getpid(), 'code': code, 'at': time.time()})
 
 
 if __name__ == '__main__':

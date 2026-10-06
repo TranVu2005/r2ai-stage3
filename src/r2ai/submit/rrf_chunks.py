@@ -15,6 +15,8 @@ rule (make_submission.load_full_texts; a doc without text gets none, as in the b
 measure: changed chunk docs vs the base (the first --k-chunk primary docs) per query, and among the newly chosen docs how
 many have rank_reranker > 50 / rank_hybrid > 100; writes rrf_measure.json. build refuses when the mean change is < --min-mean
 (default 1.0 doc/query) unless --force.
+rrf_chunk_submission is the same build as a library call (no --min-mean), used by r2ai.submit.best when the config enables
+postprocess.rrf_chunk_docs; hybrid_ranks may then differ from doc_ranking (the CLI uses --doc-ranking for both).
 """
 from __future__ import annotations
 
@@ -61,23 +63,31 @@ def dist(x) -> dict:
 
 
 def choose(a) -> tuple[list[int], dict, dict, dict]:
-    qids = sorted(int(x) for x in pq.read_table(resolve_path(a.queries), columns=['id'])['id'].to_pylist())
-    top, pool = V.load_lists(a.runs_dir, a.doc_ranking, qids, a.k_cache)
-    docs = V.d50_docs(top, pool, a.k_total)
-    rr, hy = ranks(a.rerank_run), ranks(a.doc_ranking)
-    new = {q: rrf_choice(docs[q], rr.get(q, {}), hy[q], a.k_chunk, a.rrf_k, a.missing_rank) for q in qids}
+    return choose_docs(runs_dir=a.runs_dir, doc_ranking=a.doc_ranking, hybrid_ranks=a.doc_ranking, rerank_run=a.rerank_run,
+                       queries=a.queries, k_cache=a.k_cache, k_total=a.k_total, k_chunk=a.k_chunk, rrf_k=a.rrf_k,
+                       missing_rank=a.missing_rank)
+
+
+def choose_docs(*, runs_dir, doc_ranking, hybrid_ranks, rerank_run, queries, k_cache=100, k_total=150, k_chunk=50, rrf_k=60,
+                missing_rank=201) -> tuple[list[int], dict, dict, dict]:
+    """(qids, D50 primary docs, RRF-chosen chunk docs, measure) per query."""
+    qids = sorted(int(x) for x in pq.read_table(resolve_path(queries), columns=['id'])['id'].to_pylist())
+    top, pool = V.load_lists(runs_dir, doc_ranking, qids, k_cache)
+    docs = V.d50_docs(top, pool, k_total)
+    rr, hy = ranks(rerank_run), ranks(hybrid_ranks)
+    new = {q: rrf_choice(docs[q], rr.get(q, {}), hy[q], k_chunk, rrf_k, missing_rank) for q in qids}
     changed, n_rr50, n_hy100, n_both, missing = [], 0, 0, 0, 0
     for q in qids:
-        old = set(docs[q][:a.k_chunk])
+        old = set(docs[q][:k_chunk])
         add = [d for d in new[q] if d not in old]
         changed.append(len(add))
         for d in add:
-            r, h = rr.get(q, {}).get(d, a.missing_rank), hy[q][d]
+            r, h = rr.get(q, {}).get(d, missing_rank), hy[q][d]
             n_rr50 += r > 50
             n_hy100 += h > 100
             n_both += r > 50 and h > 100
         missing += sum(d not in rr.get(q, {}) for d in docs[q])
-    m = {'queries': len(qids), 'k_chunk': a.k_chunk, 'rrf_k': a.rrf_k,
+    m = {'queries': len(qids), 'k_chunk': k_chunk, 'rrf_k': rrf_k,
          'primary_docs_per_query': dist(len(docs[q]) for q in qids),
          'primary_docs_without_reranker_rank': missing,
          'chunk_docs_changed_vs_base': dist(changed), 'new_chunk_docs_total': int(sum(changed)),
@@ -103,21 +113,16 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def cmd_build(a) -> int:
+def write_chunks(base, out_zip, qids: list[int], new: dict, docs_dir) -> dict:
+    """base JSON -> out_zip + its .json with relevant_chunks = full chunks of new[q] (in that order); the rest unchanged."""
     from r2ai.submit.make_submission import load_full_texts
-    out_zip = assert_writable(a.out)
+    out_zip = assert_writable(out_zip)
     out_json = assert_writable(out_zip.with_suffix('.json'))
-    require_inputs(a.base, a.docs_dir)
-    t0 = time.time()
-    qids, docs, new, m = choose(a)
-    if m['chunk_docs_changed_vs_base']['mean'] < a.min_mean and not a.force:
-        print(json.dumps(m, indent=1))
-        print(f'mean change {m["chunk_docs_changed_vs_base"]["mean"]} < {a.min_mean} doc/query: not built', flush=True)
-        return 2
-    full, src, _ = load_full_texts({d for q in qids for d in new[q]}, resolve_path(a.docs_dir))
+    require_inputs(base, docs_dir)
+    full, src, _ = load_full_texts({d for q in qids for d in new[q]}, resolve_path(docs_dir))
     out_json.parent.mkdir(parents=True, exist_ok=True)
     n, missing, same_text, diff_text = 0, 0, 0, 0
-    with open(a.base, 'r', encoding='utf-8', newline='') as fi, open(out_json, 'w', encoding='utf-8', newline='\n') as fo:
+    with open(base, 'r', encoding='utf-8', newline='') as fi, open(out_json, 'w', encoding='utf-8', newline='\n') as fo:
         fo.write('[\n')
         for line in fi:
             line = line.rstrip('\n')
@@ -144,10 +149,34 @@ def cmd_build(a) -> int:
         raise ValueError(f'{n} queries (expected {len(qids)}), {diff_text} kept docs with a different chunk text')
     with zipfile.ZipFile(out_zip, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
         z.write(out_json, out_json.name)
-    m |= {'base': str(a.base), 'docs_missing_text': missing, 'kept_docs_same_chunk_text': same_text, 'full_text_sources': src,
-          'json_bytes': out_json.stat().st_size, 'json_sha256': _sha256(out_json), 'zip_bytes': out_zip.stat().st_size,
-          'zip_sha256': _sha256(out_zip), 'max_zip_bytes': 104857600, 'zip_within_ceiling': out_zip.stat().st_size <= 104857600,
-          'elapsed_s': round(time.time() - t0, 1)}
+    return {'base': str(base), 'docs_missing_text': missing, 'kept_docs_same_chunk_text': same_text, 'full_text_sources': src,
+            'json': str(out_json), 'json_bytes': out_json.stat().st_size, 'json_sha256': _sha256(out_json),
+            'zip_bytes': out_zip.stat().st_size, 'zip_sha256': _sha256(out_zip), 'max_zip_bytes': 104857600,
+            'zip_within_ceiling': out_zip.stat().st_size <= 104857600}
+
+
+def rrf_chunk_submission(base_json, out_zip, *, runs_dir, doc_ranking, hybrid_ranks, rerank_run, queries, docs_dir, k_cache=100,
+                         k_total=150, k_chunk=50, rrf_k=60, missing_rank=201) -> dict:
+    """Library form of `build` (same bytes, no --min-mean gate): returns the measure + write stats."""
+    qids, _, new, m = choose_docs(runs_dir=runs_dir, doc_ranking=doc_ranking, hybrid_ranks=hybrid_ranks, rerank_run=rerank_run,
+                                  queries=queries, k_cache=k_cache, k_total=k_total, k_chunk=k_chunk, rrf_k=rrf_k,
+                                  missing_rank=missing_rank)
+    return m | write_chunks(base_json, out_zip, qids, new, docs_dir)
+
+
+def cmd_build(a) -> int:
+    out_zip = assert_writable(a.out)
+    assert_writable(out_zip.with_suffix('.json'))
+    require_inputs(a.base, a.docs_dir)
+    t0 = time.time()
+    qids, docs, new, m = choose(a)
+    if m['chunk_docs_changed_vs_base']['mean'] < a.min_mean and not a.force:
+        print(json.dumps(m, indent=1))
+        print(f'mean change {m["chunk_docs_changed_vs_base"]["mean"]} < {a.min_mean} doc/query: not built', flush=True)
+        return 2
+    w = write_chunks(a.base, out_zip, qids, new, a.docs_dir)
+    w.pop('json')
+    m |= w | {'elapsed_s': round(time.time() - t0, 1)}
     out_zip.with_suffix('.stats.json').write_text(json.dumps(m, indent=1), encoding='utf-8')
     print(json.dumps(m, indent=1))
     return 0 if m['zip_within_ceiling'] else 1

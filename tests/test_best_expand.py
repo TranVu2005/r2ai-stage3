@@ -1,4 +1,5 @@
-"""configs: best = D50 + H1-expand post-processing, d50 = plain D50; best.build replays both byte for byte on a fixture."""
+"""configs: h1expand = D50 + H1-expand post-processing (the best before RRF), d50 = plain D50; best.build replays both byte
+for byte on a fixture. The current best (h1expand + RRF chunk docs) is covered by test_best_rrf.py."""
 import copy
 import json
 
@@ -14,6 +15,7 @@ from r2ai.submit import best
 
 IDS = list(range(10, 120))
 K_TOTAL, K_CHUNK = 104, 3
+H1EXPAND = ROOT / 'configs' / 'submission-h1expand.yaml'
 GROUPS = {d: [d] + ([d + 1000] if d % 3 == 0 else []) for d in IDS}
 CLUSTERS = {0: [10, 12], 1: [11, 50], 2: [101, 110], 3: [20, 119], 4: [14, 60]}
 
@@ -43,7 +45,7 @@ def env(tmp_path, monkeypatch):
 
 
 def _cfg(env, expand: bool, base_sha='', sha=''):
-    cfg = copy.deepcopy(best.load_config(best.DEFAULT_CONFIG))
+    cfg = copy.deepcopy(best.load_config(H1EXPAND))
     cfg['queries'] = str(env / 'query.parquet')
     s = cfg['submission']
     s |= {'runs_dir': str(env / 'runs'), 'doc_ranking': str(env / 'cand.parquet'), 'chunks_dir': str(env / 'chunks'),
@@ -62,8 +64,8 @@ def _h1(env, mode):
     return json.loads(out.with_suffix('.stats.json').read_text(encoding='utf-8'))['json_sha256'], out.with_suffix('.json')
 
 
-def test_configs_best_enables_expand_d50_does_not():
-    b = best.load_config(best.DEFAULT_CONFIG)
+def test_configs_h1expand_enables_expand_d50_does_not():
+    b = best.load_config(H1EXPAND)
     d = best.load_config(ROOT / 'configs' / 'submission-d50.yaml')
     e = best.expand_config(b)
     assert e and e['scope'] == 'content' and e['clusters'] == 'out/runs/H1/clusters.parquet'

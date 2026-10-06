@@ -5,7 +5,7 @@ The pipeline never uploads; the user uploads by hand and reports the scores. Lea
 
 ## Leaderboard (scores provided by the user)
 
-Total uploads: **21** (user provided). Current best RD150 0.2139; `configs/submission-best.yaml` remains RRF pending the next ranking session.
+Total uploads: **22** (user provided). Current best RD150 0.2139; `configs/submission-best.yaml` = RD150 since commit `5c8b7e6` (replay JSON SHA match).
 
 | upload date | file | ZIP SHA256 | JSON SHA256 | config | Final | Doc F2 | Doc P | Doc R | Chunk F2 | Chunk P | Chunk R | source |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -23,7 +23,8 @@ Total uploads: **21** (user provided). Current best RD150 0.2139; `configs/submi
 | 2026-10-05 | **H1-expand** `out/runs/H1/expand/sub_h1_expand.zip` (101,761,288 B = 97.05 MiB) | `565b96add077b6458ae74d06c282db056a5a7179435bef99ecda5852e9ded9e9` | `6c27d3f327fdcc5dac248cdaf80cf1be941fbff22666b25dbd07f32903f01106` (405,355,611 B) | D50 + ids of duplicate-cluster mates (content scope) appended to relevant_docs; chunks = D50; config `configs/submission-h1expand.yaml` | 0.2109 | 0.2285 | 0.1414 | 0.3372 | 0.1932 | 0.2294 | 0.2167 | provided by the user 2026-10-05 |
 | 2026-10-06 | **RRF** `out/runs/rerank200/partC/sub_rrf_d50x_full50.zip` (101,641,704 B = 96.93 MiB) | `34eb7b2a7337a5f32ea3cb87c7bd65d7d51397abf3be34a1feed83e3e930bd8f` | `ff035b8ba7eea0a177932850d3a9cc9f1ffbcbe8297b8a8740bae23bd949d1c3` (402,439,775 B) | H1-expand relevant_docs; the 50 full-chunk docs = the 50 of the 150 D50 docs with the best 1/(60 + reranker rank, 200-doc cache) + 1/(60 + hybrid rank), RRF order; config `configs/submission-best.yaml` | 0.2125 | 0.2285 | 0.1414 | 0.3372 | 0.1964 | 0.234 | 0.2199 | provided by the user 2026-10-06 |
 | 2026-10-06 | Z `out/runs/zh-sample/Z/Z.zip` (102,056,971 B = 97.33 MiB) | `8db51260ed8e03c6529df757b175fb99e6f26e340f1eda544a50962c8c532b1f` | `95eff8650e6b092ec53e5b43345e12ec5f1dba801175288d6fda4251b18c811d` (397,071,020 B) | D50 doc universe + zh 2% sample (dense branch), merged by direct reranker logit into the top 150; full chunks for the top 50 (same rule as D50); no cluster expand | 0.2034 | 0.2158 | 0.1290 | 0.3275 | 0.1910 | 0.2264 | 0.2143 | provided by the user 2026-10-06 |
-| 2026-10-06 | **RD150** `out/runs/rrf-docs-2026-10-06/RD150/sub_RD150.zip` (101,643,711 B) | `9eaf78b41d82372397ef56df9d5bcae3f8b8e93ea10ee7f5047da3d4a494ccfd` | `136c259145c6fa134bcd5d4a877575088e28346ef43636afc87d2e283508e950` (402,439,824 B) | top 150 RRF on rerank pool 200 + cluster expand; chunks byte-identical RRF; best config still RRF | **0.2139 (BEST)** | 0.2313 | 0.1431 | 0.3412 | 0.1964 | 0.2340 | 0.2199 | provided by the user 2026-10-06 |
+| 2026-10-06 | **RD150** `out/runs/rrf-docs-2026-10-06/RD150/sub_RD150.zip` (101,643,711 B) | `9eaf78b41d82372397ef56df9d5bcae3f8b8e93ea10ee7f5047da3d4a494ccfd` | `136c259145c6fa134bcd5d4a877575088e28346ef43636afc87d2e283508e950` (402,439,824 B) | top 150 RRF on rerank pool 200 + cluster expand; chunks byte-identical RRF; best config = RD150 since `5c8b7e6` | **0.2139 (BEST)** | 0.2313 | 0.1431 | 0.3412 | 0.1964 | 0.2340 | 0.2199 | provided by the user 2026-10-06 |
+| 2026-10-06 | Z-append `out/runs/zh-sample/Z-append/Z_append.zip` (102,291,502 B) | `1b451004cc3f83a78312b45ecb171a7481072b1d9f330eddbead2440d9b562b9` | `b461ea2bc53284eb86e634f5b5af25e128529799ff37667f75e3019202ee03f6` (403,513,731 B) | diagnostic: RD150 byte-pinned (vi docs + chunks) + up to 100 zh primary docs (2 % sample, dense branch, mean 99.985/query) appended to relevant_docs; no zh chunks | 0.1916 | 0.1868 | 0.0863 | 0.3429 | 0.1964 | 0.2340 | 0.2199 | provided by the user 2026-10-06 |
 | — | G `out/runs/ab-2026-10-05c/G/sub_abG_kd150_full32.zip` | `3cf7112f…78dc` | `eeff96dd…9287` | V3b + C | not uploaded, not needed (K50 > C) | | | | | | | |
 
 C / V3 / V3b vs baseline (each changes one side only, and the other side's metrics are identical to the baseline, as designed):
@@ -443,12 +444,61 @@ ties as rrf_chunks.
   best bytes; RD150c docs = RD150 bytes).
 * RD150 score (user provided): Final 0.2139 = (0.2313 + 0.1964)/2 = 0.21385 rounded; Doc P 0.1431, Doc R 0.3412, Chunk P 0.2340, Chunk R 0.2199. Against RRF: Doc F2 +0.0028, Doc R +0.0040, chunks byte-identical; choosing the RRF doc set over pool 200 contributes +0.0014 Final. RD150c not measured.
 
+## Best = RD150 config; RRF sweep (2026-10-06, commit `5c8b7e6`, not uploaded)
+
+`configs/submission-rrf.yaml` = the former best (RRF, content unchanged). `configs/submission-best.yaml` = rrf +
+`postprocess.rrf_doc_set` (k 60, k_docs 150, reranker cache `out/runs/rerank200/full/vi_k100.parquet`, hybrid ranks
+`vi_cand.docs.parquet`); `r2ai.submit.best` runs builder -> expand -> rrf -> rrf_doc_set, each optional (absent / disabled = old
+behaviour), checking every configured intermediate SHA. Gates (`out/runs/rrf-sweep-2026-10-06/`): best JSON `136c2591...e950` =
+uploaded RD150 (builder, expand and rrf intermediates match), 344 s, validator 0 errors; rrf `ff035b8b...` (381 s), h1expand
+`6c27d3f3...` (198 s), d50 `2f10b78a...` (151 s) match.
+Variants (base = RRF JSON, chunks byte-identical to RD150, validator 0 errors, out-of-scope diff 0):
+* RDk20 / RDk100 (k 20 / 100, K 150): 0.417 / 0.312 docs in and out per query. ZIP `5c3ab91d...2d08` / `3471865a...c931`.
+* RD175 / RD200 (k 60, K 175 / 200): +23.85 / +46.49 docs per query (RRF ranks 151-175 / 151-200). ZIP `6ef8407b...0440` / `495dc884...3128`.
+* The RD200 primary id set equals the V3 id set in 1,200 / 1,200 queries (measured); V3 scored Doc F2 -0.0050 vs V3b. Rough estimate
+  of the hit rate of RRF ranks 151-200: about 4.7 % (threshold F2/5 about 4.6 %).
+* Not uploaded (extrapolated, not measured): RD200 about -0.004 Final, RD175 -0.001 to -0.002; RDk20 / RDk100 |delta Final| <= 0.0001.
+
+## Pool 300 -> P300 / RD125 (2026-10-06, code commit `bc9970b`, not uploaded)
+
+`run_retrieval_k100 --tier1-docs 300 --tier1-base 100,200 --tier2-docs 0 --chunk-score-docs 0 --pair-scores` (`--tier1-base` now
+takes several levels: replays the three reranker calls of the 200-doc cache, 50 | 51-100 | 101-200, and scores docs 201-300 in a
+fourth call; one level or off = old outputs). An earlier single-level trial (`--tier1-base 200`) failed the gate: merging two old
+calls moved fp16 logits (269 / 3,941 doc scores). Report `out/runs/pool300-2026-10-06/REPORT.md`.
+* Gate tol 0 vs `out/runs/rerank200/full` (`deep_gate deep --pairs`): 20 queries 3,941 doc / 5,128 chunk pairs, 1,200 queries
+  234,862 doc / 309,536 chunk pairs, |delta| = 0, none missing, relative order 1,200 / 1,200. Query 408 under `--sample` has 255
+  candidate docs vs 254 in full runs (query-encoding batch), no effect on the gate.
+* Cost (1,200 queries): 5,416 s in process, 4.204 s/query (p95 5.896), peak RSS 5.031 GiB / private 7.022 GiB, VRAM torch 1,452 MiB /
+  nvidia-smi 2,063 MiB. Docs per query p50 269, max 300 (831 queries < 300).
+* P300 = RRF k 60, K 150 over the 300-doc pool + cluster expand; chunks byte-identical to RD150. Docs in / out vs RD150 mean 5.83 /
+  p50 4 / p95 17 / max 37 (949 queries); 96.7 % of the docs in come from pool ranks 201-300 (hybrid 201-300), reranker rank mean
+  62.6; docs out: hybrid rank mean 128, RD150 RRF ranks 101-150. ZIP `out/runs/pool300-2026-10-06/P300/sub_P300.zip` 101,645,425 B,
+  SHA256 `0f932fd8d79a9c706c6d5b20178f9bbe9383be204bee53be25c30a856aa94267`; JSON 402,439,902 B, SHA256
+  `d1d810c4b74317905da492bdc29958edbc58377775b9939ed8e089046f111170`; validator 1,200 / 60,000 / 0 errors; out-of-scope diff 0.
+* RD125 = pool 200, K 125 (drops RRF ranks 126-150: 24.43 docs / query). ZIP `.../RD125/sub_RD125.zip` 101,504,121 B, SHA256
+  `fcb273e0468f1f9fa6daca46a9dcbf05820ef490df4f71eac01993bdf9a80015`; JSON 402,204,899 B, SHA256
+  `c76ba9617eccca209ae88cbe06b7a134995e8c0fed086111751a487256d56b58`; validator 0 errors.
+* Extrapolated, not measured: P300 about +0.0006 Final vs RD150 (RD150 rate: +0.0028 Doc F2 per 13.71 swapped docs); RD125 <= RD150
+  (estimated hit rate of RRF 126-150 >= 4.7 %, above the threshold). Upload order: P300; RD125 not to be uploaded.
+
+## Z-append: zh sample appended to RD150 (2026-10-06, uploaded as a diagnostic: Final 0.1916)
+
+`python -m r2ai.zh_sample.append` (zh agent, commit `80bdca1`; `out/runs/zh-sample/Z-append/`): RD150 kept byte for byte (vi docs and
+chunks), up to 100 zh primary docs of the 2 % sample (dense branch, max cached reranker logit) appended to relevant_docs, no zh chunks.
+* Score (user): Final 0.1916 = (0.1868 + 0.1964) / 2 (match); Doc P 0.0863, Doc R 0.3429, chunks identical to RD150.
+* Doc P falls as pure dilution predicts: 0.1431 x 151.7 / 251.7 = 0.0862. Signal: Doc R +0.0017 vs RD150 (threshold 0.0002).
+* Sample share s = 35,788 / 1,771,895 sample URLs over the 15 accessible domains = 2.02 % -> Doc R gain for a full zh crawl about
+  0.0017 / 0.0202 = +0.084 (upper bound, estimate; ignores competition in the top 100 as the corpus grows).
+* Decision: crawl all permitted zh (zh agent), separate zh index, calibrate the merge (rank RRF / per-query quota) on diagnostics
+  before any mixed upload. No mixed zh upload before calibration.
+
 ## Pending uploads
 
-RRF uploaded 2026-10-06: 0.2125; RD150 uploaded: 0.2139 (current best, user provided). Built, not uploaded:
-RD150c. Z-append on RD150 docs + RRF chunks is the next diagnostic (not an upload candidate); not built at this documentation commit.
-D32 / D40, G, R120 / R180, H1-dedup and Z are not to be uploaded again.
+RD150 uploaded: 0.2139 (current best, user provided); Z-append uploaded as a diagnostic (0.1916). Next upload candidate: **P300**
+(extrapolated +0.0006, not measured). Built, not uploaded: RD150c, RD125, RDk20, RDk100, RD175, RD200 (the last five not to be uploaded).
+D32 / D40, G, R120 / R180, H1-dedup, Z and Z-append are not to be uploaded again. No mixed zh upload before calibration.
 
 ## Changelog
 
 - 2026-10-06 14:48 UTC+7 — GPT-6 (Codex): commit pending Z documentation; record RD150 user-provided score and exact artifact SHA, current best 0.2139, Doc R baseline 0.3412, +0.0014 from RRF doc selection on pool 200, 21 uploads. Config best remains RRF; update zh REPORT with Z LB score. No upload/network/GPU.
+- 2026-10-06 18:25 UTC+7 — Claude Opus 5.5: record Z-append (user-provided score, decision: full zh crawl), RRF sweep (`5c8b7e6`, best config = RD150) and pool 300 (`bc9970b`; P300 / RD125 built, not uploaded); 22 uploads. No upload/network.

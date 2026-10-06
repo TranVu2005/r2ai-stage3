@@ -5,6 +5,8 @@ The pipeline never uploads; the user uploads by hand and reports the scores. Lea
 
 ## Leaderboard (scores provided by the user)
 
+Total uploads: **21** (user provided). Current best RD150 0.2139; `configs/submission-best.yaml` remains RRF pending the next ranking session.
+
 | upload date | file | ZIP SHA256 | JSON SHA256 | config | Final | Doc F2 | Doc P | Doc R | Chunk F2 | Chunk P | Chunk R | source |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 2026-10-03 | sub02 / sub03 / sub04 / sub05 / **sub06** / sub07 / sub08 (OLD index, 123,874 docs) | see sections below | | see sections below | 0.0158 / 0.0273 / 0.0551 / 0.0623 / **0.0626** / 0.0545 / 0.0507 | | | sub06: 0.088 | | | | `Downloads/SCOREBOARD.md` (user, 2026-10-03); per-metric columns other than sub06 Doc R not copied here |
@@ -19,7 +21,9 @@ The pipeline never uploads; the user uploads by hand and reports the scores. Lea
 | 2026-10-05 | **D50** `out/runs/deep-rerank-2026-10-05/D50/sub_deepD50_kd150_full50.zip` (101,751,549 B = 97.04 MiB) | `0ab1983d41100a6d429bd3b1938034d7534020ff6ea9822955f874e4e2fde127` | `2f10b78ac17f4eafdd5fe1b0b207260b062f17b29f4fcc3ee1a4b364b3c36544` (405,340,395 B) | K50 with doc ranks 1..100 from the deep rerank (tier 1 = 100 docs); config `configs/submission-d50.yaml` | 0.2107 | 0.2283 | 0.1422 | 0.3359 | 0.1932 | 0.2294 | 0.2167 | provided by the user 2026-10-05 |
 | 2026-10-05 | R150 `out/runs/rerank200/R150/sub_r200_kd150_full50.zip` (101,642,878 B = 96.93 MiB) | `ba7eea1a1fce0fb6c88c239be59b3548517cb23f5a24128294fd5c93d6606060` | `f8f304fb1ff9acf57339e5660e0b427bc4613600e8fccb897d89d954ebe46731` (403,369,945 B) | rerank tier 1 = 200 (nested on tier 1 = 100), top 150 by reranker; full chunks for the top 50 | 0.2076 | 0.2287 | 0.1423 | 0.3365 | 0.1865 | 0.221 | 0.2093 | provided by the user 2026-10-05 |
 | 2026-10-05 | **H1-expand** `out/runs/H1/expand/sub_h1_expand.zip` (101,761,288 B = 97.05 MiB) | `565b96add077b6458ae74d06c282db056a5a7179435bef99ecda5852e9ded9e9` | `6c27d3f327fdcc5dac248cdaf80cf1be941fbff22666b25dbd07f32903f01106` (405,355,611 B) | D50 + ids of duplicate-cluster mates (content scope) appended to relevant_docs; chunks = D50; config `configs/submission-h1expand.yaml` | 0.2109 | 0.2285 | 0.1414 | 0.3372 | 0.1932 | 0.2294 | 0.2167 | provided by the user 2026-10-05 |
-| 2026-10-06 | **RRF** `out/runs/rerank200/partC/sub_rrf_d50x_full50.zip` (101,641,704 B = 96.93 MiB) | `34eb7b2a7337a5f32ea3cb87c7bd65d7d51397abf3be34a1feed83e3e930bd8f` | `ff035b8ba7eea0a177932850d3a9cc9f1ffbcbe8297b8a8740bae23bd949d1c3` (402,439,775 B) | H1-expand relevant_docs; the 50 full-chunk docs = the 50 of the 150 D50 docs with the best 1/(60 + reranker rank, 200-doc cache) + 1/(60 + hybrid rank), RRF order; config `configs/submission-best.yaml` | **0.2125 (BEST)** | 0.2285 | 0.1414 | 0.3372 | 0.1964 | 0.234 | 0.2199 | provided by the user 2026-10-06 |
+| 2026-10-06 | **RRF** `out/runs/rerank200/partC/sub_rrf_d50x_full50.zip` (101,641,704 B = 96.93 MiB) | `34eb7b2a7337a5f32ea3cb87c7bd65d7d51397abf3be34a1feed83e3e930bd8f` | `ff035b8ba7eea0a177932850d3a9cc9f1ffbcbe8297b8a8740bae23bd949d1c3` (402,439,775 B) | H1-expand relevant_docs; the 50 full-chunk docs = the 50 of the 150 D50 docs with the best 1/(60 + reranker rank, 200-doc cache) + 1/(60 + hybrid rank), RRF order; config `configs/submission-best.yaml` | 0.2125 | 0.2285 | 0.1414 | 0.3372 | 0.1964 | 0.234 | 0.2199 | provided by the user 2026-10-06 |
+| 2026-10-06 | Z `out/runs/zh-sample/Z/Z.zip` (102,056,971 B = 97.33 MiB) | `8db51260ed8e03c6529df757b175fb99e6f26e340f1eda544a50962c8c532b1f` | `95eff8650e6b092ec53e5b43345e12ec5f1dba801175288d6fda4251b18c811d` (397,071,020 B) | D50 doc universe + zh 2% sample (dense branch), merged by direct reranker logit into the top 150; full chunks for the top 50 (same rule as D50); no cluster expand | 0.2034 | 0.2158 | 0.1290 | 0.3275 | 0.1910 | 0.2264 | 0.2143 | provided by the user 2026-10-06 |
+| 2026-10-06 | **RD150** `out/runs/rrf-docs-2026-10-06/RD150/sub_RD150.zip` (101,643,711 B) | `9eaf78b41d82372397ef56df9d5bcae3f8b8e93ea10ee7f5047da3d4a494ccfd` | `136c259145c6fa134bcd5d4a877575088e28346ef43636afc87d2e283508e950` (402,439,824 B) | top 150 RRF on rerank pool 200 + cluster expand; chunks byte-identical RRF; best config still RRF | **0.2139 (BEST)** | 0.2313 | 0.1431 | 0.3412 | 0.1964 | 0.2340 | 0.2199 | provided by the user 2026-10-06 |
 | — | G `out/runs/ab-2026-10-05c/G/sub_abG_kd150_full32.zip` | `3cf7112f…78dc` | `eeff96dd…9287` | V3b + C | not uploaded, not needed (K50 > C) | | | | | | | |
 
 C / V3 / V3b vs baseline (each changes one side only, and the other side's metrics are identical to the baseline, as designed):
@@ -53,10 +57,24 @@ R150 / H1-expand (Final = (Doc F2 + Chunk F2) / 2: R150 (0.2287 + 0.1865) / 2 = 
   3.9 % for chunks (0.1932 / 5). The LB averages per query, so this holds per query, not exactly for the mean.
 
 RRF (Final = (Doc F2 + Chunk F2) / 2: (0.2285 + 0.1964) / 2 = 0.21245 -> 0.2125; matches). Compared with H1-expand:
-* **Best file: RRF, Final 0.2125** (H1-expand + 0.0016). Doc metrics identical (same relevant_docs); Chunk F2 +0.0032
+* **Best file at that point: RRF, Final 0.2125** (H1-expand + 0.0016). Doc metrics identical (same relevant_docs); Chunk F2 +0.0032
   (0.1932 -> 0.1964), Chunk P +0.0046 (0.2294 -> 0.2340), Chunk R +0.0032 (0.2167 -> 0.2199). Mixing the reranker rank with the
   hybrid rank picks better full-chunk docs than the D50 order (deep rerank 1..100, hybrid 101..150), unlike R150 (reranker alone).
 * Config `configs/submission-best.yaml` = H1-expand + `postprocess.rrf_chunk_docs`; see "Best = RRF" below.
+
+Z (Final = (Doc F2 + Chunk F2) / 2: (0.2158 + 0.1910) / 2 = 0.2034; matches). Compared with D50 (0.2107 / 0.2283 / 0.1422 / 0.3359 / 0.1932 / 0.2294 / 0.2167):
+* **Z loses to D50 by 0.0073** (and to current best RD150, 0.2139, by 0.0105): Doc F2 -0.0125 (0.2283 -> 0.2158), Doc P -0.0132 (0.1422 -> 0.1290),
+  Doc R -0.0084 (0.3359 -> 0.3275), Chunk F2 -0.0022 (0.1932 -> 0.1910), Chunk P -0.0030, Chunk R -0.0024. Doc R fell, so the vi docs Z pushed out of the
+  tail of the 150 held more gold than the zh docs it brought in (inference from the macro metrics, not a per-query measurement).
+* **Z does not diagnose the share of zh gold.** The sample is 2 % of each zh domain (seed 42, floor 200, ceil; `sample_manifest.json`), so it holds about
+  2 % of the zh gold (estimate, assuming gold is spread like the corpus; the floor of 200 per domain adds some), yet it takes 15.23 % of the top-150 slots
+  (27,406 of 180,000, dense branch; hybrid 15.04 %; 1,190 of 1,200 queries get at least one zh doc; measured in `out/runs/zh-sample/yield.json`).
+  By that estimate Z loses for any share of zh gold. The loss is a property of the 2 % sample and of the merge, not a verdict on zh.
+* **Confirmed: the reranker lifts zh docs very strongly** (15 % of the slots from a 2 % sample). Crawling all of zh has to come with a per-language
+  score calibration, otherwise zh docs displace vi docs in the same way.
+* **Next measurement: Z-append** (not built yet): preserve all RD150 vi docs and RRF chunks, append up to 100 zh primary docs after them; compare Doc R with RD150
+  (0.3412). Diagnostic only, no zh chunks; the decision to crawl all zh waits for this result.
+* Current best: RD150, Final 0.2139; configs/submission-best.yaml still pins RRF pending the next ranking session.
 
 vs sub06: Final x2.79, Doc R x3.29 (0.088 -> 0.2897). Coverage of the vi corpus was the bottleneck.
 
@@ -354,6 +372,18 @@ which identical text 0.45; same-cluster docs outside the top 150 mean 1.66. Iden
   (98.76 MiB, above the accepted 97.04 MiB mark), SHA256 `08d111ce1a30f273eb28c47d56a89ecf3ce37efec83f0f84ac2100af84f46c57`; validator 0 errors.
 * H1-expand uploaded: 0.2109 (best; Doc R +0.0013, Doc P -0.0008 vs D50). H1-dedup dropped (gold holds part of the copies).
 
+## Z: zh 2 % sample merged into D50 (2026-10-06; uploaded 0.2034, below D50, dropped)
+
+Built by `python -m r2ai.zh_sample.variant` (`build_z`; baseline pinned by JSON SHA256 `2f10b78a...6c36544`, so the best file cannot drift under it).
+* zh data (2 % per domain, `data/raw_zh_sample`): 35,686 docs extracted, 29,385 chunked, 161,435 t256 chunks; 15 of 41 domains have page data, the other 26 are
+  blocked by robots or robots not reachable (yield not measured); raw 154,258,724 B; dense + sparse 372,477,851 B (`out/runs/zh-sample/FINAL_ANALYSIS.md`).
+* Retrieval: the 1,200 vi queries are encoded once and searched in the separate zh index (same BGE-M3 and chunker); no translation. bge-reranker-v2-m3 scores
+  (vi query, zh chunk) directly; zh top 150 per branch merged with the D50 vi list by reranker logit (`merge_scores`), vi relative order kept.
+  Branch: dense (+340 query-doc zh hits, +1.26 %, over hybrid, by the hit proxy; the proxy is not relevance).
+* File: ZIP 102,056,971 B (97.33 MiB, 2,800,629 B under the 100 MiB ceiling), SHA256 `8db51260...2b1f`; JSON 397,071,020 B, SHA256 `95eff865...811d`;
+  validator 0 errors; doc list changed vs D50 in 1,190 / 1,200 queries, chunk slots in 529; vi relative order changed in 0 queries; 2,606 zh chunk slots of 60,000 (4.34 %).
+* Score: see Leaderboard and the Z block above. Z 0.2034 vs D50 0.2107 (-0.0073).
+
 ## Best configuration and replay (2026-10-05)
 
 `configs/submission-best.yaml` = D50 + H1-expand (Final 0.2109; since 2026-10-06 `configs/submission-h1expand.yaml`, see "Best = RRF"); `configs/submission-d50.yaml` = D50 (the former best config,
@@ -385,7 +415,7 @@ hybrid rank from `vi_cand.docs.parquet`, the order the D50 builder used); chunk 
 * Score (user, 2026-10-06): Final 0.2125, Doc F2 0.2285 (identical), Chunk F2 0.1964 (+0.0032) -> +0.0016 = half the Chunk F2
   change, as expected; the swapped-in docs are right more often than the ones they replace.
 
-## Best = RRF; RRF doc variants RD150 / RD150c (2026-10-06, RD150 / RD150c not uploaded)
+## RRF configuration; RD150 best / RD150c pending (2026-10-06)
 
 `configs/submission-h1expand.yaml` = the former best (content unchanged). `configs/submission-best.yaml` = h1expand +
 `postprocess.rrf_chunk_docs` (enabled, k 60, reranker_cache `out/runs/rerank200/full/vi_k100.parquet`, hybrid_ranks
@@ -411,10 +441,14 @@ ties as rrf_chunks.
   p95 118, hybrid rank all 151..200 (the D50 150 are exactly the hybrid top 150); dropped docs: reranker rank mean 170.9, hybrid
   101..150. Overlap with R150 mean 136.08 docs/query (13.15 differ). Out-of-scope diff 0 (ids/keys 1,200/1,200; RD150 chunks =
   best bytes; RD150c docs = RD150 bytes).
-* Score: not measured. Extrapolated (not measured): R150 changed 24.67 docs/query for Doc F2 +0.0004, so RD150 (13.71) about
-  +0.0002 Doc F2, +0.0001 Final. Order if uploaded: RD150 first (doc side only), RD150c only if RD150 >= best.
+* RD150 score (user provided): Final 0.2139 = (0.2313 + 0.1964)/2 = 0.21385 rounded; Doc P 0.1431, Doc R 0.3412, Chunk P 0.2340, Chunk R 0.2199. Against RRF: Doc F2 +0.0028, Doc R +0.0040, chunks byte-identical; choosing the RRF doc set over pool 200 contributes +0.0014 Final. RD150c not measured.
 
 ## Pending uploads
 
-RRF (`out/runs/rerank200/partC/sub_rrf_d50x_full50.zip`) uploaded 2026-10-06: 0.2125, the best file. Built, not uploaded:
-RD150, then RD150c only if RD150 >= best (low priority; see "Best = RRF"). D32 / D40, G, R120 / R180 and H1-dedup are not to be uploaded.
+RRF uploaded 2026-10-06: 0.2125; RD150 uploaded: 0.2139 (current best, user provided). Built, not uploaded:
+RD150c. Z-append on RD150 docs + RRF chunks is the next diagnostic (not an upload candidate); not built at this documentation commit.
+D32 / D40, G, R120 / R180, H1-dedup and Z are not to be uploaded again.
+
+## Changelog
+
+- 2026-10-06 14:48 UTC+7 — GPT-6 (Codex): commit pending Z documentation; record RD150 user-provided score and exact artifact SHA, current best 0.2139, Doc R baseline 0.3412, +0.0014 from RRF doc selection on pool 200, 21 uploads. Config best remains RRF; update zh REPORT with Z LB score. No upload/network/GPU.

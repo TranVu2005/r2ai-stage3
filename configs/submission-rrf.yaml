@@ -1,18 +1,17 @@
-# Best leaderboard configuration: RD150 = RRF (configs/submission-rrf.yaml) + RRF choice of the doc set (Final 0.2139,
-# 2026-10-06; score provided by the user). = configs/submission-rrf.yaml (retrieval, builder, expand and RRF chunk docs
-# unchanged) + one more post-processing step: relevant_docs = doc_ids_group of the k_docs docs of the tier-1 = 200 rerank pool
-# (reranker_cache) with the highest 1/(k + reranker rank) + 1/(k + rank in hybrid_ranks), k = 60 (ties: lower reranker rank,
-# then lower hybrid rank), in that order, then their duplicate-cluster mates (clusters / scope of expand_clusters);
-# relevant_chunks stay those of the RRF step byte for byte (r2ai.submit.rrf_docs, --chunks base).
-# reranker_cache = out/runs/rerank200/full (GPU run of 2026-10-05; not produced by scripts/run_best_retrieval.py).
+# Best leaderboard configuration: D50 + H1-expand + RRF choice of the full-chunk docs (Final 0.2125, 2026-10-06; score
+# provided by the user). = configs/submission-h1expand.yaml (retrieval, builder and expand unchanged) + one more
+# post-processing step: relevant_docs stay those of H1-expand; the 50 docs that get a full chunk are the 50 of the 150 D50
+# primary docs with the highest 1/(k + rank in reranker_cache) + 1/(k + rank in hybrid_ranks), k = 60 (ties: lower reranker
+# rank, then lower hybrid rank), in that order (r2ai.submit.rrf_chunks). reranker_cache = the tier-1 = 200 rerank cache
+# (out/runs/rerank200/full, GPU run of 2026-10-05; not produced by scripts/run_best_retrieval.py).
 # The clusters come from the vi corpus as of 2026-10-05: rebuild them (README) whenever the corpus changes (e.g. zh docs).
 # Read by r2ai.submit.best (scripts/run_best_retrieval.py, scripts/build_best_submission.py); code defaults are unchanged.
 # Relative paths are relative to the repo root.
-run_id: best-rd150
+run_id: best-d50-expand-rrf
 leaderboard:
-  file: out/runs/rrf-docs-2026-10-06/RD150/sub_RD150.zip
-  final: 0.2139
-  doc_f2: 0.2313
+  file: out/runs/rerank200/partC/sub_rrf_d50x_full50.zip
+  final: 0.2125
+  doc_f2: 0.2285
   chunk_f2: 0.1964
   source: provided by the user 2026-10-06
 queries: D:/GitHub/r2ai-stage3-old/data/raw/query.parquet
@@ -40,17 +39,16 @@ submission:
   doc_ranking: out/runs/ab-2026-10-05b/cand/vi_cand.docs.parquet
   chunks_dir: data/chunks
   docs_dir: data/docs_vi
-  out: out/runs/best/submission/sub_best_rd150.zip
+  out: out/runs/best/submission/sub_best_d50_expand_rrf.zip
   # K doc 150 primary docs (ranks 1..100 deep-rerank order, 101..150 hybrid order), each expanded to its whole
   # doc_ids_group; full chunks (whole answer if inside the body, else whole body; no cut) for the top 50 docs.
   args: [--k-doc, '100', --k-doc-total, '150', --k-chunk, '50', --chunk-mode, full, --dedupe-scope, doc]
   max_zip_bytes: 104857600      # 100 MiB ceiling; LB accepted 97.04 MiB, 110 MiB never finished uploading
   base_json_sha256: 2f10b78ac17f4eafdd5fe1b0b207260b062f17b29f4fcc3ee1a4b364b3c36544   # builder output = D50
   expand_json_sha256: 6c27d3f327fdcc5dac248cdaf80cf1be941fbff22666b25dbd07f32903f01106 # after expand = uploaded H1-expand
-  rrf_json_sha256: ff035b8ba7eea0a177932850d3a9cc9f1ffbcbe8297b8a8740bae23bd949d1c3    # after RRF chunk docs = uploaded RRF
-  expected_json_sha256: 136c259145c6fa134bcd5d4a877575088e28346ef43636afc87d2e283508e950   # after RRF doc set = uploaded RD150
-  expected_json_bytes: 402439824
-  uploaded_zip_sha256: 9eaf78b41d82372397ef56df9d5bcae3f8b8e93ea10ee7f5047da3d4a494ccfd
+  expected_json_sha256: ff035b8ba7eea0a177932850d3a9cc9f1ffbcbe8297b8a8740bae23bd949d1c3   # after RRF = uploaded RRF
+  expected_json_bytes: 402439775
+  uploaded_zip_sha256: 34eb7b2a7337a5f32ea3cb87c7bd65d7d51397abf3be34a1feed83e3e930bd8f
 postprocess:
   expand_clusters:
     enabled: true                 # false (or no postprocess key) = plain D50
@@ -62,9 +60,3 @@ postprocess:
     reranker_cache: out/runs/rerank200/full/vi_k100.parquet          # tier 1 = 200 rerank, ranks 1..200
     hybrid_ranks: out/runs/ab-2026-10-05b/cand/vi_cand.docs.parquet  # = submission.doc_ranking (D50 hybrid order)
     missing_rank: 201             # reranker rank of a primary doc absent from reranker_cache (none on 2026-10-06)
-  rrf_doc_set:
-    enabled: true                 # false (or no key) = RRF (relevant_docs of H1-expand)
-    k: 60
-    k_docs: 150                   # docs taken from the pool before the cluster expand
-    reranker_cache: out/runs/rerank200/full/vi_k100.parquet          # the pool (all its docs) and their reranker ranks
-    hybrid_ranks: out/runs/ab-2026-10-05b/cand/vi_cand.docs.parquet  # every pool doc has one (0 missing on 2026-10-06)

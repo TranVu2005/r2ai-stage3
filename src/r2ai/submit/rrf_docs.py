@@ -13,6 +13,8 @@ relevant_docs = doc_ids_group of the --k-docs best docs in RRF order, then the H
 Stats (<out>.stats.json): docs new / dropped vs the D50 150 docs (--runs-dir / --doc-ranking / --k-cache / --k-total), their
 reranker and hybrid ranks, overlap with R150 (first --k-docs docs of the pool in reranker order), chunks whose doc_id is not
 in relevant_docs, chunk docs changed vs --base.
+rrf_doc_submission is the same build as a library call, used by r2ai.submit.best when the config enables
+postprocess.rrf_doc_set; hybrid_ranks may then differ from doc_ranking (the CLI uses --doc-ranking for both).
 """
 from __future__ import annotations
 
@@ -23,6 +25,7 @@ import json
 import sys
 import time
 import zipfile
+from pathlib import Path
 
 import numpy as np
 import pyarrow.parquet as pq
@@ -63,14 +66,25 @@ def rank_dist(x) -> dict:
             'p95': float(np.percentile(x, 95)), 'max': int(x.max()), 'hist': hist}
 
 
-def cmd_build(a) -> int:
+def rrf_doc_submission(base_json, out_zip, *, chunks, runs_dir, doc_ranking, hybrid_ranks, rerank_run, queries, chunks_dir,
+                       docs_dir, clusters, scope='content', k_cache=100, k_total=150, k_docs=150, k_chunk=50, rrf_k=60) -> dict:
+    """base JSON -> out_zip + its .json (see the module doc); returns the stats."""
+    from types import SimpleNamespace
+    a = SimpleNamespace(base=base_json, out=out_zip, chunks=chunks, runs_dir=runs_dir, doc_ranking=doc_ranking,
+                        hybrid_ranks=hybrid_ranks, rerank_run=rerank_run, queries=queries, chunks_dir=chunks_dir, docs_dir=docs_dir,
+                        clusters=clusters, scope=scope, k_cache=k_cache, k_total=k_total, k_docs=k_docs, k_chunk=k_chunk, rrf_k=rrf_k)
+    return _build(a)
+
+
+def _build(a) -> dict:
     from r2ai.submit.make_submission import load_full_texts
     out_zip = assert_writable(a.out)
     out_json = assert_writable(out_zip.with_suffix('.json'))
-    require_inputs(a.base, a.rerank_run, a.doc_ranking, a.clusters, resolve_path(a.chunks_dir) / 'docs.parquet', a.docs_dir)
+    require_inputs(a.base, a.rerank_run, a.doc_ranking, a.hybrid_ranks, a.clusters, resolve_path(a.chunks_dir) / 'docs.parquet',
+                   a.docs_dir)
     t0 = time.time()
     qids = sorted(int(x) for x in pq.read_table(resolve_path(a.queries), columns=['id'])['id'].to_pylist())
-    rr, hy = R.ranks(a.rerank_run), R.ranks(a.doc_ranking)
+    rr, hy = R.ranks(a.rerank_run), R.ranks(a.hybrid_ranks)
     pool = {q: sorted(rr.get(q, {}), key=rr.get(q, {}).get) for q in qids}
     pool_missing_hy = sum(d not in hy.get(q, {}) for q in qids for d in pool[q])
     docs = {q: rrf_docs(pool[q], rr.get(q, {}), hy.get(q, {}), a.k_docs, a.rrf_k) for q in qids}
@@ -138,7 +152,13 @@ def cmd_build(a) -> int:
     m |= {'json_bytes': out_json.stat().st_size, 'json_sha256': R._sha256(out_json), 'zip_bytes': out_zip.stat().st_size,
           'zip_sha256': R._sha256(out_zip), 'max_zip_bytes': 104857600, 'zip_within_ceiling': out_zip.stat().st_size <= 104857600,
           'elapsed_s': round(time.time() - t0, 1)}
-    out_zip.with_suffix('.stats.json').write_text(json.dumps(m, indent=1), encoding='utf-8')
+    return m
+
+
+def cmd_build(a) -> int:
+    a.hybrid_ranks = a.doc_ranking
+    m = _build(a)
+    Path(a.out).with_suffix('.stats.json').write_text(json.dumps(m, indent=1), encoding='utf-8')
     print(json.dumps(m, indent=1))
     return 0
 

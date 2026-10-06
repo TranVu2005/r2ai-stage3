@@ -1,13 +1,17 @@
-"""configs: best = h1expand + postprocess.rrf_chunk_docs (RRF choice of the full-chunk docs); best.build replays the
-r2ai.submit.rrf_chunks CLI byte for byte on a fixture, and with the key off/absent gives the H1-expand bytes unchanged."""
+"""configs: rrf = h1expand + postprocess.rrf_chunk_docs (RRF choice of the full-chunk docs); best.build replays the
+r2ai.submit.rrf_chunks CLI byte for byte on a fixture, and with the key off/absent gives the H1-expand bytes unchanged.
+The current best (rrf + RRF doc set, RD150) is covered by test_best_rd150.py."""
 import copy
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from r2ai.paths import ROOT
 from r2ai.submit import best
 from r2ai.submit import rrf_chunks as R
 from tests.test_best_expand import H1EXPAND, IDS, K_CHUNK, K_TOTAL, _cfg, _h1, env  # noqa: F401  (fixture)
+
+RRF = ROOT / 'configs' / 'submission-rrf.yaml'
 
 
 def _rr(env):
@@ -34,8 +38,8 @@ def _rrf_cfg(env, enabled, sha_id, sha_ex, sha):
     return cfg
 
 
-def test_config_best_is_h1expand_plus_rrf_chunk_docs():
-    b, h = best.load_config(best.DEFAULT_CONFIG), best.load_config(H1EXPAND)
+def test_config_rrf_is_h1expand_plus_rrf_chunk_docs():
+    b, h = best.load_config(RRF), best.load_config(H1EXPAND)
     assert best.rrf_config(b) == {'enabled': True, 'k': 60, 'reranker_cache': 'out/runs/rerank200/full/vi_k100.parquet',
                                   'hybrid_ranks': 'out/runs/ab-2026-10-05b/cand/vi_cand.docs.parquet', 'missing_rank': 201}
     assert best.rrf_config(h) is None

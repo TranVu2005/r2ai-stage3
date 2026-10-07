@@ -133,6 +133,58 @@ def test_transient_history_does_not_halt_or_extend_pause_on_recovery(failures, s
         assert not any(e['event'] == 'full_zh_outage_wait' for e in events)
 
 
+def test_session_start_rate_keeps_learned_rate_unless_it_was_cut():
+    from r2ai.zh_full.crawl import session_start_rate
+    assert session_start_rate(.5625, 4, had_rate_cut=False) == .5625
+    assert session_start_rate(.5625, 4, had_rate_cut=True) == pytest.approx(.421875)
+    assert session_start_rate(6, 4, had_rate_cut=False) == 4
+    assert session_start_rate(.1, 4, had_rate_cut=False) == .25
+    assert session_start_rate(None, 4, had_rate_cut=False) == 1.0
+
+
+def test_begin_session_remeasures_baseline_and_resumes_rate():
+    from r2ai.zh_full.crawl import FullTuner, begin_session
+    tuner = FullTuner(4, 2, rate=.421875, baseline_p95=.59, clock=lambda: 100)
+    begin_session(tuner, .5625, had_rate_cut=False)
+    assert tuner.rate == .5625 and tuner.baseline_p95 is None
+    for _ in range(100):
+        tuner.record(2.0, 200, False)
+    assert tuner.baseline_p95 == 2.0
+
+
+def test_full_tuner_reports_every_rate_cut():
+    from r2ai.zh_full.crawl import FullTuner
+    cuts = []
+    limited = FullTuner(4, 2, clock=lambda: 100)
+    limited.on_rate_cut = lambda: cuts.append('429')
+    limited.record(.1, 429, False)
+    outage = FullTuner(4, 2, clock=lambda: 100)
+    outage.on_rate_cut = lambda: cuts.append('outage')
+    for _ in range(12):
+        outage.record(.1, None, True)
+    slow = FullTuner(4, 2, clock=lambda: 100)
+    slow.on_rate_cut = lambda: cuts.append('slow')
+    slow.record(5, 200, False)
+    assert {'429', 'outage', 'slow'} <= set(cuts)
+    quiet = FullTuner(4, 2, clock=lambda: 100)
+    quiet.on_rate_cut = lambda: cuts.append('quiet')
+    for _ in range(600):
+        quiet.record(.1, 200, False)
+    assert 'quiet' not in cuts
+
+
+def test_rate_cut_ledger_is_read_once_per_session(tmp_path, monkeypatch):
+    from r2ai.zh_full import crawl
+    monkeypatch.setattr(crawl, 'atomic_json', lambda p, v: p.write_text(json.dumps(v), encoding='utf-8'))
+    path = tmp_path / 'rate_cuts.json'
+    assert not crawl.take_rate_cut(path, 'cnkang.com')
+    crawl.mark_rate_cut(path, 'cnkang.com')
+    crawl.mark_rate_cut(path, 'cnkang.com')
+    assert crawl.take_rate_cut(path, 'cnkang.com')
+    assert not crawl.take_rate_cut(path, 'cnkang.com')
+    assert not crawl.take_rate_cut(path, '120ask.com')
+
+
 def test_stop_request_targets_only_its_process_and_ignores_stale_pid():
     from r2ai.zh_full import crawl
     assert crawl.stop_requested({'pid': 13704}, 13704)

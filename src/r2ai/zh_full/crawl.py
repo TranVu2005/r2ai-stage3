@@ -20,6 +20,7 @@ from vicrawl.state import StateDB
 from vicrawl.settings import Config
 from vicrawl.urlnorm import group_urls, normalize_url, domain_of
 from r2ai.zh_sample.crawl import ZhTuner
+from vicrawl.tuner import MIN_RATE, start_rate
 from urllib.parse import urlsplit
 
 SAMPLE = RUNS_DIR / 'zh-sample'
@@ -30,13 +31,17 @@ LANES = (
     ('jb39.com', 'jbk.39.net', 'a-hospital.com', 'wujue.com', 'zydcd.com', 'health.people.com.cn', 'familydoctor.cn'),
 )
 DOMAINS = frozenset(d for lane in LANES for d in lane)
+RATE_CUTS = RUN / 'rate_cuts.json'
 
 
 class FullTuner(ZhTuner):
     """Transient outages wait at a reduced rate; access/challenge halts stay final."""
+    RATE_CUTS = ('rate_down', 'zh_slow_cap', 'full_zh_outage_wait')
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.transient_errors = deque(maxlen=self._errs.maxlen)
+        self.on_rate_cut = None
 
     def record(self, latency, http_status, error):
         transient = bool(error or http_status == 429 or (http_status is not None and http_status >= 500))
@@ -50,7 +55,37 @@ class FullTuner(ZhTuner):
                 self.rate = max(.25, self.rate / 2)
                 self.paused_until = max(self.paused_until, self.clock() + 60)
                 events.append({'event': 'full_zh_outage_wait', 'rate': self.rate, 'wait_seconds': 60})
+        if self.on_rate_cut and any(e.get('event') in self.RATE_CUTS for e in events):
+            self.on_rate_cut()
         return events
+
+
+def session_start_rate(saved_rate, cap, had_rate_cut):
+    """Resume at the learned rate; only a session that had to slow down restarts 25% lower."""
+    if had_rate_cut or not saved_rate:
+        return start_rate(saved_rate, cap)
+    return max(MIN_RATE, min(cap, saved_rate))
+
+
+def begin_session(tuner, saved_rate, had_rate_cut):
+    tuner.rate = session_start_rate(saved_rate, tuner.cap, had_rate_cut)
+    # The sample-run baseline goes stale; rate_up compares against latency measured this session.
+    tuner.baseline_p95 = None
+
+
+def mark_rate_cut(path, domain):
+    # Written when the cut happens, so a crashed session still counts as having slowed down.
+    cuts = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
+    if not cuts.get(domain):
+        atomic_json(path, {**cuts, domain: True})
+
+
+def take_rate_cut(path, domain):
+    cuts = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
+    if domain not in cuts:
+        return False
+    atomic_json(path, {d: v for d, v in cuts.items() if d != domain})
+    return bool(cuts[domain])
 
 
 def stop_requested(request, pid):
@@ -400,6 +435,8 @@ async def run():
     async def domain_run(domain):
         dc = domain_config(cfg, domain)
         client = Client(domain, dc, net, db, stop, Audit())
+        begin_session(client.tuner, (db.get_domain(domain) or {}).get('rate'), take_rate_cut(RATE_CUTS, domain))
+        client.tuner.on_rate_cut = lambda: mark_rate_cut(RATE_CUTS, domain)
         # No idle keep-alive sockets: active request slots bound total sockets,
         # including the geo check performed before a page within the same slot.
         await client.client.aclose()

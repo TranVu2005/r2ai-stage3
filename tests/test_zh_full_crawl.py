@@ -185,6 +185,34 @@ def test_rate_cut_ledger_is_read_once_per_session(tmp_path, monkeypatch):
     assert not crawl.take_rate_cut(path, '120ask.com')
 
 
+def test_h2_protocol_error_is_a_recorded_request_failure_not_a_crash():
+    # Server closes a pooled HTTP/2 connection while a new stream opens; h2 raises outside httpx.HTTPError.
+    import asyncio
+    import io
+    import h2.exceptions
+    from r2ai.zh_full.crawl import FullTuner, network_runtime
+    runtime = network_runtime()
+
+    class Net:
+        async def check(self): pass
+
+    class Transport:
+        def stream(self, *args):
+            raise h2.exceptions.ProtocolError('Invalid input ConnectionInputs.SEND_SETTINGS in state ConnectionState.CLOSED')
+
+    async def run():
+        c = object.__new__(runtime.PoliteClient)
+        c.domain, c.net, c.stop, c.audit = 'cnkang.com', Net(), asyncio.Event(), io.StringIO()
+        c.tuner = FullTuner(4, 2, rate=4)
+        c.next_at, c.pace_lock, c.client = 0, asyncio.Lock(), Transport()
+        return c, await c.hop('https://www.cnkang.com/a', 'page')
+
+    client, (code, _, body, error, _) = asyncio.run(run())
+    assert code is None and body == b'' and error.startswith('ProtocolError: ')
+    assert json.loads(client.audit.getvalue())['error'] == error
+    assert list(client.tuner._errs) == [True]
+
+
 def test_stop_request_targets_only_its_process_and_ignores_stale_pid():
     from r2ai.zh_full import crawl
     assert crawl.stop_requested({'pid': 13704}, 13704)

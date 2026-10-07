@@ -11,6 +11,7 @@ import re
 import signal
 import time
 from urllib.parse import urlsplit, urljoin
+import h2.exceptions
 import httpx
 from vicrawl.fetch import CHROME_UA, MAX_BODY, decode_html
 from vicrawl.robots import interpret_robots
@@ -141,7 +142,8 @@ class PoliteClient:
                     if size >= MAX_BODY:
                         break
                 body = b''.join(parts)[:MAX_BODY]
-        except httpx.HTTPError as e:
+        except (httpx.HTTPError, h2.exceptions.ProtocolError) as e:
+            # h2 can leak ProtocolError when the server closes a pooled HTTP/2 connection mid-handshake.
             error = f'{type(e).__name__}: {str(e)[:200]}'
         dt = time.time() - t0
         self.audit.write(json.dumps({'domain': self.domain, 'url': url, 'kind': kind, 't0': t0,

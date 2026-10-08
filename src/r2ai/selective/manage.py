@@ -76,6 +76,25 @@ def apply_rows(conn, rows, version):
         raise
 
 
+def _mark_selected(conn, rows):
+    # select_meta.new_status is the current selection: the watchdog treats a fetch of a row still marked
+    # deferred there as a safety violation, so a reopened row must be recorded as selected.
+    conn.executemany('UPDATE urls SET status=? WHERE url_norm=?',[(s,u) for u,s in rows])
+    conn.executemany('UPDATE select_meta SET new_status=old_status WHERE url_norm=?',[(u,) for u,_ in rows])
+
+
+def sync_reopened(conn):
+    """Repair rows reopened before reopen recorded the selection in select_meta."""
+    conn.execute('BEGIN IMMEDIATE')
+    try:
+        n=conn.execute('''UPDATE select_meta SET new_status=old_status WHERE new_status='deferred_select'
+            AND url_norm IN (SELECT url_norm FROM urls WHERE status!='deferred_select')''').rowcount
+        conn.execute('COMMIT')
+        return n
+    except BaseException:
+        conn.execute('ROLLBACK'); raise
+
+
 def reopen(conn, domain, top):
     if top<0: raise ValueError('top must be nonnegative')
     conn.execute('BEGIN IMMEDIATE')
@@ -83,7 +102,7 @@ def reopen(conn, domain, top):
         rows=conn.execute('''SELECT u.url_norm,m.old_status FROM urls u JOIN select_meta m USING(url_norm)
             WHERE u.domain=? AND u.status='deferred_select'
             ORDER BY m.score DESC,json_array_length(u.doc_ids) DESC,u.url_norm LIMIT ?''',(domain,top)).fetchall()
-        conn.executemany('UPDATE urls SET status=? WHERE url_norm=?',[(s,u) for u,s in rows])
+        _mark_selected(conn,rows)
         conn.execute('COMMIT')
         return len(rows)
     except BaseException:
@@ -99,7 +118,7 @@ def reopen_urls(conn, domain, url_norms):
         conn.executemany('INSERT OR IGNORE INTO reopen_list VALUES(?)',[(u,) for u in url_norms])
         rows=conn.execute('''SELECT u.url_norm,m.old_status FROM urls u JOIN select_meta m USING(url_norm)
             JOIN reopen_list l USING(url_norm) WHERE u.domain=? AND u.status='deferred_select' ''',(domain,)).fetchall()
-        conn.executemany('UPDATE urls SET status=? WHERE url_norm=?',[(s,u) for u,s in rows])
+        _mark_selected(conn,rows)
         conn.execute('DELETE FROM reopen_list')
         conn.execute('COMMIT')
         return len(rows)
@@ -253,6 +272,7 @@ def main(argv=None):
     r=sub.add_parser('reopen'); r.add_argument('--domain',required=True); r.add_argument('--top',type=int,required=True)
     r=sub.add_parser('reopen-urls'); r.add_argument('--domain',required=True); r.add_argument('--file',required=True,help='parquet with url_norm')
     r=sub.add_parser('rollback'); r.add_argument('--cut-version',required=True)
+    sub.add_parser('sync-reopened')
     args=parser.parse_args(argv)
     if args.step=='apply': apply_and_gate(); return 0
     preflight()
@@ -264,6 +284,7 @@ def main(argv=None):
         with writer(DB) as conn:
             if args.step=='reopen': result=reopen(conn,args.domain,args.top)
             elif args.step=='reopen-urls': result=reopen_urls(conn,args.domain,urls)
+            elif args.step=='sync-reopened': result=sync_reopened(conn)
             else: result=rollback(conn,args.cut_version)
     print(json.dumps({'step':args.step,'changed_rows':result}))
     return 0

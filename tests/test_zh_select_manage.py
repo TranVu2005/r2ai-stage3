@@ -63,6 +63,26 @@ def test_reopen_urls_restores_only_listed_deferred_rows_of_that_domain(db):
     assert db.conn.execute("SELECT status FROM urls WHERE url_norm='x/6'").fetchone()[0] == 'deferred_select'
 
 
+def test_reopen_records_selection_so_watchdog_does_not_flag_reopened_fetches(db):
+    from r2ai.zh_full.watchdog import _deferred_in_audit
+    m.apply_rows(db.conn, plan(), 'v1')
+    m.reopen(db.conn, 'x', 1)                    # x/6, highest deferred score
+    m.reopen_urls(db.conn, 'x', ['x/3'])
+    audit = [{'kind': 'page', 'url': f'https://x/{i}'} for i in (6, 3, 4)]
+    assert _deferred_in_audit(db.conn, audit) == ['x/4']
+    assert m.rollback(db.conn, 'v1') == 7       # unfetched reopened rows still roll back
+
+
+def test_sync_reopened_repairs_meta_of_rows_reopened_before_the_fix(db):
+    m.apply_rows(db.conn, plan(), 'v1')
+    db.conn.execute("UPDATE urls SET status='pending' WHERE url_norm IN ('x/1','x/5')")   # legacy reopen
+    db.conn.execute("UPDATE urls SET status='ok' WHERE url_norm='x/1'")                    # fetched since
+    assert m.sync_reopened(db.conn) == 2
+    assert dict(db.conn.execute("SELECT url_norm,new_status FROM select_meta WHERE url_norm IN ('x/1','x/5','x/6')")) == {
+        'x/1': 'pending', 'x/5': 'pending', 'x/6': 'deferred_select'}
+    assert m.sync_reopened(db.conn) == 0
+
+
 def test_apply_stale_or_duplicate_plan_is_atomic_and_no_reapply(db):
     rows = plan()
     rows[-1]['old_rank']=200

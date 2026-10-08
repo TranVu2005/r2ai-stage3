@@ -20,6 +20,14 @@ def test_crawler_detection_needs_exact_module_and_run_step():
     assert [p.pid for p in crawler_procs(procs)] == [1]
 
 
+def test_crawler_detection_supports_new_deadline_flag_without_duplicate_spawn():
+    procs=[proc(1,cmd=[*CMD,'--deadline','2026-10-20T23:59:00+07:00']),
+           proc(2,cmd=[*CMD,'--deadline=2026-10-19T23:59:00+07:00']),
+           proc(3,cmd=['python','-m','r2ai.zh_full.crawl','stop','--deadline','x'])]
+    assert [p.pid for p in crawler_procs(procs)]==[1,2]
+    assert go(procs[:1],runtime={'pid':1,'updated_at':NOW-30})['action']=='ok'
+
+
 def test_fresh_heartbeat_is_ok_and_clears_suspect():
     got = go([proc()], runtime={'pid': 10, 'updated_at': NOW - 60}, suspect={'pid': 10, 'since': NOW - 900})
     assert got['action'] == 'ok' and got['suspect'] is None

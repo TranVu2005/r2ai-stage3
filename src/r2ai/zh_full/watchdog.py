@@ -3,7 +3,7 @@
     python -m r2ai.zh_full.watchdog            # check once, restart if dead/hung
     python -m r2ai.zh_full.watchdog --dry-run  # decide and log only
 
-Alive = a process running exactly `python -B -u -m r2ai.zh_full.crawl run` whose own
+Alive = a process running `python -B -u -m r2ai.zh_full.crawl run` (optional --deadline) whose own
 heartbeat (runtime_state.json written by that PID after it started, or its stdout log)
 is newer than 10 minutes. A stale heartbeat must be seen on two checks >= 4 minutes
 apart before the process tree is killed, so a wake from sleep is not mistaken for a hang.
@@ -39,8 +39,20 @@ class Proc:
     cmdline: list
 
 
+def is_crawler_command(command):
+    try:
+        start = command.index('-m')
+    except ValueError:
+        return False
+    if command[start:start+3] != ['-m','r2ai.zh_full.crawl','run']:
+        return False
+    extra = command[start+3:]
+    return (not extra or (len(extra)==2 and extra[0]=='--deadline')
+            or (len(extra)==1 and extra[0].startswith('--deadline=')))
+
+
 def crawler_procs(procs):
-    return [p for p in procs if p.cmdline[-3:] == ['-m', 'r2ai.zh_full.crawl', 'run']]
+    return [p for p in procs if is_crawler_command(p.cmdline)]
 
 
 def restarts_last_hour(history, now):
@@ -118,7 +130,7 @@ def _live_procs():
     for p in psutil.process_iter(['pid', 'create_time', 'cmdline']):
         try:
             cmd = p.info['cmdline'] or []
-            if cmd[-3:] == ['-m', 'r2ai.zh_full.crawl', 'run']:
+            if is_crawler_command(cmd):
                 out.append(Proc(p.info['pid'], p.info['create_time'], list(cmd)))
         except (psutil.Error, TypeError):
             continue

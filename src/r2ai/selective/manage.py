@@ -90,6 +90,23 @@ def reopen(conn, domain, top):
         conn.execute('ROLLBACK'); raise
 
 
+def reopen_urls(conn, domain, url_norms):
+    """Reopen an explicit URL list (e.g. a seed-42 scout); only deferred rows of this domain change."""
+    conn.execute('BEGIN IMMEDIATE')
+    try:
+        conn.execute('CREATE TEMP TABLE IF NOT EXISTS reopen_list(url_norm TEXT PRIMARY KEY)')
+        conn.execute('DELETE FROM reopen_list')
+        conn.executemany('INSERT OR IGNORE INTO reopen_list VALUES(?)',[(u,) for u in url_norms])
+        rows=conn.execute('''SELECT u.url_norm,m.old_status FROM urls u JOIN select_meta m USING(url_norm)
+            JOIN reopen_list l USING(url_norm) WHERE u.domain=? AND u.status='deferred_select' ''',(domain,)).fetchall()
+        conn.executemany('UPDATE urls SET status=? WHERE url_norm=?',[(s,u) for u,s in rows])
+        conn.execute('DELETE FROM reopen_list')
+        conn.execute('COMMIT')
+        return len(rows)
+    except BaseException:
+        conn.execute('ROLLBACK'); raise
+
+
 def rollback(conn, version):
     conn.execute('BEGIN IMMEDIATE')
     try:
@@ -234,14 +251,20 @@ def main(argv=None):
     sub=parser.add_subparsers(dest='step',required=True)
     sub.add_parser('apply')
     r=sub.add_parser('reopen'); r.add_argument('--domain',required=True); r.add_argument('--top',type=int,required=True)
+    r=sub.add_parser('reopen-urls'); r.add_argument('--domain',required=True); r.add_argument('--file',required=True,help='parquet with url_norm')
     r=sub.add_parser('rollback'); r.add_argument('--cut-version',required=True)
     args=parser.parse_args(argv)
     if args.step=='apply': apply_and_gate(); return 0
     preflight()
+    if args.step=='reopen-urls':
+        import pandas as pd
+        urls=list(pd.read_parquet(args.file,columns=['url_norm']).url_norm)
     with exclusive('crawl'):
         stopped_wal0()
         with writer(DB) as conn:
-            result=reopen(conn,args.domain,args.top) if args.step=='reopen' else rollback(conn,args.cut_version)
+            if args.step=='reopen': result=reopen(conn,args.domain,args.top)
+            elif args.step=='reopen-urls': result=reopen_urls(conn,args.domain,urls)
+            else: result=rollback(conn,args.cut_version)
     print(json.dumps({'step':args.step,'changed_rows':result}))
     return 0
 

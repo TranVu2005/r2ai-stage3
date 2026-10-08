@@ -54,6 +54,15 @@ def test_reopen_in_score_order_keeps_old_retry_schedule_and_status(db):
     with pytest.raises(ValueError): m.reopen(db.conn,'x',-1)
 
 
+def test_reopen_urls_restores_only_listed_deferred_rows_of_that_domain(db):
+    m.apply_rows(db.conn, plan(), 'v1')
+    # x/7 is already selected, y/1 does not exist, x/6 stays deferred because it is not listed.
+    assert m.reopen_urls(db.conn, 'x', ['x/3', 'x/5', 'x/7', 'y/1']) == 2
+    assert [r['url_norm'] for r in q.next_batch(db,'x',20,100,dry_run=True)] == ['x/7','x/2','x/3','x/5']
+    assert m.reopen_urls(db.conn, 'other', ['x/6']) == 0
+    assert db.conn.execute("SELECT status FROM urls WHERE url_norm='x/6'").fetchone()[0] == 'deferred_select'
+
+
 def test_apply_stale_or_duplicate_plan_is_atomic_and_no_reapply(db):
     rows = plan()
     rows[-1]['old_rank']=200

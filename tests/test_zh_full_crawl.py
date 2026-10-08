@@ -152,6 +152,14 @@ def test_begin_session_remeasures_baseline_and_resumes_rate():
     assert tuner.baseline_p95 == 2.0
 
 
+def test_selective_zhong_session_never_increases_rate_above_saved_rate():
+    from r2ai.zh_full.crawl import FullTuner, begin_session
+    tuner=FullTuner(4,2,clock=lambda:100)
+    begin_session(tuner,1.0,had_rate_cut=False,domain='zhongyibaodian.net')
+    for _ in range(500): tuner.record(.1,200,False)
+    assert tuner.cap<=1.0 and tuner.rate<=1.0
+
+
 def test_full_tuner_reports_every_rate_cut():
     from r2ai.zh_full.crawl import FullTuner
     cuts = []

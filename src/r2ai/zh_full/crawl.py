@@ -22,6 +22,7 @@ from vicrawl.urlnorm import group_urls, normalize_url, domain_of
 from r2ai.zh_sample.crawl import ZhTuner
 from vicrawl.tuner import MIN_RATE, start_rate
 from urllib.parse import urlsplit
+from .selection_queue import next_batch, next_retry_at, remaining_count, selected_domain, is_deferred, deadline_timestamp, deadline_hook, DEFAULT_DEADLINE
 
 SAMPLE = RUNS_DIR / 'zh-sample'
 LANES = (
@@ -67,7 +68,10 @@ def session_start_rate(saved_rate, cap, had_rate_cut):
     return max(MIN_RATE, min(cap, saved_rate))
 
 
-def begin_session(tuner, saved_rate, had_rate_cut):
+def begin_session(tuner, saved_rate, had_rate_cut, domain=None):
+    if domain == 'zhongyibaodian.net':
+        # Its last-session error rate was ~10%; selection must never raise pacing.
+        tuner.cap = min(tuner.cap, saved_rate or 1.)
     tuner.rate = session_start_rate(saved_rate, tuner.cap, had_rate_cut)
     # The sample-run baseline goes stale; rate_up compares against latency measured this session.
     tuner.baseline_p95 = None
@@ -332,13 +336,17 @@ def write_raw(domain, records):
     return final
 
 
-async def run():
+async def run(deadline=None):
+    deadline = deadline_timestamp() if deadline is None else deadline
+    if time.time() >= deadline:
+        return 0
     import httpx
     import psutil
     preflight()
     require_inputs(DB, RUN / 'prepare_complete.json', CONFIG_DIR / 'domains-zh-sample.yaml')
     runtime = network_runtime()
     stop, global_slots = asyncio.Event(), asyncio.Semaphore(8)
+    request_hooks = {'request': [deadline_hook(deadline, stop)]}
     loop = asyncio.get_running_loop()
     previous = {}
     for name in ('SIGINT', 'SIGTERM', 'SIGBREAK'):
@@ -369,7 +377,7 @@ async def run():
             async with self.lock:
                 if time.time() - self.checked_at >= 60:
                     self.country = None
-                    async with httpx.AsyncClient(trust_env=False, timeout=15, limits=direct_limits(True)) as client:
+                    async with httpx.AsyncClient(trust_env=False, timeout=15, limits=direct_limits(True),event_hooks=request_hooks) as client:
                         for url in ('https://ipinfo.io/json', 'https://api.country.is/'):
                             try:
                                 response = await client.get(url)
@@ -393,6 +401,8 @@ async def run():
         async def allowed(self, url):
             if not same_domain_url(url, self.domain):
                 return False, 'cross_domain_redirect_not_allowed'
+            if is_deferred(db.conn,url):
+                return False, 'deferred_select'
             return await super().allowed(url)
 
         async def hop(self, url, kind):
@@ -403,7 +413,7 @@ async def run():
         now = time.time()
         result = {}
         for domain, t0 in starts.items():
-            remaining = db.conn.execute("SELECT count(*) FROM urls WHERE domain=? AND (status IN ('pending','in_progress') OR next_try_at IS NOT NULL)", (domain,)).fetchone()[0]
+            remaining = remaining_count(db.conn, domain)
             total = db.conn.execute('SELECT count(*) FROM urls WHERE domain=?', (domain,)).fetchone()[0]
             done = total - remaining - completed[domain]
             elapsed = max(now - t0, 1e-9)
@@ -427,28 +437,32 @@ async def run():
         return value
 
     async def wait(seconds):
+        seconds = min(seconds, max(0., deadline - time.time()))
         try:
             await asyncio.wait_for(stop.wait(), timeout=max(0.01, seconds))
         except asyncio.TimeoutError:
             pass
+        if time.time() >= deadline:
+            stop.set()
 
     async def domain_run(domain):
         dc = domain_config(cfg, domain)
         client = Client(domain, dc, net, db, stop, Audit())
-        begin_session(client.tuner, (db.get_domain(domain) or {}).get('rate'), take_rate_cut(RATE_CUTS, domain))
+        begin_session(client.tuner, (db.get_domain(domain) or {}).get('rate'), take_rate_cut(RATE_CUTS, domain), domain=domain)
         client.tuner.on_rate_cut = lambda: mark_rate_cut(RATE_CUTS, domain)
         # No idle keep-alive sockets: active request slots bound total sockets,
         # including the geo check performed before a page within the same slot.
         await client.client.aclose()
         client.client = httpx.AsyncClient(trust_env=False, http2=True, follow_redirects=False,
+            event_hooks=request_hooks,
             timeout=httpx.Timeout(25, connect=10), limits=direct_limits(False),
             headers={'User-Agent': runtime.CHROME_UA, 'Accept-Language': 'zh-CN,zh;q=0.9',
                      'Accept': 'text/html,application/xhtml+xml,*/*;q=0.5'})
         starts[domain] = time.time()
-        remaining_start = db.conn.execute("SELECT count(*) FROM urls WHERE domain=? AND (status IN ('pending','in_progress') OR next_try_at IS NOT NULL)", (domain,)).fetchone()[0]
+        remaining_start = remaining_count(db.conn, domain)
         total = db.conn.execute('SELECT count(*) FROM urls WHERE domain=?', (domain,)).fetchone()[0]
         completed[domain] = total - remaining_start
-        buffer, robots_retry = [], 0
+        buffer, robots_retry, hold_state = [], 0, None
         db.upsert_domain(domain, state='active', updated_at=time.time())
         print(f'lane start {domain}: {remaining_start} pending, max_conns=2', flush=True)
 
@@ -461,7 +475,10 @@ async def run():
         async def worker():
             nonlocal robots_retry
             while not stop.is_set() and not client.tuner.halted and not robots_retry:
-                rows = db.next_batch(domain, 1, time.time())
+                if time.time() >= deadline:
+                    stop.set()
+                    return
+                rows = next_batch(db, domain, 1, time.time())
                 if not rows:
                     return
                 row = rows[0]
@@ -485,12 +502,24 @@ async def run():
                     flush()
 
         try:
+            if remaining_start == 0 and selected_domain(db.conn, domain):
+                hold_state = 'deferred_select'
+                if domain == '120ask.com':
+                    # Budget is zero while robots unavailable. Check robots only;
+                    # deferred pages remain off limits even if robots recover.
+                    url = db.conn.execute('SELECT url FROM urls WHERE domain=? ORDER BY rank LIMIT 1',(domain,)).fetchone()
+                    if url:
+                        allowed, reason = await runtime.PoliteClient.allowed(client,url[0])
+                        hold_state = 'select_hold_robots_ready' if allowed else 'waiting_robots'
+                        print(f'select hold {domain}: robots_allowed={allowed}, reason={reason}',flush=True)
+                db.upsert_domain(domain,state=hold_state,updated_at=time.time())
+                return
             while not stop.is_set():
                 await supervise_workers([worker() for _ in range(dc.max_conns)], stop)
                 flush()
                 if client.tuner.halted:
                     break
-                retry_at = robots_retry or runtime.next_retry_at(db, domain, None)
+                retry_at = robots_retry or next_retry_at(db, domain)
                 if retry_at is None:
                     break
                 db.upsert_domain(domain, state='waiting_robots' if robots_retry else 'waiting_retry', updated_at=time.time())
@@ -502,7 +531,7 @@ async def run():
             flush()
             db.upsert_domain(domain, rate=client.tuner.rate, conns=dc.max_conns,
                 baseline_p95=client.tuner.baseline_p95, crawl_delay=client.tuner.crawl_delay,
-                state='halted' if client.tuner.halted else ('stopped' if stop.is_set() else 'finished'),
+                state=hold_state or ('halted' if client.tuner.halted else ('stopped' if stop.is_set() else 'finished')),
                 halt_reason=client.tuner.halt_reason, updated_at=time.time())
             await client.client.aclose()
             print(f'lane finish {domain}, state={(db.get_domain(domain) or {}).get("state")}', flush=True)
@@ -536,7 +565,11 @@ async def run():
         atomic_json(RUN / 'process.json', {'pid': os.getpid(), 'started_at': time.time(), 'lanes': LANES,
                                         'raw': str(RAW), 'db': str(DB), 'config_sha256': digest(CONFIG_DIR / 'domains-zh-sample.yaml')})
         await supervise_lanes([lane(domains) for domains in LANES], monitor(), stop)
-        return 130 if stop.is_set() else 0
+        return 0 if time.time() >= deadline else (130 if stop.is_set() else 0)
+    except asyncio.CancelledError:
+        if time.time() >= deadline:
+            return 0
+        raise
     finally:
         stop.set()
         try:
@@ -553,7 +586,9 @@ async def run():
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('step', choices=['prepare', 'run', 'stop'])
+    parser.add_argument('--deadline', default=DEFAULT_DEADLINE)
     args = parser.parse_args(argv)
+    deadline = deadline_timestamp(args.deadline)
     if args.step == 'stop':
         request_stop()
         return 0
@@ -563,7 +598,7 @@ def main(argv=None):
     with exclusive('crawl'), keep_awake():
         code = None
         try:
-            code = asyncio.run(run())
+            code = asyncio.run(run() if args.deadline == DEFAULT_DEADLINE else run(deadline))
             return code
         finally:
             # The watchdog reads this to tell "all lanes finished" (0) from stop/crash; a hard kill writes nothing.

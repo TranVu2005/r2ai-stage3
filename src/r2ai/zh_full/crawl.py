@@ -47,6 +47,7 @@ class FullTuner(ZhTuner):
     def record(self, latency, http_status, error):
         transient = bool(error or http_status == 429 or (http_status is not None and http_status >= 500))
         self.transient_errors.append(transient)
+        rate_before = self.rate
         events = super().record(latency, http_status, error)
         if (self.halted and (self.halt_reason or '').startswith('error_rate')
                 and sum(self.transient_errors) == sum(self._errs)):
@@ -56,7 +57,9 @@ class FullTuner(ZhTuner):
                 self.rate = max(.25, self.rate / 2)
                 self.paused_until = max(self.paused_until, self.clock() + 60)
                 events.append({'event': 'full_zh_outage_wait', 'rate': self.rate, 'wait_seconds': 60})
-        if self.on_rate_cut and any(e.get('event') in self.RATE_CUTS for e in events):
+        # A cap that leaves the rate unchanged is not a slowdown; counting it cut every restart by 25%.
+        cuts = [e['event'] for e in events if e.get('event') in self.RATE_CUTS]
+        if self.on_rate_cut and cuts and (self.rate < rate_before or set(cuts) != {'zh_slow_cap'}):
             self.on_rate_cut()
         return events
 
@@ -121,9 +124,41 @@ async def fetch_record(client, db, row, stop):
         raise
 
 
-def direct_limits(geo=False):
+def direct_limits(geo=False, conns=2):
     import httpx
-    return httpx.Limits(max_connections=1 if geo else 2, max_keepalive_connections=0)
+    return httpx.Limits(max_connections=1 if geo else conns, max_keepalive_connections=0)
+
+
+class EgressCache:
+    """Egress must be VN. A recent VN result keeps serving while a refresh runs in the background,
+    so the ~3-6s geo probe no longer stalls every domain once a minute; past max_age_s it blocks."""
+    def __init__(self, probe, clock=time.time, refresh_s=60, max_age_s=120):
+        self.probe, self.clock, self.refresh_s, self.max_age_s = probe, clock, refresh_s, max_age_s
+        self.lock, self.country, self.checked_at, self.refreshing = asyncio.Lock(), None, None, None
+
+    def age(self):
+        return float('inf') if self.checked_at is None else self.clock() - self.checked_at
+
+    async def refresh(self):
+        async with self.lock:
+            if self.age() >= self.refresh_s:       # a failed probe is also retried at most once per refresh_s
+                self.country = await self.probe()
+                self.checked_at = self.clock()
+
+    async def check(self):
+        task = self.refreshing
+        if task and task.done() and not task.cancelled() and task.exception():
+            self.refreshing = None
+            raise task.exception()
+        if self.country == 'VN' and self.age() < self.max_age_s:
+            if self.age() >= self.refresh_s and (task is None or task.done()):
+                self.refreshing = asyncio.create_task(self.refresh())
+            return
+        await self.refresh()
+        if self.country is None:
+            raise RuntimeError('EGRESS_UNAVAILABLE: wait without page requests')
+        if self.country != 'VN':
+            raise RuntimeError(f'EGRESS country={self.country}; need VN')
 
 
 def same_domain_url(url, domain):
@@ -143,9 +178,14 @@ def new_groups(rows, domain, reused):
     return [{**g, 'rank': i} for i, g in enumerate(groups)]
 
 
+# cnkang answers in ~2s p50 (08/10 evening), so 2 sockets capped it near 0.5 req/s; 4 matches the
+# tuner's SLOW_MAX_CONNS. The request rate stays paced by the tuner (zh_slow_cap, 429 -> rate_down).
+MAX_CONNS_OVERRIDE = {'cnkang.com': 4}
+
+
 def domain_config(cfg, domain):
     original = cfg.for_domain(domain)
-    return replace(original, max_conns=min(2, original.max_conns))
+    return replace(original, max_conns=MAX_CONNS_OVERRIDE.get(domain, min(2, original.max_conns)))
 
 
 def network_runtime():
@@ -370,32 +410,23 @@ async def run(deadline=None):
         def flush(self):
             audits.flush()
 
-    class Network:
-        def __init__(self):
-            self.lock, self.country, self.checked_at = asyncio.Lock(), None, 0
-        async def check(self):
-            async with self.lock:
-                if time.time() - self.checked_at >= 60:
-                    self.country = None
-                    async with httpx.AsyncClient(trust_env=False, timeout=15, limits=direct_limits(True),event_hooks=request_hooks) as client:
-                        for url in ('https://ipinfo.io/json', 'https://api.country.is/'):
-                            try:
-                                response = await client.get(url)
-                                if response.status_code == 200:
-                                    self.country = response.json().get('country')
-                                    if self.country:
-                                        break
-                            except (httpx.HTTPError, ValueError):
-                                pass
-                    self.checked_at = time.time()
-                    atomic_json(RUN / 'egress.json', {'country': self.country, 'checked_at': self.checked_at,
-                                                    'direct': True, 'proxy': False})
-                if self.country is None:
-                    raise RuntimeError('EGRESS_UNAVAILABLE: wait without page requests')
-                if self.country != 'VN':
-                    raise RuntimeError(f'EGRESS country={self.country}; need VN')
+    async def egress_probe():
+        country = None
+        async with httpx.AsyncClient(trust_env=False, timeout=15, limits=direct_limits(True),event_hooks=request_hooks) as client:
+            for url in ('https://ipinfo.io/json', 'https://api.country.is/'):
+                try:
+                    response = await client.get(url)
+                    if response.status_code == 200:
+                        country = response.json().get('country')
+                        if country:
+                            break
+                except (httpx.HTTPError, ValueError):
+                    pass
+        atomic_json(RUN / 'egress.json', {'country': country, 'checked_at': time.time(),
+                                        'direct': True, 'proxy': False})
+        return country
 
-    net = Network()
+    net = EgressCache(egress_probe)
 
     class Client(runtime.PoliteClient):
         async def allowed(self, url):
@@ -431,7 +462,8 @@ async def run(deadline=None):
         value = {'pid': os.getpid(), 'updated_at': now, 'country': net.country, 'domains': result,
                  'rss_bytes': mem.rss, 'private_bytes': getattr(mem, 'private', None),
                  'available_memory_bytes': psutil.virtual_memory().available,
-                 'no_extract': True, 'max_active_domains': 4, 'max_connections_per_domain': 2,
+                 'no_extract': True, 'max_active_domains': 4,
+                 'max_connections_per_domain': {**{d: 2 for d in DOMAINS}, **MAX_CONNS_OVERRIDE},
                  'max_connections_total': 8}
         atomic_json(RUN / 'runtime_state.json', value)
         return value
@@ -455,7 +487,7 @@ async def run(deadline=None):
         await client.client.aclose()
         client.client = httpx.AsyncClient(trust_env=False, http2=True, follow_redirects=False,
             event_hooks=request_hooks,
-            timeout=httpx.Timeout(25, connect=10), limits=direct_limits(False),
+            timeout=httpx.Timeout(25, connect=10), limits=direct_limits(False, dc.max_conns),
             headers={'User-Agent': runtime.CHROME_UA, 'Accept-Language': 'zh-CN,zh;q=0.9',
                      'Accept': 'text/html,application/xhtml+xml,*/*;q=0.5'})
         starts[domain] = time.time()
@@ -464,7 +496,7 @@ async def run(deadline=None):
         completed[domain] = total - remaining_start
         buffer, robots_retry, hold_state = [], 0, None
         db.upsert_domain(domain, state='active', updated_at=time.time())
-        print(f'lane start {domain}: {remaining_start} pending, max_conns=2', flush=True)
+        print(f'lane start {domain}: {remaining_start} pending, max_conns={dc.max_conns}', flush=True)
 
         def flush():
             if buffer:

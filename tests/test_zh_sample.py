@@ -295,6 +295,18 @@ def test_zh_slow_server_rate_cap():
     assert tuner.interval() >= 1
 
 
+def test_zh_slow_cap_ignores_a_single_cold_request():
+    # A session's first request (robots.txt on a fresh TLS connection) took 3.4-3.7s on cnkang;
+    # the p50 of that one sample capped a 4 req/s domain at 1 req/s for the whole session.
+    from r2ai.zh_sample.crawl import ZhTuner, SLOW_CAP_MIN_SAMPLES
+    tuner = ZhTuner(4, 2, rate=4)
+    events = tuner.record(3.66, 200, False)
+    for _ in range(SLOW_CAP_MIN_SAMPLES - 2):
+        events += tuner.record(.5, 200, False)
+    assert not any(e['event'] == 'zh_slow_cap' for e in events)
+    assert tuner.cap == 4 and tuner.rate == 4
+
+
 def test_d50_config_is_pinned_when_best_changes():
     from r2ai.zh_sample.evaluate import choose_d50_config, D50_SHA256
     baseline = {'submission': {'expected_json_sha256':D50_SHA256}, 'run_id':'best-d50'}

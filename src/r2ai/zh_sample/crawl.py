@@ -51,6 +51,9 @@ def next_retry_at(db, domain, limit):
         " AND (status='pending' OR next_try_at IS NOT NULL)", args).fetchone()[0]
 
 
+SLOW_CAP_MIN_SAMPLES = 20      # one cold first request must not decide a session's cap
+
+
 class ZhTuner(Tuner):
     """Opt-in zh slow-server cap, without changing the default vi tuner."""
     def __init__(self, *args, **kwargs):
@@ -59,7 +62,7 @@ class ZhTuner(Tuner):
 
     def record(self, latency, http_status, error):
         events = super().record(latency, http_status, error)
-        if self.p50 > 3 and self.cap > 1:
+        if len(self._recent) >= SLOW_CAP_MIN_SAMPLES and self.p50 > 3 and self.cap > 1:
             self.cap, self.rate = 1, min(self.rate, 1)
             events.append({'event': 'zh_slow_cap', 'rate': self.rate, 'p50': self.p50})
         return events

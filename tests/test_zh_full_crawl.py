@@ -18,10 +18,16 @@ def test_skip_all_sample_urls_and_preserve_alias_grouping():
 
 
 def test_domain_config_caps_connections_without_mutating_config():
-    cfg = Config(domains={'cnkang.com': {'max_conns': 4, 'rate_cap': 1}})
-    got = domain_config(cfg, 'cnkang.com')
+    cfg = Config(domains={'120ask.com': {'max_conns': 4, 'rate_cap': 1}})
+    got = domain_config(cfg, '120ask.com')
     assert got.max_conns == 2 and got.rate_cap == 1
-    assert cfg.for_domain('cnkang.com').max_conns == 4
+    assert cfg.for_domain('120ask.com').max_conns == 4
+
+
+def test_cnkang_gets_four_connections_for_its_slow_server():
+    cfg = Config(domains={'cnkang.com': {'max_conns': 2, 'rate_cap': 4}})
+    assert domain_config(cfg, 'cnkang.com').max_conns == 4
+    assert domain_config(cfg, 'zhongyibaodian.net').max_conns <= 2
 
 
 def test_lanes_are_disjoint_and_long_sites_start_first():
@@ -111,6 +117,8 @@ def test_direct_socket_limits_and_cross_domain_redirect_policy():
     assert direct_limits(True).max_connections == 1
     assert direct_limits(True).max_keepalive_connections == 0
     assert direct_limits(False).max_connections == 2
+    assert direct_limits(False, 4).max_connections == 4
+    assert direct_limits(False, 4).max_keepalive_connections == 0
     assert same_domain_url('https://www.120ask.com/a', '120ask.com')
     assert not same_domain_url('https://cnkang.com/a', '120ask.com')
     assert not same_domain_url('https://120ask.com@evil.com/a', '120ask.com')
@@ -170,15 +178,78 @@ def test_full_tuner_reports_every_rate_cut():
     outage.on_rate_cut = lambda: cuts.append('outage')
     for _ in range(12):
         outage.record(.1, None, True)
-    slow = FullTuner(4, 2, clock=lambda: 100)
+    slow = FullTuner(4, 2, rate=4, clock=lambda: 100)
     slow.on_rate_cut = lambda: cuts.append('slow')
-    slow.record(5, 200, False)
+    for _ in range(20):
+        slow.record(5, 200, False)
     assert {'429', 'outage', 'slow'} <= set(cuts)
     quiet = FullTuner(4, 2, clock=lambda: 100)
     quiet.on_rate_cut = lambda: cuts.append('quiet')
     for _ in range(600):
         quiet.record(.1, 200, False)
     assert 'quiet' not in cuts
+
+
+def test_slow_cap_that_does_not_lower_rate_is_not_a_rate_cut():
+    # Marking it anyway made every restart start 25% lower (1.0 -> 0.75 on 08/10).
+    from r2ai.zh_full.crawl import FullTuner
+    cuts = []
+    tuner = FullTuner(4, 2, rate=.75, clock=lambda: 100)
+    tuner.on_rate_cut = lambda: cuts.append('slow')
+    events = []
+    for _ in range(20):
+        events += tuner.record(5, 200, False)
+    assert any(e['event'] == 'zh_slow_cap' for e in events)
+    assert tuner.rate == .75 and cuts == []
+
+
+def test_egress_cache_refreshes_in_background_while_recent_vn_is_valid():
+    import asyncio
+    from r2ai.zh_full.crawl import EgressCache
+    now, probes = [0.0], []
+    gate = asyncio.Event
+
+    async def check():
+        release = gate()
+        async def probe():
+            probes.append(now[0])
+            await release.wait()
+            return 'VN'
+        cache = EgressCache(probe, clock=lambda: now[0], refresh_s=60, max_age_s=120)
+        release.set()
+        await cache.check()                        # first check must verify synchronously
+        assert probes == [0.0]
+        release.clear()
+        now[0] = 70.0
+        await asyncio.wait_for(cache.check(), .1)  # stale but valid: returns without waiting for the probe
+        await asyncio.sleep(0)
+        assert probes == [0.0, 70.0]
+        await asyncio.wait_for(cache.check(), .1)  # no second concurrent refresh
+        assert probes == [0.0, 70.0]
+        release.set()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert cache.checked_at == 70.0
+    asyncio.run(check())
+
+
+def test_egress_cache_blocks_when_too_old_and_never_passes_non_vn():
+    import asyncio
+    from r2ai.zh_full.crawl import EgressCache
+    now, answers = [0.0], ['VN', None, 'US']
+
+    async def check():
+        async def probe():
+            return answers.pop(0)
+        cache = EgressCache(probe, clock=lambda: now[0], refresh_s=60, max_age_s=120)
+        await cache.check()
+        now[0] = 130.0
+        with pytest.raises(RuntimeError, match='EGRESS_UNAVAILABLE'):
+            await cache.check()                    # too old: waits for the probe, which failed
+        now[0] = 200.0
+        with pytest.raises(RuntimeError, match='need VN'):
+            await cache.check()
+    asyncio.run(check())
 
 
 def test_rate_cut_ledger_is_read_once_per_session(tmp_path, monkeypatch):

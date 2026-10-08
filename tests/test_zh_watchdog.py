@@ -145,3 +145,96 @@ def test_crawl_main_records_unknown_code_on_crash(monkeypatch):
     with pytest.raises(RuntimeError):
         crawl.main(['run'])
     assert written['last_exit.json']['code'] is None
+
+
+def test_deadline_completes_without_restarting_even_when_urls_remain():
+    got = decide(NOW, [], {'pid': 10}, None, {'pid': 10, 'code': 130}, [], None, False,
+                 deadline=NOW - 1, remaining=123)
+    assert got['action'] == 'completed'
+    assert got['reason'] == 'deadline reached'
+
+
+def test_empty_selected_queue_is_completed_after_crawler_exits():
+    got = decide(NOW, [], {'pid': 10}, None, {'pid': 10, 'code': 130}, [], None, False,
+                 deadline=NOW + 60, remaining=0)
+    assert got['action'] == 'completed'
+    assert got['reason'] == 'no selected URLs remain'
+
+
+def test_watchdog_builds_crawl_command_with_same_deadline():
+    import r2ai.zh_full.watchdog as watchdog
+    deadline = '2026-10-20T23:59:00+07:00'
+    build = getattr(watchdog, 'build_crawl_command', None)
+    assert callable(build)
+    assert build('C:/repo/.venv/Scripts/python.exe', deadline) == [
+        'C:/repo/.venv/Scripts/python.exe', '-B', '-u', '-m',
+        'r2ai.zh_full.crawl', 'run', '--deadline', deadline]
+
+
+def test_network_retry_uses_bounded_exponential_backoff():
+    import r2ai.zh_full.watchdog as watchdog
+    delay = getattr(watchdog, 'network_retry_delay', None)
+    assert callable(delay)
+    assert [delay(i) for i in (1, 2, 3, 4, 10)] == [60, 120, 240, 480, 600]
+
+
+def test_network_gate_holds_restart_and_probe_respects_retry_time():
+    import r2ai.zh_full.watchdog as watchdog
+    gate = getattr(watchdog, 'gate_network_restart', None)
+    probe_allowed = getattr(watchdog, 'network_probe_allowed', None)
+    assert callable(gate) and callable(probe_allowed)
+    state = {}
+    decision = {'action': 'restart', 'reason': 'dead'}
+    gate(decision, NOW, state, online=False)
+    assert decision['action'] == 'waiting_network'
+    assert state['next_network_probe_at'] == NOW + 60
+    assert not probe_allowed(NOW + 59, state)
+    assert probe_allowed(NOW + 60, state)
+    retry = {'action': 'restart', 'reason': 'dead'}
+    gate(retry, NOW + 60, state, online=True)
+    assert retry['action'] == 'restart'
+    assert state['network_failures'] == 0
+
+
+def test_status_alert_timers_clear_when_domain_leaves_active_state():
+    import r2ai.zh_full.watchdog as watchdog
+    update = getattr(watchdog, '_status_alerts', None)
+    assert callable(update)
+    state = {'threshold_since': {'cnkang.com:errors': NOW - 3600,
+                                 'cnkang.com:zero_ok': NOW - 3600}}
+    assert update(NOW, {'cnkang.com': {'state': 'finished', 'ok_per_second_15m': 0,
+                                      'error_pct_15m': None}}, True, state) == []
+    assert state['threshold_since'] == {}
+
+
+def test_monitor_bootstrap_keeps_epoch_and_last_robots_without_reading_partial_line(monkeypatch, tmp_path):
+    import r2ai.zh_full.watchdog as watchdog
+    audit = tmp_path / 'requests.jsonl'
+    audit.write_bytes(b'{"domain":"120ask.com","kind":"robots","t0":1,"http_status":521,"error":""}\n'
+                      b'{"domain":"120ask.com","kind":"robots","t0":2,"http_status":200,"error":""}\n'
+                      b'{"partial":')
+    monkeypatch.setattr(watchdog, 'AUDIT_PATH', audit)
+    bootstrap = getattr(watchdog, 'bootstrap_monitor_config', None)
+    assert callable(bootstrap)
+    value = bootstrap(NOW, {'started_at': 12, 'domains': {}})
+    assert value['monitor_since'] == 12
+    assert value['robots_last'] == {'120ask.com': 200}
+    assert value['audit_offset'] == audit.stat().st_size - len(b'{"partial":')
+
+
+def test_status_row_contains_keepalive_fields_and_public_actions():
+    import r2ai.zh_full.watchdog as watchdog
+    build = getattr(watchdog, 'status_record', None)
+    assert callable(build)
+    record = build(NOW, {'action': 'restart', 'reason': 'dead', 'pid': None,
+                         'spawned_pid': 20}, {},
+                   {'cnkang.com': {'ok_cumulative': 99, 'ok_per_second_15m': 2,
+                                   'error_pct_15m': 0, 'remaining': 100,
+                                   'state': 'active'}},
+                   {'120ask.com': '521'}, 0, 30_000_000_000)
+    assert record['action'] == 'started'
+    assert record['pid'] == 20
+    assert record['domains']['cnkang.com']['remaining'] == 100
+    assert record['robots']['120ask.com'] == '521'
+    assert record['deferred_fetched'] == 0
+    assert record['free_disk_bytes'] == 30_000_000_000

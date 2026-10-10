@@ -74,7 +74,7 @@ postprocess:
     enabled: true                 # false (or no key) = RD150
     pin: out/runs/best-vsappend/slug_pool_pin.parquet   # frozen slug universe (python -m r2ai.submit.slug_append pin; README)
     pin_sha256: 196f2e50cd914de4bf55c812519ec5d05afde1ea31a1608b207442a24b00371f
-    k: 20                         # doc ids appended per query
+    k: 20                         # doc ids appended per query (default 20 when absent); change together with expected_json_sha256
     k1: 1.2                       # BM25 over de-accented URL slug tokens (r2ai.selective.bm25 constants)
     b: 0.75
     scan_depth: 400               # candidates scanned per query while looking for k ids not already in relevant_docs

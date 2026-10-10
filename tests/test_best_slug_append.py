@@ -165,7 +165,7 @@ def test_configs_best_is_rd150_plus_slug_append():
     assert best.slug_append_config(off) is None
 
 
-def _chain(env, crawl, tmp_path, monkeypatch, enabled, pin_sha, final_sha, rd_sha):
+def _chain(env, crawl, tmp_path, monkeypatch, enabled, pin_sha, final_sha, rd_sha, slug_k=20):
     q = env / 'query.parquet'
     pq.write_table(pa.table({'id': [1, 2], 'query': QUERIES}), q)
     _, js_ex = _h1(env, 'expand')
@@ -175,7 +175,9 @@ def _chain(env, crawl, tmp_path, monkeypatch, enabled, pin_sha, final_sha, rd_sh
     cfg['submission'] |= {'expected_json_sha256': final_sha, 'rrf_doc_set_json_sha256': rd_sha or best.sha256(rd)}
     if enabled is not None:
         cfg['postprocess']['slug_append'] = {'enabled': enabled, 'pin': str(tmp_path / 'pin.parquet'), 'pin_sha256': pin_sha,
-                                             'k': 20, 'k1': 1.2, 'b': 0.75, 'scan_depth': 400}
+                                             'k1': 1.2, 'b': 0.75, 'scan_depth': 400}
+        if slug_k is not None:                                                      # None = key absent (default k = 20)
+            cfg['postprocess']['slug_append']['k'] = slug_k
     monkeypatch.setattr(best, 'load_config', lambda p, c=cfg: c)
     return rd
 
@@ -245,3 +247,19 @@ def test_apply_cli_writes_json_and_zip_like_the_library_call(tmp_path, crawl, ca
     assert json.loads(js)[0]['relevant_docs'] == [5, 6, 903, 910] and json.loads(js)[1]['relevant_docs'] == [904, 912]
     with zipfile.ZipFile(tmp_path / 'o' / 'x.zip') as z:
         assert z.namelist() == ['x.json'] and z.read('x.json').decode('utf-8') == js
+
+
+
+def test_best_build_slug_k_is_a_config_parameter_with_default_20(env, crawl, tmp_path, monkeypatch):
+    info = _pin(tmp_path, crawl)
+    rd = _chain(env, crawl, tmp_path, monkeypatch, True, info['sha256'], 'x', None)
+    shas = {}
+    for k in (20, 2):
+        S.append_slug_ids(rd, tmp_path / f'want{k}.json', pin=tmp_path / 'pin.parquet', pin_sha256=info['sha256'],
+                          queries=env / 'query.parquet', k=k, k1=1.2, b=0.75, scan_depth=400)
+        shas[k] = best.sha256(tmp_path / f'want{k}.json')
+    assert shas[20] != shas[2]
+    for slug_k, want in ((None, 20), (20, 20), (2, 2)):                              # absent key == k 20 == the pinned best
+        _chain(env, crawl, tmp_path, monkeypatch, True, info['sha256'], shas[want], None, slug_k=slug_k)
+        assert best.main(['build', '--out', str(env / f'k_{slug_k}/sub.zip')]) == 0
+        assert (env / f'k_{slug_k}/sub.json').read_bytes() == (tmp_path / f'want{want}.json').read_bytes()

@@ -17,7 +17,8 @@ build:    make_submission with submission.args, runs_dir / doc_ranking from the 
           rewrites only relevant_docs (the k_docs pool docs with the highest RRF, then their cluster mates).
           With postprocess.slug_append.enabled (off when the key is absent), r2ai.submit.slug_append appends the top-k vi doc ids
           ranked by BM25 over the URL slugs of non-crawlable vi URLs to relevant_docs (VS-append); the candidate set is the
-          frozen pin file (slug_append.pin, SHA256 slug_append.pin_sha256), state/crawl.db is not read.
+          frozen pin file (slug_append.pin, SHA256 slug_append.pin_sha256), state/crawl.db is not read; the number of ids per query is
+          slug_append.k (default 20), so a sweep (VS30 / VS40 / VS60) only changes this one value and expected_json_sha256.
           Steps run in that order (builder, expand, rrf, rrf_doc_set, slug_append); each enabled step but the last writes
           <out stem>_<step>.zip, the last one <out>. submission.<step>_json_sha256 (optional; base / expand / rrf) is
           checked on each intermediate JSON, expected_json_sha256 on the final one.
@@ -35,6 +36,7 @@ from pathlib import Path
 
 DEFAULT_CONFIG = ROOT / 'configs' / 'submission-best.yaml'
 CAND_DOCS = 'vi_cand.docs.parquet'
+SLUG_K_DEFAULT = 20               # postprocess.slug_append.k when the key is absent (VS-append)
 
 
 def load_config(path: str | Path) -> dict:
@@ -164,7 +166,7 @@ def cmd_build(a, cfg) -> int:
             from r2ai.submit.slug_append import slug_append_submission
             print(f'slug_append: {json.dumps(sla)}', flush=True)
             st = slug_append_submission(js, out, pin=_p(sla['pin']), pin_sha256=sla['pin_sha256'], queries=arg('--queries'),
-                                        k=int(sla['k']), k1=float(sla['k1']), b=float(sla['b']), scan_depth=int(sla['scan_depth']))
+                                        k=int(sla.get('k', SLUG_K_DEFAULT)), k1=float(sla['k1']), b=float(sla['b']), scan_depth=int(sla['scan_depth']))
             base['slug_append'] = {k: st[k] for k in ('queries', 'pool_urls', 'universe_urls', 'appended_total', 'appended_mean',
                                                       'queries_below_k')}
         base[f'{tag}_elapsed_s'] = round(time.time() - t1, 1)

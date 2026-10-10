@@ -413,6 +413,16 @@ def test_memory_guard_waits_then_stops_after_too_many_pauses(tmp_path):
         g.check('b')
 
 
+def test_memory_guard_cli_flags_override_defaults(tmp_path):
+    from r2ai.zh_full_ingest.__main__ import memory_guard
+    from r2ai.zh_full_ingest.common import MIN_AVAILABLE_GIB
+    roots = make_roots(tmp_path)
+    default = memory_guard(roots)
+    assert (default.minimum, default.max_pauses) == (MIN_AVAILABLE_GIB, 3)
+    custom = memory_guard(roots, 2.5, 7)
+    assert (custom.minimum, custom.max_pauses) == (2.5, 7)
+
+
 def test_cut_sample_keeps_the_latest_copy_like_zh_sample(tmp_path):
     from r2ai.zh_full_ingest.ingest import cut_sample, extract_batch, compare_sample_docs, _write_parquet
     roots = make_roots(tmp_path)

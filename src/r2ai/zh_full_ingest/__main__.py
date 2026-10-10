@@ -38,6 +38,11 @@ def status(roots):
         c.close()
 
 
+def memory_guard(roots, min_available_gib=None, max_pauses=3):
+    kwargs = {} if min_available_gib is None else {'minimum_gib': min_available_gib}
+    return MemoryGuard(roots, max_pauses=max_pauses, **kwargs)
+
+
 def main(argv=None):
     from . import ingest
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -48,11 +53,13 @@ def main(argv=None):
     ap.add_argument('--domain')
     ap.add_argument('--segment')
     ap.add_argument('--batch-docs', type=int, default=5000)
+    ap.add_argument('--min-available-gib', type=float, default=None, help='RAM guard threshold (default MIN_AVAILABLE_GIB)')
+    ap.add_argument('--max-pauses', type=int, default=3, help='RAM guard pauses allowed per 30 min before stopping')
     a = ap.parse_args(argv)
     roots = Roots()
     roots.preflight()
     stop = _stop_on_alert(roots)
-    memory = MemoryGuard(roots)
+    memory = memory_guard(roots, a.min_available_gib, a.max_pauses)
     if a.step == 'convert-old-sample':
         with exclusive(roots, 'segments'):
             out = ingest.convert_old_sample(roots)

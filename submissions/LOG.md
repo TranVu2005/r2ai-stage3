@@ -5,7 +5,7 @@ The pipeline never uploads; the user uploads by hand and reports the scores. Lea
 
 ## Leaderboard (scores provided by the user)
 
-Total uploads: **27** (user provided). Best measured: **VS-append 0.2168** (2026-10-07; RD150 + 20 slug-ranked ids/query from non-crawlable vi URLs). `configs/submission-best.yaml` is still RD150 (commit `5c8b7e6`); making VS-append the best config is the next session's job (after VS40 / VS60 / VS-swap).
+Total uploads: **28** (user provided). Best measured and best config: **VS-append 0.2168** (2026-10-07; RD150 + 20 slug-ranked ids/query from non-crawlable vi URLs). `configs/submission-best.yaml` = RD150 + `postprocess.slug_append` (k = 20) since commit `a6cd723` (JSON `9c91c952…43e2e0`, gate tol 0 match). VS40 (k = 40) uploaded 2026-10-11: 0.2146, below VS-append; the slug sweep stopped at k = 20 (VS30 / VS60 built, not uploaded).
 
 | upload date | file | ZIP SHA256 | JSON SHA256 | config | Final | Doc F2 | Doc P | Doc R | Chunk F2 | Chunk P | Chunk R | source |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -30,6 +30,7 @@ Total uploads: **27** (user provided). Best measured: **VS-append 0.2168** (2026
 | 2026-10-06 | ZA-cnkang `out/runs/zh-full/diagnostics/ZA-cnkang/ZA-cnkang.zip` (101,870,297 B) | `07e04e5161f8fec8a49f2749076c2eb916c97e2f739b18ce138ead79a9d96f1f` | `8132ae096e9957086f68340259cd64edc18a077d0b53e2be5aa079cd6dbf2e11` (402,827,130 B) | diagnostic: RD150 + zh sample docs of cnkang.com only (43,034 ids appended) | 0.2045 | 0.2125 | 0.1153 | 0.3417 | 0.1964 | 0.2340 | 0.2199 | provided by the user 2026-10-06 (Chunk columns = RD150, as above); Doc R +0.0005; remaining 13 domains = +0.0017 - 0.0007 - 0.0005 = +0.0005 (derived) |
 | 2026-10-07 | **VS-append** `out/runs/selective-check/VS-append/VS_append.zip` (101,761,767 B) | `48da9d87a1140a732eb06caa5c5573a6bd68d877f155067718831f01930853fe` | `9c91c952863c4e33b992053d665d547ba1f483cd0be487047386ba09af43e2e0` (402,631,653 B) | RD150 byte-pinned (vi docs + chunks) + 20 ids/query (24,000 total) ranked by BM25 on de-accented URL slugs, from vi URLs that could not be crawled (robots, youmed, soft404, bot challenge, network error, nhathuoclongchau not in crawl.db); validator 1,200 / 60,000 / 0 errors | **0.2168 (BEST measured)** | 0.2373 | 0.1353 | 0.3716 | 0.1964 | 0.2340 | 0.2199 | provided by the user 2026-10-07; Final = 0.21685 rounded; +0.0029 Final, Doc R +0.0304 vs RD150 |
 | 2026-10-07 | VS-longchau `out/runs/selective-check/VS-longchau/VS_longchau.zip` (101,743,981 B) | `fe8dc975934586d124fc024fa0c4d1f6dbd97f081e1a88da90826f837d905eae` | `3fa7191d14376f49c064d1717c898a6e307c523dafa6c19982e333c47baf721e` (402,603,408 B) | VS-append restricted to its nhathuoclongchau ids (20,448 total, 17.04/query, min 4, max 20); RD150 byte-pinned | 0.2165 | 0.2366 | 0.1364 | 0.3683 | 0.1964 | 0.2340 | 0.2199 | provided by the user 2026-10-07; Doc R +0.0271 vs RD150; rest of VS-append = +0.0304 - 0.0271 = +0.0033 (additive over disjoint id sets, derived) |
+| 2026-10-11 | VS40 `out/runs/best-vsappend/VS40/VS40.zip` (101,870,962 B) | `16c6cf8d6e16e7afd100d6d10cdf599dde3ce6c9842e24e21b304360842bfd94` | `0e2ba19ea6e017abe6d9ce3435ad08e5ae129e66676b2b64c10ea70c49a2d1bf` (402,823,449 B) | VS-append with k = 40: RD150 byte-pinned + 40 ids/query (48,000 total) ranked by BM25 on de-accented URL slugs (same pin `slug_pool_pin.parquet` SHA256 `196f2e50…371f`, k1 1.2, b 0.75, scan_depth 400); first 20 ids identical to VS-append in 1,200/1,200 queries; validator 1,200 / 60,000 / 0 errors | 0.2146 | 0.2327 | 0.1245 | 0.3813 | 0.1964 | 0.234 | 0.2199 | provided by the user 2026-10-11; Final = 0.21455 rounded; -0.0022 Final, -0.0046 Doc F2, -0.0108 Doc P, +0.0097 Doc R vs VS-append |
 | — | G `out/runs/ab-2026-10-05c/G/sub_abG_kd150_full32.zip` | `3cf7112f…78dc` | `eeff96dd…9287` | V3b + C | not uploaded, not needed (K50 > C) | | | | | | | |
 
 C / V3 / V3b vs baseline (each changes one side only, and the other side's metrics are identical to the baseline, as designed):
@@ -515,11 +516,45 @@ chunks), up to 100 zh primary docs of the 2 % sample (dense branch, max cached r
 * zh: ZA-120ask Doc R +0.0007, ZA-cnkang +0.0005, remaining 13 domains +0.0005 (2 % sample). cnkang crawl order by path-prefix prior
   (not a cut; `out/runs/selective-check/cnkang_order.parquet`, `HANDOFF_crawl.md`) is handed to the crawl session.
 
+## VS-append becomes the best config; slug sweep VS30 / VS40 / VS60 (2026-10-10 / 11; VS40 uploaded 0.2146)
+
+Reports `out/runs/best-vsappend/REPORT.md` (commits `a6cd723`, `e79d698`, `0644009`, fast-forwarded into `main`; CPU only; the agent uploaded nothing).
+* Best config: `configs/submission-best.yaml` = `configs/submission-rd150.yaml` (the former best, content unchanged) + `postprocess.slug_append`
+  (`src/r2ai/submit/slug_append.py`, step added to `r2ai.submit.best`). Gates (tol 0): rd150 JSON `136c2591…e950` (4 intermediate hashes match, 277.7 s);
+  best JSON `9c91c952…43e2e0` = the uploaded VS-append (5 hashes match, 318.0 s, slug_append 54.5 s); ZIP 101,761,755 B; validator 1,200 / 60,000 / 0 errors for both.
+  Frozen parameters k 20, k1 1.2, b 0.75, scan_depth 400; 24,000 ids appended (20.0/query, 0 queries below k). `k` is a config parameter (default 20 when absent, `0644009`).
+* Pin `out/runs/best-vsappend/slug_pool_pin.parquet` (30,920,581 B, SHA256 `196f2e50cd914de4bf55c812519ec5d05afde1ea31a1608b207442a24b00371f`; 733,568 URLs = 653,970 crawl.db + 79,598 longchau corpus; pool 101,259).
+  It lives in ignored `out/` and is above the 5 MB tracked-file limit, so it is not committed; backup outside the repo `D:/r2ai-pins/slug_pool_pin.parquet` (+ `.sha256`, `cmp` identical). Losing it breaks the build (SHA check).
+* Regression tests (`e79d698`, `tests/test_best_slug_append.py`): frozen tokenisation, frozen output bytes on a fixture, CLI `apply`; mutation checks (change `selective.bm25`, `selective.common`, `zh_sample.append._addition`) each fail at least one test. Full suite 530 → 533 → 534 passed, 2 deselected.
+  CLI: `python -m r2ai.submit.slug_append apply --base RD150.json --pin PIN --pin-sha256 SHA --queries query.parquet --k K --out X.zip`.
+* Sweep files (base = `sub_RD150.json`, validator 1,200 / 60,000 / 0 errors, relevant_chunks identical to RD150, RD150 ids an intact prefix, first k ids identical to VS-append, 0 duplicates, 0 ids already in RD150):
+
+| file | ZIP B | ZIP SHA256 | JSON SHA256 | ids appended | longchau ids/query (min–max) |
+|---|---:|---|---|---:|---|
+| VS30 (not uploaded) | 101,817,014 | `d0f2cd441eba2f5b9c52eea01e80989b3be2f73d96cc8f5d1c6e4d7a6c967822` | `d8442a11debbac2c29d83783bef38241ad5708e3b28ae7343da753c4ab70889a` | 36,000 | 25.63 (8–30) |
+| **VS40** (uploaded 2026-10-11) | 101,870,962 | `16c6cf8d6e16e7afd100d6d10cdf599dde3ce6c9842e24e21b304360842bfd94` | `0e2ba19ea6e017abe6d9ce3435ad08e5ae129e66676b2b64c10ea70c49a2d1bf` | 48,000 | 34.20 (14–40) |
+| VS60 (not uploaded) | 101,974,994 | `7d2edce97d0d46674b317007694b4d7336dea06e60009a9bf5e419322a7ba399` | `496e6d738a7fb49a143dc7b0563a378db4f565adc59f34fb21e45be3f061f0f7` | 72,000 | 51.32 (22–60) |
+
+  Domain share of the ids is stable across k (nhathuoclongchau 85.4–85.5 %; VS40: longchau 41,046, youmed 2,705, vov 1,973, thaythuocvietnam 1,723, baolangson 375, others 178). VS-append: 17.04 longchau ids/query.
+* VS40 vs VS-append (user scores): Final 0.2146 vs 0.2168 (-0.0022); Doc F2 0.2327 vs 0.2373; Doc P 0.1245 vs 0.1353; Doc R 0.3813 vs 0.3716 (+0.0097); chunk columns identical (0.1964 / 0.234 / 0.2199).
+  Final = (0.2327 + 0.1964) / 2 = 0.21455, reported 0.2146 (matches).
+* Reading (derived from the macro scores, estimates, no gold labels): ids 21-40 add Doc R +0.0097 = 32 % of the +0.0304 from the first 20 ids. Marginal precision of ranks 21-40 is about 2.4 % (user's estimate) or about 3.2 %
+  (the agent's rough estimate, assuming Doc P is an id-weighted mean; RD150 averages 151.16 docs/query and VS-append 171.16, measured from the JSON), below the break-even about 4.7 % (Doc F2 0.2373 / 5);
+  the first 20 ids are about 7.6 %. So Final falls although Doc R rises. **User decision: stop sweeping the number of slug ids, keep k = 20, do not upload VS30 / VS60.** VS-swap not done.
+
+## Plan: ZF (zh docs appended to VS-append), not built
+
+Definition (user, 2026-10-11): **ZF-k** = VS-append (best config, JSON `9c91c952…43e2e0`) byte-pinned + up to k zh docs per query appended after `relevant_docs`, ranked by the reranker score (docs already present dropped); chunks unchanged.
+**ZF-100** = diagnostic (read the Doc R change against 0.3716); **ZF-10** = candidate (compare Final against 0.2168). No ZF file exists yet (checked `out/`, `src/`, `configs/`, `docs/`, `submissions/`); nothing uploaded.
+State behind it (2026-10-11 00:53, details in `docs/PROGRESS.md` section 6): zh-full batch `b001` embedded (743,945 docs, 4,398,151 chunks; 28 active segments, 4,567,101 chunks incl. the 2 % sample) and the 1,200 queries run on it;
+offline calibration of 56 RRF / quota configurations is structural only (no labels). Deviation: the ingest agent embedded all of `b001` instead of piloting 120ask + cnkang, and skipped the ZF step. Next: ZF-100 / ZF-10 -> LB score -> calibration by score.
+
+
 ## Pending uploads
 
-VS-append uploaded 2026-10-07: 0.2168 (best measured, user provided); config best is still RD150 (0.2139) until the next session decides.
+VS-append uploaded 2026-10-07: 0.2168 (best measured and best config since `a6cd723`, user provided). VS40 uploaded 2026-10-11: 0.2146 (below VS-append).
 Uploaded diagnostics: Z-append 0.1916, ZA-120ask 0.2028, ZA-cnkang 0.2045, VS-longchau 0.2165, P300 0.2135 (not better than RD150).
-Built, not uploaded: RD150c, RD125, RDk20, RDk100, RD175, RD200 (the last five not to be uploaded). Next candidates: VS40 / VS60 / VS-swap.
+Built, not uploaded: RD150c, RD125, RDk20, RDk100, RD175, RD200 (the last five not to be uploaded), VS30, VS60 (user: do not upload). Next candidates: ZF-100 (diagnostic) and ZF-10 (candidate), not built yet.
 D32 / D40, G, R120 / R180, H1-dedup, Z, Z-append, P300 and the vi doc-pool variants are not to be uploaded again. No mixed zh upload before calibration.
 
 ## Changelog
@@ -527,3 +562,4 @@ D32 / D40, G, R120 / R180, H1-dedup, Z, Z-append, P300 and the vi doc-pool varia
 - 2026-10-06 14:48 UTC+7 — GPT-6 (Codex): commit pending Z documentation; record RD150 user-provided score and exact artifact SHA, current best 0.2139, Doc R baseline 0.3412, +0.0014 from RRF doc selection on pool 200, 21 uploads. Config best remains RRF; update zh REPORT with Z LB score. No upload/network/GPU.
 - 2026-10-06 18:25 UTC+7 — Claude Opus 5.5: record Z-append (user-provided score, decision: full zh crawl), RRF sweep (`5c8b7e6`, best config = RD150) and pool 300 (`bc9970b`; P300 / RD125 built, not uploaded); 22 uploads. No upload/network.
 - 2026-10-07 15:40 UTC+7 — Claude Sonnet 5.5: record P300 (0.2135), ZA-120ask (0.2028), ZA-cnkang (0.2045), VS-append (0.2168, best measured) and VS-longchau (0.2165), all user provided; 27 uploads; slug-stream section. HEAD checked `9f79c3bbe2bedaa08176222e30c76278cfc67385`. Documentation only; no upload/network/GPU.
+- 2026-10-11 01:00 UTC+7 — Claude Sonnet 5.5: record VS40 (user-provided 0.2146; 28 uploads; slug sweep stopped at k = 20), VS-append as the best config (`a6cd723`, `e79d698`, `0644009`), VS30 / VS60 built and not uploaded, and the ZF-100 / ZF-10 plan (not built). HEAD checked `ac1c9a59897cd2725df96b9e6a16fcc9faeebfba`. Documentation only; no upload / GPU, crawler untouched.

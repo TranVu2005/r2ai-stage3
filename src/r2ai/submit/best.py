@@ -15,7 +15,10 @@ build:    make_submission with submission.args, runs_dir / doc_ranking from the 
           rewrites only relevant_chunks (the k_chunk D50 primary docs with the highest RRF of reranker_cache / hybrid_ranks).
           With postprocess.rrf_doc_set.enabled (off when the key is absent; needs expand_clusters), r2ai.submit.rrf_docs
           rewrites only relevant_docs (the k_docs pool docs with the highest RRF, then their cluster mates).
-          Steps run in that order (builder, expand, rrf, rrf_doc_set); each enabled step but the last writes
+          With postprocess.slug_append.enabled (off when the key is absent), r2ai.submit.slug_append appends the top-k vi doc ids
+          ranked by BM25 over the URL slugs of non-crawlable vi URLs to relevant_docs (VS-append); the candidate set is the
+          frozen pin file (slug_append.pin, SHA256 slug_append.pin_sha256), state/crawl.db is not read.
+          Steps run in that order (builder, expand, rrf, rrf_doc_set, slug_append); each enabled step but the last writes
           <out stem>_<step>.zip, the last one <out>. submission.<step>_json_sha256 (optional; base / expand / rrf) is
           checked on each intermediate JSON, expected_json_sha256 on the final one.
 """
@@ -99,14 +102,20 @@ def rrf_doc_set_config(cfg: dict) -> dict | None:
     return r if r.get('enabled') else None
 
 
+def slug_append_config(cfg: dict) -> dict | None:
+    """postprocess.slug_append of the config when enabled, else None (key absent = off)."""
+    r = (cfg.get('postprocess') or {}).get('slug_append') or {}
+    return r if r.get('enabled') else None
+
+
 def cmd_build(a, cfg) -> int:
     from r2ai.submit import make_submission
-    exp, rrf, rds = expand_config(cfg), rrf_config(cfg), rrf_doc_set_config(cfg)
+    exp, rrf, rds, sla = expand_config(cfg), rrf_config(cfg), rrf_doc_set_config(cfg), slug_append_config(cfg)
     if rds and not exp:
         raise ValueError('postprocess.rrf_doc_set needs postprocess.expand_clusters (its clusters / scope)')
     s = cfg['submission']
     final = Path(_p(a.out or s['out']))
-    steps = [t for t, on in (('expand', exp), ('rrf', rrf), ('rrf_doc_set', rds)) if on]
+    steps = [t for t, on in (('expand', exp), ('rrf', rrf), ('rrf_doc_set', rds), ('slug_append', sla)) if on]
     out_of = lambda tag: final if tag == steps[-1] else final.with_name(f'{final.stem}_{tag}.zip')
     argv = build_argv(cfg, a.from_retrieval, str(final.with_name(final.stem + '_base.zip')) if steps else a.out)
     print(f'make_submission {" ".join(argv)}', flush=True)
@@ -140,7 +149,7 @@ def cmd_build(a, cfg) -> int:
                                       missing_rank=int(rrf['missing_rank']))
             base['rrf'] = {k: st[k] for k in ('chunk_docs_changed_vs_base', 'new_chunk_docs_total',
                                               'primary_docs_without_reranker_rank', 'docs_missing_text', 'kept_docs_same_chunk_text')}
-        else:
+        elif tag == 'rrf_doc_set':
             from r2ai.submit.rrf_docs import rrf_doc_submission
             print(f'rrf_doc_set: {json.dumps(rds)}', flush=True)
             st = rrf_doc_submission(js, out, chunks='base', runs_dir=arg('--runs-dir'), doc_ranking=arg('--doc-ranking'),
@@ -151,6 +160,13 @@ def cmd_build(a, cfg) -> int:
                                     rrf_k=int(rds['k']))
             base['rrf_doc_set'] = {k: st[k] for k in ('docs_new_vs_d50', 'pool_docs_without_hybrid_rank',
                                                       'chunk_docs_outside_relevant_docs', 'expand_ids_added')}
+        else:
+            from r2ai.submit.slug_append import slug_append_submission
+            print(f'slug_append: {json.dumps(sla)}', flush=True)
+            st = slug_append_submission(js, out, pin=_p(sla['pin']), pin_sha256=sla['pin_sha256'], queries=arg('--queries'),
+                                        k=int(sla['k']), k1=float(sla['k1']), b=float(sla['b']), scan_depth=int(sla['scan_depth']))
+            base['slug_append'] = {k: st[k] for k in ('queries', 'pool_urls', 'universe_urls', 'appended_total', 'appended_mean',
+                                                      'queries_below_k')}
         base[f'{tag}_elapsed_s'] = round(time.time() - t1, 1)
         zp, js = out, out.with_suffix('.json')
         if out != final:

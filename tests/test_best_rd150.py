@@ -1,4 +1,4 @@
-"""configs: best = rrf + postprocess.rrf_doc_set (RD150: RRF choice of the doc set over the 200-doc pool); best.build replays
+"""configs: rd150 = rrf + postprocess.rrf_doc_set (RD150: RRF choice of the doc set over the 200-doc pool, the best before slug_append); best.build replays
 the r2ai.submit.rrf_docs CLI (--chunks base) byte for byte on a fixture, and with the key off/absent gives the RRF bytes."""
 import copy
 
@@ -31,7 +31,7 @@ def _cfg(env, enabled, sha_rrf, sha):
 
 
 def test_config_best_is_rrf_plus_rrf_doc_set():
-    b, r = best.load_config(best.DEFAULT_CONFIG), best.load_config(RRF)
+    b, r = best.load_config(ROOT / 'configs' / 'submission-rd150.yaml'), best.load_config(RRF)
     assert best.rrf_doc_set_config(b) == {'enabled': True, 'k': 60, 'k_docs': 150,
                                           'reranker_cache': 'out/runs/rerank200/full/vi_k100.parquet',
                                           'hybrid_ranks': 'out/runs/ab-2026-10-05b/cand/vi_cand.docs.parquet'}

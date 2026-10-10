@@ -1,20 +1,21 @@
-# Best leaderboard configuration: RD150 = RRF (configs/submission-rrf.yaml) + RRF choice of the doc set (Final 0.2139,
-# 2026-10-06; score provided by the user). = configs/submission-rrf.yaml (retrieval, builder, expand and RRF chunk docs
-# unchanged) + one more post-processing step: relevant_docs = doc_ids_group of the k_docs docs of the tier-1 = 200 rerank pool
-# (reranker_cache) with the highest 1/(k + reranker rank) + 1/(k + rank in hybrid_ranks), k = 60 (ties: lower reranker rank,
-# then lower hybrid rank), in that order, then their duplicate-cluster mates (clusters / scope of expand_clusters);
-# relevant_chunks stay those of the RRF step byte for byte (r2ai.submit.rrf_docs, --chunks base).
-# reranker_cache = out/runs/rerank200/full (GPU run of 2026-10-05; not produced by scripts/run_best_retrieval.py).
-# The clusters come from the vi corpus as of 2026-10-05: rebuild them (README) whenever the corpus changes (e.g. zh docs).
+# Best measured configuration: VS-append = RD150 (configs/submission-rd150.yaml, unchanged: retrieval, builder, expand, RRF chunk
+# docs, RRF doc set) + postprocess.slug_append: up to k = 20 more vi doc ids per query, ranked by BM25 over the URL slugs of vi URLs
+# that have no text (crawl.db rows blocked_4xx / bot_challenge / soft404_or_home / dead_origin / network_error / pending, plus the
+# nhathuoclongchau.com.vn corpus URLs absent from crawl.db; 101,259 URLs). Appended after the RD150 ids, relevant_chunks stay
+# RD150's byte for byte (Final 0.2168 on 2026-10-07; score provided by the user).
+# The slug candidate set (all 733,568 vi URLs for IDF / length, their status, first doc id of each candidate) is FROZEN in the pin
+# file slug_append.pin (SHA256 slug_append.pin_sha256; r2ai.submit.slug_append pin, README): replay never reads state/crawl.db, so
+# crawling longchau later does not change this configuration. BM25 k1, b, k and scan_depth are frozen below too.
+# Replay: JSON 9c91c952...43e2e0 from RD150 136c2591...e950 (builder -> expand -> rrf -> rrf_doc_set -> slug_append).
 # Read by r2ai.submit.best (scripts/run_best_retrieval.py, scripts/build_best_submission.py); code defaults are unchanged.
 # Relative paths are relative to the repo root.
-run_id: best-rd150
+run_id: best-vsappend
 leaderboard:
-  file: out/runs/rrf-docs-2026-10-06/RD150/sub_RD150.zip
-  final: 0.2139
-  doc_f2: 0.2313
+  file: out/runs/selective-check/VS-append/VS_append.zip
+  final: 0.2168
+  doc_f2: 0.2373
   chunk_f2: 0.1964
-  source: provided by the user 2026-10-06
+  source: provided by the user 2026-10-07 (Final = (0.2373 + 0.1964) / 2 = 0.21685)
 queries: D:/GitHub/r2ai-stage3-old/data/raw/query.parquet
 
 retrieval:
@@ -40,7 +41,7 @@ submission:
   doc_ranking: out/runs/ab-2026-10-05b/cand/vi_cand.docs.parquet
   chunks_dir: data/chunks
   docs_dir: data/docs_vi
-  out: out/runs/best/submission/sub_best_rd150.zip
+  out: out/runs/best/submission/sub_best_vsappend.zip
   # K doc 150 primary docs (ranks 1..100 deep-rerank order, 101..150 hybrid order), each expanded to its whole
   # doc_ids_group; full chunks (whole answer if inside the body, else whole body; no cut) for the top 50 docs.
   args: [--k-doc, '100', --k-doc-total, '150', --k-chunk, '50', --chunk-mode, full, --dedupe-scope, doc]
@@ -48,9 +49,10 @@ submission:
   base_json_sha256: 2f10b78ac17f4eafdd5fe1b0b207260b062f17b29f4fcc3ee1a4b364b3c36544   # builder output = D50
   expand_json_sha256: 6c27d3f327fdcc5dac248cdaf80cf1be941fbff22666b25dbd07f32903f01106 # after expand = uploaded H1-expand
   rrf_json_sha256: ff035b8ba7eea0a177932850d3a9cc9f1ffbcbe8297b8a8740bae23bd949d1c3    # after RRF chunk docs = uploaded RRF
-  expected_json_sha256: 136c259145c6fa134bcd5d4a877575088e28346ef43636afc87d2e283508e950   # after RRF doc set = uploaded RD150
-  expected_json_bytes: 402439824
-  uploaded_zip_sha256: 9eaf78b41d82372397ef56df9d5bcae3f8b8e93ea10ee7f5047da3d4a494ccfd
+  rrf_doc_set_json_sha256: 136c259145c6fa134bcd5d4a877575088e28346ef43636afc87d2e283508e950   # after RRF doc set = uploaded RD150
+  expected_json_sha256: 9c91c952863c4e33b992053d665d547ba1f483cd0be487047386ba09af43e2e0   # after slug_append = uploaded VS-append
+  expected_json_bytes: 402631653
+  uploaded_zip_sha256: 48da9d87a1140a732eb06caa5c5573a6bd68d877f155067718831f01930853fe   # out/runs/selective-check/VS-append (deflate level 9; zip bytes carry the file mtime, the JSON SHA256 is the gate)
 postprocess:
   expand_clusters:
     enabled: true                 # false (or no postprocess key) = plain D50
@@ -68,3 +70,11 @@ postprocess:
     k_docs: 150                   # docs taken from the pool before the cluster expand
     reranker_cache: out/runs/rerank200/full/vi_k100.parquet          # the pool (all its docs) and their reranker ranks
     hybrid_ranks: out/runs/ab-2026-10-05b/cand/vi_cand.docs.parquet  # every pool doc has one (0 missing on 2026-10-06)
+  slug_append:
+    enabled: true                 # false (or no key) = RD150
+    pin: out/runs/best-vsappend/slug_pool_pin.parquet   # frozen slug universe (python -m r2ai.submit.slug_append pin; README)
+    pin_sha256: 196f2e50cd914de4bf55c812519ec5d05afde1ea31a1608b207442a24b00371f
+    k: 20                         # doc ids appended per query
+    k1: 1.2                       # BM25 over de-accented URL slug tokens (r2ai.selective.bm25 constants)
+    b: 0.75
+    scan_depth: 400               # candidates scanned per query while looking for k ids not already in relevant_docs

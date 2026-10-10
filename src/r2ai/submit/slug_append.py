@@ -5,6 +5,7 @@ corpus URLs that are not in crawl.db. Score = BM25 of the query tokens against t
 length over every vi URL). The first doc id of a candidate URL is appended when it is not already in relevant_docs.
 
     python -m r2ai.submit.slug_append pin --crawl-db state/crawl.db --corpus data/raw/links_corpus.parquet --out PIN.parquet
+    python -m r2ai.submit.slug_append apply --base RD150.json --pin PIN --pin-sha256 SHA --queries query.parquet --k 40 --out X.zip
 
 The pin file freezes the URL universe (all URLs, in crawl.db row order, then the corpus longchau URLs), their status and the
 first doc id of each candidate; best.py checks its SHA256 (postprocess.slug_append.pin_sha256) and never reads crawl.db, so a
@@ -170,8 +171,24 @@ def main(argv=None):
     p.add_argument('--crawl-db', required=True)
     p.add_argument('--corpus', required=True)
     p.add_argument('--out', required=True)
+    p = sub.add_parser('apply', help='append k slug ids to a submission JSON (best.py does this for the configured k)')
+    p.add_argument('--base', required=True, help='submission JSON (e.g. RD150)')
+    p.add_argument('--pin', required=True)
+    p.add_argument('--pin-sha256', required=True)
+    p.add_argument('--queries', required=True)
+    p.add_argument('--k', type=int, required=True)
+    p.add_argument('--k1', type=float, default=1.2)
+    p.add_argument('--b', type=float, default=0.75)
+    p.add_argument('--scan-depth', type=int, default=400)
+    p.add_argument('--out', required=True, help='output zip; the JSON is written next to it')
     a = ap.parse_args(argv)
-    print(json.dumps(build_pin(a.crawl_db, a.corpus, a.out), indent=1))
+    if a.cmd == 'pin':
+        print(json.dumps(build_pin(a.crawl_db, a.corpus, a.out), indent=1))
+        return 0
+    st = slug_append_submission(a.base, a.out, pin=a.pin, pin_sha256=a.pin_sha256, queries=a.queries, k=a.k, k1=a.k1, b=a.b,
+                                scan_depth=a.scan_depth)
+    st.pop('query_picks')
+    print(json.dumps(st, indent=1))
     return 0
 
 

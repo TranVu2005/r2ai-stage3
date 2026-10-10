@@ -206,3 +206,42 @@ def test_best_build_fails_on_wrong_pin_or_intermediate_hash(env, crawl, tmp_path
         best.main(['build', '--out', str(env / 'bad1/sub.zip')])
     _chain(env, crawl, tmp_path, monkeypatch, True, info['sha256'], 'x', 'f' * 64)
     assert best.main(['build', '--out', str(env / 'bad2/sub.zip')]) == 1          # RD150 hash (intermediate) differs
+
+
+# ---- regression guards: frozen expectations, independent of r2ai.selective.bm25 / r2ai.zh_sample.append -------------------
+GOLDEN_OUT = ('[\n{"id": 1, "relevant_docs": [5, 6, 903, 910, 907], "relevant_chunks": [{"doc_id": 5, "chunk_text": "th\\u1ecbt \\"x\\""}]},\n'
+              '{"id": 2, "relevant_docs": [904, 912, 902, 907], "relevant_chunks": [{"doc_id": 7, "chunk_text": "y"}]}\n]\n')
+
+
+def test_golden_tokenization_is_frozen():
+    """A change of r2ai.selective.bm25 tokenization (strip_marks / toks / slug_toks) changes the VS-append ids: fail loudly."""
+    from r2ai.selective.bm25 import slug_toks, toks
+    assert slug_toks('https://a.vn/Thuốc-ho-trẻ-em_đau-1?x=Tiểu%20đường') == ['thuoc', 'ho', 'tre', 'em', 'dau', 'tieu', 'duong']
+    assert toks('Điều trị tiểu đường, tuýp 2 (type-2) ĐẠI') == ['dieu', 'tri', 'tieu', 'duong', 'tuyp', 'type', 'dai']
+
+
+def test_golden_output_bytes_on_fixture(tmp_path, crawl):
+    """Frozen expected bytes (ids, order and every other byte, incl. the \\u escapes) of slug_append on the fixture: a change in
+    r2ai.selective.bm25 or r2ai.zh_sample.append (_rows / _addition) that moves a byte or an id makes this fail."""
+    info = _pin(tmp_path, crawl)
+    base, out = tmp_path / 'base.json', tmp_path / 'out.json'
+    base.write_text(BASE, encoding='utf-8', newline='')
+    st = S.append_slug_ids(base, out, pin=tmp_path / 'pin.parquet', pin_sha256=info['sha256'], queries=crawl[2],
+                           k=20, k1=1.2, b=0.75, scan_depth=400)
+    assert out.read_text(encoding='utf-8') == GOLDEN_OUT
+    assert st['query_picks'] == [[903, 910, 907], [904, 912, 902, 907]]
+
+
+def test_apply_cli_writes_json_and_zip_like_the_library_call(tmp_path, crawl, capsys):
+    import zipfile
+    info = _pin(tmp_path, crawl)
+    base = tmp_path / 'base.json'
+    base.write_text(BASE, encoding='utf-8', newline='')
+    assert S.main(['apply', '--base', str(base), '--pin', str(tmp_path / 'pin.parquet'), '--pin-sha256', info['sha256'],
+                   '--queries', str(crawl[2]), '--k', '2', '--out', str(tmp_path / 'o' / 'x.zip')]) == 0
+    st = json.loads(capsys.readouterr().out)
+    assert st['k'] == 2 and st['appended_total'] == 4 and 'query_picks' not in st
+    js = (tmp_path / 'o' / 'x.json').read_text(encoding='utf-8')
+    assert json.loads(js)[0]['relevant_docs'] == [5, 6, 903, 910] and json.loads(js)[1]['relevant_docs'] == [904, 912]
+    with zipfile.ZipFile(tmp_path / 'o' / 'x.zip') as z:
+        assert z.namelist() == ['x.json'] and z.read('x.json').decode('utf-8') == js

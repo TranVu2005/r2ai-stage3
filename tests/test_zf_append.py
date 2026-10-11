@@ -91,3 +91,17 @@ def test_render_primary_only_writes_one_id_per_doc_and_passes_the_byte_gate():
     result = ''.join(out)
     assert json.loads(result)[0]['relevant_docs'] == [1, 10, 30]
     assert verify_gate(base, result, selections)['queries'] == 1
+
+
+def test_zgp_variants_use_absolute_tau_and_primary_ids_only():
+    from r2ai.zh_full_ingest.append_zf import parse_variant
+    assert parse_variant('ZGp', {}, 0.5, 1.7) == ({'k': 10, 'tau': 0.96, 'primary_only': True},
+                                                   {'tau': 0.96, 'cap': 10, 'primary_only': True})
+    assert parse_variant('ZGp-hi', {}, 0.5, 1.7)[0] == {'k': 10, 'tau': 1.7, 'primary_only': True}
+    assert parse_variant('ZG', {}, 0.5, 1.7)[0] == {'k': 10, 'tau': 0.5}                  # ZG unchanged
+
+
+def test_tau_is_absolute_not_tied_to_the_number_of_docs():
+    pairs = [(10, 3.0), (20, 1.0), (30, 0.5)]
+    assert select_zf(pairs, GROUPS, [], 10, tau=0.96, primary_only=True)[1] == [10, 20]
+    assert select_zf(pairs[:1], GROUPS, [], 10, tau=0.96, primary_only=True)[1] == [10]   # fewer docs, same tau

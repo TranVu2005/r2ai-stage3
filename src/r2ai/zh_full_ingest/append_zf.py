@@ -3,7 +3,7 @@
 Cache = rerank of the 1,200 queries over every ACTIVE zh-full segment (sample-v2 + b001), branch `dense`
 (same branch as Z-append). Doc = max cached chunk logit; the doc's whole doc_ids_group is appended, primary first.
 Nothing before the appended ids changes (byte gate); no GPU, no model call, no LB.
-Variants: ZF-<k> (top-k zh docs; ZF-<k>p = primary ids only), ZG (max logit >= tau, <= 10/query, tau calibrated to ~3 docs/query),
+Variants: ZF-<k> (top-k zh docs; ZF-<k>p = primary ids only), ZGp (tau 0.96, primary only), ZGp-hi (tau for ~1.5 docs/query, primary only), ZG (max logit >= tau, <= 10/query, tau calibrated to ~3 docs/query),
 ZF-120ask-5 (top-5 docs of 120ask.com only).
 Run from D:\\GitHub\\r2ai-stage3 (PYTHONPATH=<worktree>/src):
   .venv\\Scripts\\python.exe -B -m r2ai.zh_full_ingest.append_zf --variants ZG ZF-120ask-5
@@ -157,6 +157,7 @@ def validate(zip_path, log_path):
 
 
 ZG_CAP, ZG_TARGET_MEAN = 10, 3.0
+ZGP_TAU, ZGP_HI_TARGET_MEAN = 0.96, 1.5      # ZGp: tau fixed by the user; ZGp-hi: tau calibrated to ~1.5 docs/query
 # Doc R gain of Z-append (+0.0017 at 99.985 docs/query, sample 2%) scaled to the whole corpus; both are estimates.
 DELTA_DOC_R_LOWER_PER_100 = 0.0017
 DELTA_DOC_R_UPPER_PER_100 = 0.037
@@ -188,7 +189,7 @@ def calibrate_tau(base, cache, groups, cap=ZG_CAP, target=ZG_TARGET_MEAN):
     return tau, mean_for(tau)
 
 
-def parse_variant(spec, owner, tau):
+def parse_variant(spec, owner, tau, tau_hi=None):
     """-> (kwargs for render/select_zf incl. k, filter description)."""
     if spec.startswith('ZF-120ask-'):
         k = int(spec.rsplit('-', 1)[1])
@@ -196,6 +197,12 @@ def parse_variant(spec, owner, tau):
         return {'k': k, 'allow': allow}, {'k': k, 'domain': '120ask.com'}
     if spec == 'ZG':
         return {'k': ZG_CAP, 'tau': tau}, {'tau': tau, 'cap': ZG_CAP}
+    if spec == 'ZGp':
+        return ({'k': ZG_CAP, 'tau': ZGP_TAU, 'primary_only': True},
+                {'tau': ZGP_TAU, 'cap': ZG_CAP, 'primary_only': True})
+    if spec == 'ZGp-hi':
+        return ({'k': ZG_CAP, 'tau': tau_hi, 'primary_only': True},
+                {'tau': tau_hi, 'cap': ZG_CAP, 'primary_only': True})
     m = re.fullmatch(r'ZF-(\d+)(p?)', spec)
     if m:
         k, primary = int(m.group(1)), bool(m.group(2))
@@ -247,10 +254,14 @@ def main(argv=None):
     if 'ZG' in a.variants and tau is None:
         tau, tau_mean = calibrate_tau(base, cache, groups)
         print(json.dumps({'tau': tau, 'mean_docs_per_query_at_tau': tau_mean}))
+    tau_hi = None
+    if 'ZGp-hi' in a.variants:
+        tau_hi, tau_hi_mean = calibrate_tau(base, cache, groups, target=ZGP_HI_TARGET_MEAN)
+        print(json.dumps({'tau_hi': tau_hi, 'mean_docs_per_query_at_tau_hi': tau_hi_mean}))
     with exclusive(roots, 'append'):
         for name in a.variants:
             t0 = time.perf_counter()
-            kwargs, filters = parse_variant(name, owner, tau)
+            kwargs, filters = parse_variant(name, owner, tau, tau_hi)
             k = kwargs.pop('k')
             out = roots.guard(roots.run / 'ZF' / name)
             out.mkdir(parents=True, exist_ok=True)

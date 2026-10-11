@@ -3,8 +3,10 @@
 Cache = rerank of the 1,200 queries over every ACTIVE zh-full segment (sample-v2 + b001), branch `dense`
 (same branch as Z-append). Doc = max cached chunk logit; the doc's whole doc_ids_group is appended, primary first.
 Nothing before the appended ids changes (byte gate); no GPU, no model call, no LB.
-Run from D:\\GitHub\\r2ai-stage3:
-  .venv\\Scripts\\python.exe -B -m r2ai.zh_full_ingest.append_zf --k 100 10   (PYTHONPATH=<worktree>/src)
+Variants: ZF-<k> (top-k zh docs), ZG (max logit >= tau, <= 10/query, tau calibrated to ~3 docs/query),
+ZF-120ask-5 (top-5 docs of 120ask.com only).
+Run from D:\\GitHub\\r2ai-stage3 (PYTHONPATH=<worktree>/src):
+  .venv\\Scripts\\python.exe -B -m r2ai.zh_full_ingest.append_zf --variants ZG ZF-120ask-5
 """
 from __future__ import annotations
 
@@ -31,8 +33,10 @@ ZIP_CEILING = 104_857_600
 BANDS = ((1, 10), (11, 50), (51, 100))
 
 
-def select_zf(pairs, groups, present, k):
-    """Top-k docs by max logit that are not in `present`; returns (ids, docs, n_available)."""
+def select_zf(pairs, groups, present, k, tau=None, allow=None):
+    """Top-k docs by max logit that are not in `present`; returns (ids, docs, n_available).
+
+    tau: keep only docs whose max logit >= tau. allow: keep only these primary doc ids."""
     best = {}
     for doc, score in pairs:
         if type(doc) is not int or doc not in groups or type(score) not in (int, float) or not math.isfinite(score):
@@ -40,7 +44,7 @@ def select_zf(pairs, groups, present, k):
         best[doc] = max(best.get(doc, -math.inf), score)
     have, ids, docs, available = set(present), [], [], 0
     for doc in sorted(best, key=lambda d: -best[d]):          # stable: cache order breaks ties
-        if doc in have:
+        if doc in have or (allow is not None and doc not in allow) or (tau is not None and best[doc] < tau):
             continue
         available += 1
         if len(docs) < k:
@@ -51,12 +55,12 @@ def select_zf(pairs, groups, present, k):
     return ids, docs, available
 
 
-def render(base, cache, groups, k, write):
+def render(base, cache, groups, k, write, **filters):
     from r2ai.zh_sample.append import _rows, _addition
     cursor, selections = 0, {}
     for row, spans in _rows(base):
         qid = row['id']
-        ids, docs, available = select_zf(cache[qid], groups, row['relevant_docs'], k)
+        ids, docs, available = select_zf(cache[qid], groups, row['relevant_docs'], k, **filters)
         end = spans['relevant_docs'][1]
         write(base[cursor:end - 1])
         write(_addition(row['relevant_docs'], ids))
@@ -150,12 +154,82 @@ def validate(zip_path, log_path):
     return result
 
 
+ZG_CAP, ZG_TARGET_MEAN = 10, 3.0
+# Doc R gain of Z-append (+0.0017 at 99.985 docs/query, sample 2%) scaled to the whole corpus; both are estimates.
+DELTA_DOC_R_LOWER_PER_100 = 0.0017
+DELTA_DOC_R_UPPER_PER_100 = 0.037
+
+
+def delta_doc_r_estimate(docs_mean):
+    """Linear in appended docs. Lower: denser corpus does not help. Upper: linear in coverage (~779k / 35.7k docs)."""
+    return {'lower': round(DELTA_DOC_R_LOWER_PER_100 * docs_mean / 100, 5),
+            'upper': round(DELTA_DOC_R_UPPER_PER_100 * docs_mean / 100, 5),
+            'basis': 'estimate, not measured: lower = Z-append +0.0017 per 100 docs, upper = x(779k/35.7k) coverage scaling'}
+
+
+def calibrate_tau(base, cache, groups, cap=ZG_CAP, target=ZG_TARGET_MEAN):
+    """One tau (2 decimals) whose mean number of appended docs/query (cap, minus docs already in base) is closest to target."""
+    from r2ai.zh_sample.append import _rows
+    per_query = []
+    for row, _ in _rows(base):
+        best = {}
+        for d, sc in cache[row['id']]:
+            best[d] = max(best.get(d, -math.inf), sc)
+        have = set(row['relevant_docs'])
+        per_query.append(sorted((sc for d, sc in best.items() if d not in have), reverse=True))
+
+    def mean_for(tau):
+        return statistics.fmean(min(cap, sum(sc >= tau for sc in scores)) for scores in per_query)
+
+    grid = [x / 100 for x in range(-1000, 600)]
+    tau = min(grid, key=lambda t: (abs(mean_for(t) - target), t))
+    return tau, mean_for(tau)
+
+
+def parse_variant(spec, owner, tau):
+    """-> (kwargs for render/select_zf incl. k, filter description)."""
+    if spec.startswith('ZF-120ask-'):
+        k = int(spec.rsplit('-', 1)[1])
+        allow = {d for d, (_, domain) in owner.items() if domain == '120ask.com'}
+        return {'k': k, 'allow': allow}, {'k': k, 'domain': '120ask.com'}
+    if spec == 'ZG':
+        return {'k': ZG_CAP, 'tau': tau}, {'tau': tau, 'cap': ZG_CAP}
+    if spec.startswith('ZF-'):
+        k = int(spec[3:])
+        return {'k': k}, {'k': k}
+    raise ValueError(f'unknown variant {spec}')
+
+
+def histogram(selections):
+    counts = Counter(len(s['docs']) for s in selections.values())
+    return {str(n): counts[n] for n in sorted(counts)}
+
+
+def annotate_stats(roots, specs):
+    """Add the id/query and Doc R estimate fields to an existing stats.json without touching the ZIP/JSON."""
+    for spec in specs:
+        path = roots.guard(roots.run / 'ZF' / spec / 'stats.json')
+        stats = json.loads(path.read_text('utf-8'))
+        docs_mean = stats['docs_per_query']['mean']
+        ids_mean = stats['ids_appended_total'] / 1200
+        stats['ids_per_query_mean'] = ids_mean
+        stats['delta_doc_r_estimate'] = delta_doc_r_estimate(docs_mean)
+        stats['comparability'] = (f'{ids_mean:.1f} ids/query appended (whole doc_ids_group) vs Z-append ~100 primary ids/query: '
+                                  'Doc P/Final are not directly comparable with Z-append')
+        atomic_json(roots, path, stats)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--k', type=int, nargs='+', default=[100, 10])
+    ap.add_argument('--variants', nargs='+', default=['ZF-100', 'ZF-10'])
+    ap.add_argument('--tau', type=float, default=None, help='ZG threshold (default: calibrate to ~3 docs/query)')
+    ap.add_argument('--annotate-only', action='store_true')
     a = ap.parse_args(argv)
     os.environ['HF_HUB_OFFLINE'] = os.environ['TRANSFORMERS_OFFLINE'] = '1'
     roots = Roots()
+    if a.annotate_only:
+        annotate_stats(roots, a.variants)
+        return 0
     roots.preflight()
     raw = BASE.read_bytes()
     if __import__('hashlib').sha256(raw).hexdigest() != VS_APPEND_SHA256:
@@ -166,15 +240,21 @@ def main(argv=None):
     merged = json.loads((roots.run / 'retrieval-b001/rerank/dense_merged.json').read_text('utf-8'))
     merged_top = {int(q): {d for d, _ in rows if d in groups} for q, rows in merged.items()}
     from r2ai.zh_sample.append import verify_gate
+    tau = a.tau
+    if 'ZG' in a.variants and tau is None:
+        tau, tau_mean = calibrate_tau(base, cache, groups)
+        print(json.dumps({'tau': tau, 'mean_docs_per_query_at_tau': tau_mean}))
     with exclusive(roots, 'append'):
-        for k in a.k:
+        for name in a.variants:
             t0 = time.perf_counter()
-            out = roots.guard(roots.run / 'ZF' / f'ZF-{k}')
+            kwargs, filters = parse_variant(name, owner, tau)
+            k = kwargs.pop('k')
+            out = roots.guard(roots.run / 'ZF' / name)
             out.mkdir(parents=True, exist_ok=True)
-            name = f'ZF_{k}'
-            tmp_json, tmp_zip = out / f'{name}.json.tmp', out / f'{name}.pending.zip'
+            stem = name.replace('-', '_')
+            tmp_json, tmp_zip = out / f'{stem}.json.tmp', out / f'{stem}.pending.zip'
             with open(roots.guard(tmp_json), 'w', encoding='utf-8', newline='') as f:
-                selections = render(base, cache, groups, k, f.write)
+                selections = render(base, cache, groups, k, f.write, **kwargs)
                 f.flush()
                 os.fsync(f.fileno())
             with open(tmp_json, encoding='utf-8', newline='') as f:
@@ -182,26 +262,33 @@ def main(argv=None):
             if gate['queries'] != 1200 or set(selections) != set(qids):
                 raise ValueError('Need the exact 1200-query byte gate')
             with zipfile.ZipFile(roots.guard(tmp_zip), 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
-                z.write(tmp_json, arcname=f'{name}.json')
+                z.write(tmp_json, arcname=f'{stem}.json')
             if tmp_zip.stat().st_size > ZIP_CEILING:
                 raise ValueError(f'ZIP exceeds {ZIP_CEILING} bytes: {tmp_zip.stat().st_size}')
             validator = validate(tmp_zip, out / 'validator.log')
-            final_json, final_zip = roots.guard(out / f'{name}.json'), roots.guard(out / f'{name}.zip')
+            final_json, final_zip = roots.guard(out / f'{stem}.json'), roots.guard(out / f'{stem}.zip')
             atomic_json(roots, out / 'stats.json', {'complete': False, 'status': 'publishing validated staging artifacts'})
             os.replace(tmp_json, final_json)
             os.replace(tmp_zip, final_zip)
-            stats = {'diagnostic_only': True, 'LB': 'chua do', 'k': k, 'base': str(BASE), 'base_sha256': VS_APPEND_SHA256,
-                     'branch': 'dense', 'aggregation': 'max cached reranker chunk logit per primary doc; whole doc_ids_group appended',
+            summary = summarise(selections, owner, merged_top, k)
+            stats = {'diagnostic_only': True, 'LB': 'chua do', 'variant': name, 'filters': filters, 'k': k, 'base': str(BASE),
+                     'base_sha256': VS_APPEND_SHA256, 'branch': 'dense',
+                     'aggregation': 'max cached reranker chunk logit per primary doc; whole doc_ids_group appended',
                      'rerank_config_segments': len(cfg['segments']), 'rerank_candidates_pkl_sha256': cfg['candidates_pkl_sha256'],
-                     'gate': gate, 'validator': validator, 'json_bytes': final_json.stat().st_size, 'json_sha256': sha256_file(final_json),
-                     'zip_bytes': final_zip.stat().st_size, 'zip_sha256': sha256_file(final_zip), 'zip_ceiling_bytes': ZIP_CEILING,
-                     **summarise(selections, owner, merged_top, k), 'logit_at_zh_rank': rank_logits(selections, cache),
+                     'gate': gate, 'validator': validator, 'json_bytes': final_json.stat().st_size,
+                     'json_sha256': sha256_file(final_json), 'zip_bytes': final_zip.stat().st_size,
+                     'zip_sha256': sha256_file(final_zip), 'zip_ceiling_bytes': ZIP_CEILING,
+                     **summary, 'docs_per_query_histogram': histogram(selections),
+                     'queries_with_zero_docs': sum(not s['docs'] for s in selections.values()),
+                     'ids_per_query_mean': summary['ids_appended_total'] / 1200,
+                     'logit_at_zh_rank': rank_logits(selections, cache),
                      'available_zh_not_in_base': {'mean': statistics.fmean(s['available'] for s in selections.values()),
                                                   'min': min(s['available'] for s in selections.values())},
                      'new_model_calls': 0, 'new_gpu_seconds': 0, 'seconds': time.perf_counter() - t0, 'complete': True}
             atomic_json(roots, out / 'stats.json', stats)
             atomic_json(roots, out / 'query_append.json', {str(q): s for q, s in selections.items()})
-            print(json.dumps({k_: stats[k_] for k_ in ('k', 'zip_bytes', 'zip_sha256', 'json_sha256', 'validator', 'gate', 'docs_per_query')}))
+            print(json.dumps({k_: stats[k_] for k_ in ('variant', 'filters', 'zip_bytes', 'zip_sha256', 'json_sha256', 'validator',
+                                                       'gate', 'docs_per_query', 'queries_with_zero_docs')}))
     return 0
 
 

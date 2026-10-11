@@ -37,3 +37,32 @@ def test_render_appends_after_vi_docs_and_gate_proves_nothing_else_changed():
     assert json.loads(result)[1]['relevant_docs'] == [30, 31]
     assert verify_gate(base, result, selections) == {'queries': 2, 'vi_docs_diff': 0, 'chunks_byte_diff': 0}
     assert render(base, cache, GROUPS, 0, [].append)[1]['appended'] == []
+
+
+def test_select_tau_keeps_only_docs_at_or_above_the_threshold():
+    pairs = [(10, 3.0), (20, 1.0), (30, 2.0), (40, 0.5)]
+    ids, docs, available = select_zf(pairs, GROUPS, [], 10, tau=1.0)
+    assert docs == [10, 30, 20] and available == 3
+    assert select_zf(pairs, GROUPS, [], 2, tau=1.0)[1] == [10, 30]            # cap still applies
+    assert select_zf(pairs, GROUPS, [], 10, tau=9.0) == ([], [], 0)
+
+
+def test_select_allow_restricts_to_one_domain_in_reranker_order():
+    pairs = [(10, 3.0), (20, 2.5), (30, 2.0), (40, 1.0)]
+    ids, docs, _ = select_zf(pairs, GROUPS, [], 2, allow={30, 40, 20})
+    assert docs == [20, 30] and ids == [20, 30, 31]
+
+
+def test_calibrate_tau_hits_the_target_mean():
+    from r2ai.zh_full_ingest.append_zf import calibrate_tau
+    base = json.dumps([{'id': 1, 'relevant_docs': [], 'relevant_chunks': []}, {'id': 2, 'relevant_docs': [20], 'relevant_chunks': []}])
+    cache = {1: [(10, 3.0), (20, 2.0), (30, 1.0), (40, 0.0)], 2: [(10, 3.0), (20, 9.0), (30, 1.0), (40, 0.0)]}
+    tau, mean = calibrate_tau(base, cache, GROUPS, cap=10, target=2.5)
+    assert (tau, mean) == (0.01, 2.5)   # q1 keeps 10,20,30 ; q2 (20 already in base) keeps 10,30
+
+
+def test_delta_doc_r_estimate_carries_both_bounds():
+    from r2ai.zh_full_ingest.append_zf import delta_doc_r_estimate
+    e = delta_doc_r_estimate(100)
+    assert (e['lower'], e['upper']) == (0.0017, 0.037) and 'estimate' in e['basis']
+    assert delta_doc_r_estimate(10)['upper'] == 0.0037

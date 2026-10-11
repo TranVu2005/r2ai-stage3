@@ -3,7 +3,7 @@
 Cache = rerank of the 1,200 queries over every ACTIVE zh-full segment (sample-v2 + b001), branch `dense`
 (same branch as Z-append). Doc = max cached chunk logit; the doc's whole doc_ids_group is appended, primary first.
 Nothing before the appended ids changes (byte gate); no GPU, no model call, no LB.
-Variants: ZF-<k> (top-k zh docs), ZG (max logit >= tau, <= 10/query, tau calibrated to ~3 docs/query),
+Variants: ZF-<k> (top-k zh docs; ZF-<k>p = primary ids only), ZG (max logit >= tau, <= 10/query, tau calibrated to ~3 docs/query),
 ZF-120ask-5 (top-5 docs of 120ask.com only).
 Run from D:\\GitHub\\r2ai-stage3 (PYTHONPATH=<worktree>/src):
   .venv\\Scripts\\python.exe -B -m r2ai.zh_full_ingest.append_zf --variants ZG ZF-120ask-5
@@ -16,6 +16,7 @@ import io
 import json
 import math
 import os
+import re
 import sqlite3
 import statistics
 import time
@@ -33,10 +34,11 @@ ZIP_CEILING = 104_857_600
 BANDS = ((1, 10), (11, 50), (51, 100))
 
 
-def select_zf(pairs, groups, present, k, tau=None, allow=None):
+def select_zf(pairs, groups, present, k, tau=None, allow=None, primary_only=False):
     """Top-k docs by max logit that are not in `present`; returns (ids, docs, n_available).
 
-    tau: keep only docs whose max logit >= tau. allow: keep only these primary doc ids."""
+    tau: keep only docs whose max logit >= tau. allow: keep only these primary doc ids.
+    primary_only: append the primary id alone instead of the whole doc_ids_group (default: whole group)."""
     best = {}
     for doc, score in pairs:
         if type(doc) is not int or doc not in groups or type(score) not in (int, float) or not math.isfinite(score):
@@ -48,7 +50,7 @@ def select_zf(pairs, groups, present, k, tau=None, allow=None):
             continue
         available += 1
         if len(docs) < k:
-            new = [i for i in groups[doc] if i not in have]
+            new = [doc] if primary_only else [i for i in groups[doc] if i not in have]
             ids.extend(new)
             have.update(new)
             docs.append(doc)
@@ -194,9 +196,10 @@ def parse_variant(spec, owner, tau):
         return {'k': k, 'allow': allow}, {'k': k, 'domain': '120ask.com'}
     if spec == 'ZG':
         return {'k': ZG_CAP, 'tau': tau}, {'tau': tau, 'cap': ZG_CAP}
-    if spec.startswith('ZF-'):
-        k = int(spec[3:])
-        return {'k': k}, {'k': k}
+    m = re.fullmatch(r'ZF-(\d+)(p?)', spec)
+    if m:
+        k, primary = int(m.group(1)), bool(m.group(2))
+        return ({'k': k, 'primary_only': True}, {'k': k, 'primary_only': True}) if primary else ({'k': k}, {'k': k})
     raise ValueError(f'unknown variant {spec}')
 
 
@@ -273,7 +276,8 @@ def main(argv=None):
             summary = summarise(selections, owner, merged_top, k)
             stats = {'diagnostic_only': True, 'LB': 'chua do', 'variant': name, 'filters': filters, 'k': k, 'base': str(BASE),
                      'base_sha256': VS_APPEND_SHA256, 'branch': 'dense',
-                     'aggregation': 'max cached reranker chunk logit per primary doc; whole doc_ids_group appended',
+                     'aggregation': 'max cached reranker chunk logit per primary doc; ' +
+                     ('primary id only' if filters.get('primary_only') else 'whole doc_ids_group appended'),
                      'rerank_config_segments': len(cfg['segments']), 'rerank_candidates_pkl_sha256': cfg['candidates_pkl_sha256'],
                      'gate': gate, 'validator': validator, 'json_bytes': final_json.stat().st_size,
                      'json_sha256': sha256_file(final_json), 'zip_bytes': final_zip.stat().st_size,

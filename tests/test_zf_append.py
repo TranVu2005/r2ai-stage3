@@ -66,3 +66,28 @@ def test_delta_doc_r_estimate_carries_both_bounds():
     e = delta_doc_r_estimate(100)
     assert (e['lower'], e['upper']) == (0.0017, 0.037) and 'estimate' in e['basis']
     assert delta_doc_r_estimate(10)['upper'] == 0.0037
+
+
+def test_primary_only_appends_the_primary_id_and_default_keeps_the_group():
+    pairs = [(10, 3.0), (30, 2.0), (20, 1.0)]
+    assert select_zf(pairs, GROUPS, [], 2)[0] == [10, 11, 30, 31]                    # default unchanged
+    ids, docs, available = select_zf(pairs, GROUPS, [], 2, primary_only=True)
+    assert (ids, docs, available) == ([10, 30], [10, 30], 3)
+    assert select_zf(pairs, GROUPS, [10], 2, primary_only=True)[0] == [30, 20]       # doc already present is still skipped
+
+
+def test_primary_variants_parse_and_other_variants_are_unchanged():
+    from r2ai.zh_full_ingest.append_zf import parse_variant
+    assert parse_variant('ZF-5p', {}, None) == ({'k': 5, 'primary_only': True}, {'k': 5, 'primary_only': True})
+    assert parse_variant('ZF-10', {}, None) == ({'k': 10}, {'k': 10})
+    assert parse_variant('ZG', {}, 0.96) == ({'k': 10, 'tau': 0.96}, {'tau': 0.96, 'cap': 10})
+    assert parse_variant('ZF-120ask-5', {1: ('b', '120ask.com')}, None)[0] == {'k': 5, 'allow': {1}}
+
+
+def test_render_primary_only_writes_one_id_per_doc_and_passes_the_byte_gate():
+    base = json.dumps([{'id': 1, 'relevant_docs': [1], 'relevant_chunks': []}])
+    out = []
+    selections = render(base, {1: [(10, 2.0), (30, 1.0)]}, GROUPS, 2, out.append, primary_only=True)
+    result = ''.join(out)
+    assert json.loads(result)[0]['relevant_docs'] == [1, 10, 30]
+    assert verify_gate(base, result, selections)['queries'] == 1

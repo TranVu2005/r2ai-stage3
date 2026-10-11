@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS segments(segment_id INTEGER PRIMARY KEY AUTOINCREMENT
     batch TEXT NOT NULL, domain TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL, rows INTEGER,
     docs_count INTEGER, global_start INTEGER, chunks_sha256 TEXT, extractor_version TEXT, chunker TEXT,
     model TEXT, vectors TEXT, note TEXT, stats TEXT, created_at REAL NOT NULL, updated_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS embed_blocks(segment TEXT NOT NULL, block INTEGER NOT NULL, rows INTEGER NOT NULL,
+    dense_sha256 TEXT NOT NULL, sparse_sha256 TEXT NOT NULL, created_at REAL NOT NULL, PRIMARY KEY(segment, block));
 """
 
 
@@ -387,6 +389,68 @@ def _write_segment_from_blocks(roots, name, sid, n, vocabulary, cf, blocks_iter)
     return seg
 
 
+NORM_TOLERANCE = 0.02
+
+
+def check_block(dense_path: Path, sparse_path: Path, rows: int, dimension: int = 1024) -> str | None:
+    """None when the embedding block is intact, else the reason it must be recomputed."""
+    from scipy.sparse import load_npz
+    try:
+        dense = np.load(dense_path, allow_pickle=False)
+        if dense.shape != (rows, dimension) or dense.dtype.kind != 'f':
+            return f'dense shape/dtype {dense.shape} {dense.dtype}, expected ({rows}, {dimension}) float'
+        v = dense.astype(np.float32)
+        if not np.isfinite(v).all():
+            return 'dense has NaN/inf'
+        norms = np.linalg.norm(v, axis=1)
+        if (np.abs(1.0 - norms) > NORM_TOLERANCE).any():
+            return f'dense norm outside 1 +/- {NORM_TOLERANCE}: min {norms.min():.4f} max {norms.max():.4f}'
+        sparse = load_npz(sparse_path).tocsr()
+        if sparse.shape[0] != rows:
+            return f'sparse rows {sparse.shape[0]}, expected {rows}'
+        if (np.diff(sparse.indptr) == 0).any():
+            return 'sparse has an empty row'
+    except Exception as e:  # noqa: BLE001 - any unreadable file means the block is not trusted
+        return f'unreadable: {e!r}'
+    return None
+
+
+def _save_durably(final: Path, write):
+    """write(file) to <final>.tmp-style sibling, fsync, then rename: a power loss never leaves a short block."""
+    tmp = final.with_name(final.name.replace('.npy', '.tmp.npy').replace('.npz', '.tmp.npz'))
+    with open(tmp, 'wb') as f:
+        write(f)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, final)
+
+
+def _record_block(c, segment, block, rows, dense_path, sparse_path):
+    c.execute('INSERT OR REPLACE INTO embed_blocks VALUES (?,?,?,?,?,?)',
+              (segment, block, rows, sha256_file(dense_path), sha256_file(sparse_path), time.time()))
+    c.commit()
+
+
+def _block_is_trusted(roots, c, segment, i, rows, dpath, spath) -> bool:
+    """A finished block is skipped only if it passes the checks and matches the manifest SHA256 (adopted if none)."""
+    reason = check_block(dpath, spath, rows)
+    if reason is None:
+        recorded = c.execute('SELECT rows, dense_sha256, sparse_sha256 FROM embed_blocks WHERE segment=? AND block=?',
+                             (segment, i)).fetchone()
+        if recorded is None:
+            _record_block(c, segment, i, rows, dpath, spath)       # block from before hashes existed
+            return True
+        if recorded == (rows, sha256_file(dpath), sha256_file(spath)):
+            return True
+        reason = 'sha256 differs from the manifest'
+    log_event(roots, 'embed_block_rejected', {'segment': segment, 'block': i, 'reason': reason})
+    for f in (dpath, spath):
+        f.unlink(missing_ok=True)
+    c.execute('DELETE FROM embed_blocks WHERE segment=? AND block=?', (segment, i))
+    c.commit()
+    return False
+
+
 def embed_segment(roots: Roots, name: str, *, encoder_factory=None, block=MODEL['block'], batch_size=MODEL['batch_size'],
                   gpu_check=None, before_block=None, memory: MemoryGuard | None = None) -> dict:
     """BGE-M3 per 1000-chunk block (batch 16, length-sorted inside the block, as the sample index);
@@ -409,14 +473,17 @@ def embed_segment(roots: Roots, name: str, *, encoder_factory=None, block=MODEL[
     blocks_dir.mkdir(parents=True, exist_ok=True)
     gpu_check = gpu_check or (lambda: require_gpu_idle(roots))
     enc, embedded, seconds, t0 = None, 0, 0.0, time.perf_counter()
+    c = connect(roots)
     try:
         for i, (lo, t) in enumerate(_exact_blocks(cf, block, ['chunk_id', 'text'])):
             ids = t['chunk_id'].to_numpy()
             if not np.array_equal(ids, np.arange(lo, lo + len(ids))):
                 raise ValueError('chunk ids must be 0..N-1 in file order')
             dpath, spath = blocks_dir / f'{i:06d}.dense.npy', blocks_dir / f'{i:06d}.sparse.npz'
-            if dpath.exists() and spath.exists():
+            if dpath.exists() and spath.exists() and _block_is_trusted(roots, c, name, i, len(ids), dpath, spath):
                 continue
+            for stale in (dpath, spath):                                  # half a block (crash between the two renames)
+                stale.unlink(missing_ok=True)
             if before_block is not None:
                 before_block(i)
             if memory is not None:
@@ -433,16 +500,18 @@ def embed_segment(roots: Roots, name: str, *, encoder_factory=None, block=MODEL[
                 gpu_check()
             ts = time.perf_counter()
             dense, sparse = encode(enc, t['text'].to_pylist(), batch_size)
-            with open(roots.guard(blocks_dir / f'{i:06d}.dense.tmp.npy'), 'wb') as f:
-                np.save(f, dense)
-            os.replace(blocks_dir / f'{i:06d}.dense.tmp.npy', dpath)
-            save_npz(roots.guard(blocks_dir / f'{i:06d}.sparse.tmp.npz'), to_csr(sparse, enc.vocab))
-            os.replace(blocks_dir / f'{i:06d}.sparse.tmp.npz', spath)
+            roots.guard(blocks_dir / f'{i:06d}.dense.tmp.npy')
+            _save_durably(dpath, lambda f: np.save(f, dense))
+            csr = to_csr(sparse, enc.vocab)
+            roots.guard(blocks_dir / f'{i:06d}.sparse.tmp.npz')
+            _save_durably(spath, lambda f: save_npz(f, csr))
+            _record_block(c, name, i, len(dense), dpath, spath)
             dt = time.perf_counter() - ts
             seconds += dt
             embedded += len(dense)
             log_event(roots, 'embed_blocks', {'segment': name, 'block': i, 'chunks': len(dense), 'seconds': dt})
     finally:
+        c.close()
         if enc is not None:
             import torch
             del enc

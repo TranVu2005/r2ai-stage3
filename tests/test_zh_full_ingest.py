@@ -294,6 +294,147 @@ def test_embed_resume_gives_byte_identical_segment(tmp_path, no_cuda):
     assert outs[0] == outs[1]
 
 
+def _segment_files(roots, seg):
+    p = roots.index / seg['name']
+    return {f: (p / f).read_bytes() for f in ('dense.npy', 'data.bin', 'indices.bin', 'indptr.bin', 'doc_id.bin')}
+
+
+def _setup_raw(base):
+    from r2ai.zh_full_ingest.ingest import cut_batch, extract_batch
+    roots = make_roots(base)
+    base.mkdir(exist_ok=True)
+    write_shard(roots.raw / 'cnkang.com', 's1.jsonl.zst', [rec(f'cnkang.com/{i}', [20 + i], text=ART * (1 + i % 3)) for i in range(5)])
+    make_db(roots.crawl_db, [(f'cnkang.com/{i}', [20 + i], 'cnkang.com', 'ok', 's1.jsonl.zst') for i in range(5)])
+    cut_batch(roots, 'b001', ['cnkang.com'])
+    extract_batch(roots, 'b001', tok=fake_tok)
+    return roots
+
+
+def _partial_embed(base, done_blocks=1):
+    """Chunk, then embed until `done_blocks` blocks exist and the run is interrupted."""
+    from r2ai.zh_full_ingest.ingest import chunk_segment, embed_segment
+    roots = _setup_raw(base)
+    seg = chunk_segment(roots, 'b001', 'cnkang.com', batch_docs=2)
+
+    def before_block(i):
+        if i >= done_blocks:
+            raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        embed_segment(roots, seg['name'], encoder_factory=FakeEnc, block=2, batch_size=2, gpu_check=lambda: None,
+                      before_block=before_block)
+    return roots, seg
+
+
+def _resume(roots, seg):
+    from r2ai.zh_full_ingest.ingest import embed_segment
+    embed_segment(roots, seg['name'], encoder_factory=FakeEnc, block=2, batch_size=2, gpu_check=lambda: None)
+    return _segment_files(roots, seg)
+
+
+def _reference(tmp_path):
+    from r2ai.zh_full_ingest.ingest import chunk_segment, embed_segment
+    roots = _setup_raw(tmp_path / 'ref')
+    seg = chunk_segment(roots, 'b001', 'cnkang.com', batch_docs=2)
+    embed_segment(roots, seg['name'], encoder_factory=FakeEnc, block=2, batch_size=2, gpu_check=lambda: None)
+    return _segment_files(roots, seg)
+
+
+def _tamper_nan(d, s):
+    x = np.load(d).astype(np.float32)
+    x[0, 0] = np.nan
+    np.save(d, x.astype(np.float16))
+
+
+def _tamper_norm(d, s):
+    np.save(d, (np.load(d).astype(np.float32) * .5).astype(np.float16))
+
+
+def _tamper_rows(d, s):
+    np.save(d, np.load(d)[:-1])
+
+
+def _tamper_truncated(d, s):
+    raw = d.read_bytes()
+    d.write_bytes(raw[:len(raw) // 2])
+
+
+def _tamper_sparse_empty(d, s):
+    from scipy.sparse import csr_matrix, load_npz, save_npz
+    m = load_npz(s).tolil()
+    m[0, :] = 0
+    save_npz(s, csr_matrix(m))
+
+
+def _tamper_swapped_rows(d, s):          # structurally valid vectors, but not what was embedded
+    x = np.load(d)
+    np.save(d, x[::-1].copy())
+
+
+@pytest.mark.parametrize('tamper', [_tamper_nan, _tamper_norm, _tamper_rows, _tamper_truncated, _tamper_sparse_empty,
+                                    _tamper_swapped_rows])
+def test_resume_rejects_and_recomputes_a_damaged_block(tmp_path, no_cuda, tamper):
+    reference = _reference(tmp_path)
+    roots, seg = _partial_embed(tmp_path / 'run')
+    blocks = roots.index / (seg['name'] + '.blocks')
+    tamper(blocks / '000000.dense.npy', blocks / '000000.sparse.npz')
+    assert _resume(roots, seg) == reference
+    rejected = (roots.run / 'logs' / 'embed_block_rejected.jsonl').read_text('utf-8').splitlines()
+    assert len(rejected) == 1 and json.loads(rejected[0])['block'] == 0
+
+
+def test_block_sha256_is_recorded_in_the_manifest(tmp_path, no_cuda):
+    import hashlib
+    from r2ai.zh_full_ingest.ingest import connect
+    roots, seg = _partial_embed(tmp_path / 'run')
+    blocks = roots.index / (seg['name'] + '.blocks')
+    c = connect(roots)
+    try:
+        row = c.execute('SELECT block, rows, dense_sha256, sparse_sha256 FROM embed_blocks WHERE segment=?', (seg['name'],)).fetchall()
+    finally:
+        c.close()
+    assert row == [(0, 2, hashlib.sha256((blocks / '000000.dense.npy').read_bytes()).hexdigest(),
+                    hashlib.sha256((blocks / '000000.sparse.npz').read_bytes()).hexdigest())]
+
+
+def test_resume_adopts_a_structurally_valid_block_without_a_recorded_hash(tmp_path, no_cuda):
+    from r2ai.zh_full_ingest.ingest import connect
+    reference = _reference(tmp_path)
+    roots, seg = _partial_embed(tmp_path / 'run')
+    c = connect(roots)
+    c.execute('DELETE FROM embed_blocks')
+    c.commit()
+    c.close()
+    assert _resume(roots, seg) == reference
+    assert not (roots.run / 'logs' / 'embed_block_rejected.jsonl').exists()
+    c = connect(roots)
+    try:
+        assert c.execute('SELECT count(*) FROM embed_blocks WHERE segment=?', (seg['name'],)).fetchone()[0] >= 2
+    finally:
+        c.close()
+
+
+def test_block_files_are_fsynced_before_the_rename(tmp_path, no_cuda, monkeypatch):
+    real_fsync, real_replace = os.fsync, os.replace
+    state = {'fsyncs': 0, 'bad': []}
+
+    def fsync(fd):
+        state['fsyncs'] += 1
+        return real_fsync(fd)
+
+    def replace(src, dst, *a, **k):
+        if '.tmp.' in str(src):
+            if state['fsyncs'] < 1:
+                state['bad'].append(str(src))
+            state['fsyncs'] = 0
+        return real_replace(src, dst, *a, **k)
+
+    monkeypatch.setattr(os, 'fsync', fsync)
+    monkeypatch.setattr(os, 'replace', replace)
+    _partial_embed(tmp_path / 'run')
+    assert state['bad'] == []
+
+
 def test_parity_one_segment_vs_many(tmp_path):
     from scipy.sparse import random as sprandom
     from r2ai.index.segments import write_segment

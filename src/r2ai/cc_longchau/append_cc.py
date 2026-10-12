@@ -83,17 +83,25 @@ def render(base, variant, slug_by_q, cc_ids, ranking, groups, write):
     return sel
 
 
-def load_inputs(roots: Roots):
+def load_inputs(roots: Roots, run: str = 'retrieval'):
     qids = pq.read_table(QUERY_FILE, columns=['id']).column('id').to_pylist()
     if len(qids) != 1200:
         raise ValueError('need 1200 queries')
     slug = {int(q): v['appended'] for q, v in json.loads(SLUG.read_text('utf-8')).items()}
-    seg_dirs = sorted(p for p in roots.chunks.iterdir() if p.is_dir() and (p / 'docs.parquet').exists())
-    if len(seg_dirs) != 1:
-        raise ValueError(f'expected one chunked segment, found {len(seg_dirs)}')
-    t = pq.read_table(seg_dirs[0] / 'docs.parquet', columns=['doc_id', 'doc_ids_group'])
-    groups = dict(zip(t.column('doc_id').to_pylist(), t.column('doc_ids_group').to_pylist()))
-    rr = roots.run / 'retrieval' / 'rerank'
+    from .build import active_segments, zroots
+    groups = {}
+    for sg in active_segments(zroots(roots)):                 # every active segment (batch) contributes its docs
+        t = pq.read_table(roots.chunks / sg['name'] / 'docs.parquet', columns=['doc_id', 'doc_ids_group'])
+        for d, g in zip(t.column('doc_id').to_pylist(), t.column('doc_ids_group').to_pylist()):
+            if d in groups:
+                raise ValueError(f'doc {d} is in two active segments')
+            groups[d] = g
+    cfg = json.loads((roots.run / run / 'rerank' / 'config.json').read_text('utf-8'))
+    seg_names = [s['name'] for s in active_segments(zroots(roots))]
+    first = cfg['first_stage']
+    if (first.get('segments') or [first.get('segment')]) != seg_names:
+        raise ValueError(f'run {run} was built for {first.get("segments") or first.get("segment")}, active segments are {seg_names}')
+    rr = roots.run / run / 'rerank'
     ranking = {}
     for qid in qids:
         r = json.loads((rr / f'q{qid}.json').read_text('utf-8'))
@@ -103,7 +111,7 @@ def load_inputs(roots: Roots):
     return qids, slug, groups, ranking
 
 
-def run_variant(roots: Roots, base, variant, qids, slug, groups, ranking, *, plan=None, base_label=None):
+def run_variant(roots: Roots, base, variant, qids, slug, groups, ranking, *, plan=None, base_label=None, run='retrieval'):
     t0 = time.perf_counter()
     cc_ids = set(groups)
     out = roots.guard(roots.run / variant)
@@ -133,7 +141,7 @@ def run_variant(roots: Roots, base, variant, qids, slug, groups, ranking, *, pla
     lc_with_cc = sum(len([d for d in slug[q] if d in cc_ids]) for q in sel)
     picks = [d for s in sel.values() for d in s['cc_picks']]
     overlap = sum(d in set(slug[q]) for q, s in sel.items() for d in s['cc_picks'])
-    stats = {'variant': variant, 'diagnostic_only': True, 'LB': 'chua do', 'base': base_label or str(RD150), 'gate': gate, 'validator': validator,
+    stats = {'variant': variant, 'diagnostic_only': True, 'retrieval_run': run, 'cc_docs_available': len(groups), 'LB': 'chua do', 'base': base_label or str(RD150), 'gate': gate, 'validator': validator,
              'json_bytes': final_json.stat().st_size, 'json_sha256': sha256_file(final_json), 'zip_bytes': final_zip.stat().st_size,
              'zip_mib': round(final_zip.stat().st_size / 2 ** 20, 3), 'zip_sha256': sha256_file(final_zip),
              'zip_vs_largest_accepted_VS40_bytes': final_zip.stat().st_size - KNOWN_ACCEPTED_ZIP,
@@ -153,6 +161,8 @@ def run_variant(roots: Roots, base, variant, qids, slug, groups, ranking, *, pla
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--variants', nargs='+', default=list(VARIANTS), choices=VARIANTS)
+    ap.add_argument('--run', default='retrieval', help='retrieval run under out/runs/cc-longchau (default: the first-segment run of cc-A)')
+    ap.add_argument('--tag', default='', help='suffix of the output name, e.g. -n2 (the untagged names are the uploaded files)')
     a = ap.parse_args(argv)
     os.environ['HF_HUB_OFFLINE'] = os.environ['TRANSFORMERS_OFFLINE'] = '1'
     roots = Roots()
@@ -160,9 +170,9 @@ def main(argv=None):
     if sha256_file(RUNS_DIR / 'selective-check/VS-append/VS_append.json') != VS_APPEND_JSON_SHA256:
         raise ValueError('VS-append JSON SHA256 mismatch')
     base = pinned_base(RD150)
-    qids, slug, groups, ranking = load_inputs(roots)
+    qids, slug, groups, ranking = load_inputs(roots, a.run)
     for v in a.variants:
-        s = run_variant(roots, base, v, qids, slug, groups, ranking)
+        s = run_variant(roots, base, v + a.tag, qids, slug, groups, ranking, plan=v, run=a.run)
         print(json.dumps({k: s[k] for k in ('variant', 'zip_mib', 'zip_sha256', 'json_sha256', 'validator', 'gate', 'ids_appended_per_query',
                                             'slug_ids_replaced_pct_of_slug', 'cc_picks_also_in_slug_pct')}, indent=1))
     return 0

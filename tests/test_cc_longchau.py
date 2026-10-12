@@ -178,3 +178,34 @@ def test_priority_ids_fetched_first(tmp_path):
     F.run(roots, workers=1, shard_size=2, limit=2, client=client_for(roots, cc), priority_ids={12, 13})
     db = F.connect(roots)
     assert sorted(r[0] for r in db.execute("select url_id from fetch")) == [12, 13]
+
+
+# ---------------------------------------------------------------- VS-cc-B merge helpers
+import numpy as np  # noqa: E402
+
+from r2ai.cc_longchau import merge_b as MB  # noqa: E402
+
+
+def test_merge_query_is_exact_top_k_with_tie_rule():
+    vi = (np.array([1, 2, 3, 4]), np.array([.9, .8, .8, .1], np.float32), np.array([0, .5, .6, .7], np.float32))
+    cc = (np.array([MB.N_VI + 0, MB.N_VI + 1]), np.array([.8, .95], np.float32), np.array([.9, 0], np.float32))
+    ids, de, sp = MB.merge_query(vi, cc, k=2)
+    # dense top-2 = cc1 (.95), vi1 (.9); sparse top-2 = cc0 (.9), vi4 (.7); union keeps both scores of every member
+    assert ids.tolist() == [1, 4, MB.N_VI, MB.N_VI + 1]
+    assert de.tolist() == pytest.approx([.9, .1, .8, .95]) and sp.tolist() == pytest.approx([0, .7, .9, 0])
+    ids, _, _ = MB.merge_query(vi, cc, k=3)          # dense tie .8 (vi2, vi3, cc0): larger global id first -> cc0, vi3 ahead of vi2
+    assert set(ids.tolist()) >= {1, 3, MB.N_VI + 1, MB.N_VI}
+
+
+def test_hybrid_matches_reference_and_renorm_range_changes_order():
+    de, sp = np.array([1., .5, 0.], np.float32), np.array([0., .5, 1.], np.float32)
+    assert MB.hybrid(de, sp).tolist() == pytest.approx((.7 * (de - 0) / 1 + .3 * sp).tolist())
+    wide = MB.hybrid(de, sp, (0., 1., 0., 10.))           # a wider sparse range (as when CC chunks join) shrinks the sparse weight
+    assert wide.argmax() == 0 and MB.hybrid(de, sp).argmax() == 0
+
+
+def test_cached_reranker_refuses_unknown_pairs_in_gate_mode():
+    rr = MB.CachedReranker({(1, 5): 0.25}, fac=None, allow_new=False)
+    assert rr.score(1, 'q', [5]) == {5: 0.25} and rr.hit == 1
+    with pytest.raises(KeyError):
+        rr.score(1, 'q', [5, 6])

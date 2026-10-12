@@ -37,7 +37,7 @@ def _p(x):
     return str(resolve_path(x))
 
 
-def calibrate(cfg, target_mean, floor=20, ceil=150):
+def calibrate(cfg, target_mean, floor=20, ceil=150, base=None):
     """tau (2 decimals) whose mean kept primary docs/query, after protecting chunk docs, hits `target_mean` (same bisect as S5)."""
     s, rds, exp = cfg['submission'], cfg['postprocess']['rrf_doc_set'], cfg['postprocess']['expand_clusters']
     qids = sorted(int(x) for x in pq.read_table(QUERY_FILE, columns=['id'])['id'].to_pylist())
@@ -47,7 +47,7 @@ def calibrate(cfg, target_mean, floor=20, ceil=150):
     groups = V.load_groups(_p(s['chunks_dir']))
     of, members = V.load_clusters(_p(exp['clusters']), exp.get('scope', 'content'))
     cids = {}
-    with open(_p(BASE), encoding='utf-8') as f:
+    with open(base or _p(BASE), encoding='utf-8') as f:
         for line in f:
             line = line.strip()
             if line.startswith('{'):
@@ -71,7 +71,7 @@ def calibrate(cfg, target_mean, floor=20, ceil=150):
                                'protected_mean': float(np.mean([len(prot[q]) for q in qids]))}
 
 
-def build(target_mean, name):
+def build(target_mean, name, run='retrieval'):
     roots = Roots()
     roots.preflight()
     cfg = load_config(_p(CONFIG))
@@ -104,8 +104,8 @@ def build(target_mean, name):
         if full[:len(have)] != have:
             raise ValueError('slug_append changed the cut relevant_docs prefix')
         slug[row['id']] = full[len(have):]
-    qids, _, groups, ranking = load_inputs(roots)
-    stats = run_variant(roots, mid, name, qids, slug, groups, ranking, plan='VS-cc-A', base_label=f'{BASE} + doc cut A1 tau={tau}')
+    qids, _, groups, ranking = load_inputs(roots, run)
+    stats = run_variant(roots, mid, name, qids, slug, groups, ranking, plan='VS-cc-A', base_label=f'{BASE} + doc cut A1 tau={tau}', run=run)
     stats |= {'doc_cut': st1.get('doc_cut'), 'tau': tau, 'target_mean': target_mean, 'mean_primary_after_cut': mean, 'calibration': info,
               'slug_per_query_mean_before_cc_filter': float(np.mean([len(v) for v in slug.values()]))}
     atomic_json(roots, out / 'stats.json', stats)
@@ -119,10 +119,12 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--target-mean', type=float, default=115)
     ap.add_argument('--name', default=None)
+    ap.add_argument('--run', default='retrieval', help='retrieval run under out/runs/cc-longchau')
+    ap.add_argument('--tag', default='', help='suffix of the output name, e.g. -n2')
     a = ap.parse_args(argv)
     os.environ['HF_HUB_OFFLINE'] = os.environ['TRANSFORMERS_OFFLINE'] = '1'
-    name = a.name or f'VS-cc-A-cut{int(a.target_mean)}'
-    s = build(a.target_mean, name)
+    name = a.name or f'VS-cc-A-cut{int(a.target_mean)}{a.tag}'
+    s = build(a.target_mean, name, a.run)
     print(json.dumps({k: s[k] for k in ('variant', 'tau', 'mean_primary_after_cut', 'zip_bytes', 'zip_mib', 'zip_sha256', 'json_sha256',
                                         'validator', 'gate', 'relevant_docs_per_query', 'ids_appended_per_query', 'doc_cut')}, indent=1))
     return 0

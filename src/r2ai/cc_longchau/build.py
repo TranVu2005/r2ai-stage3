@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import time
 
 import numpy as np
@@ -29,37 +30,82 @@ def zroots(roots: Roots) -> ZRoots:
     return ZRoots(docs=roots.docs, chunks=roots.chunks, index=roots.index, run=roots.run, state=roots.state)
 
 
-def ensure_segment(zr: ZRoots) -> dict:
-    """Segment row with id SEGMENT_ID (allocated once; later calls return the same row)."""
+def ensure_segment(zr: ZRoots, batch: str = BATCH, *, create=True) -> dict:
+    """Segment row of `batch` (allocated once). The first batch gets id SEGMENT_ID; later batches the next AUTOINCREMENT ids,
+    so earlier segments are never overwritten and global chunk ids never clash."""
     c = I.connect(zr)
     try:
-        row = c.execute("SELECT segment_id, name, status FROM segments WHERE batch=? AND domain=? AND status!='retired'", (BATCH, DOMAIN)).fetchone()
+        row = c.execute("SELECT segment_id, name, status FROM segments WHERE batch=? AND domain=? AND status!='retired'", (batch, DOMAIN)).fetchone()
         if row:
             return {'segment_id': row[0], 'name': row[1], 'status': row[2]}
-        if c.execute('SELECT 1 FROM segments').fetchone():
-            raise ValueError('manifest already holds other segments; refusing to allocate')
-        with c:
-            c.execute("UPDATE sqlite_sequence SET seq=? WHERE name='segments'", (SEGMENT_ID - 1,))
+        if not create:
+            raise ValueError(f'no segment for batch {batch}')
+        first = not c.execute('SELECT 1 FROM segments').fetchone()
+        if first:
+            if batch != BATCH:
+                raise ValueError(f'the first batch must be {BATCH}')
+            with c:
+                c.execute("UPDATE sqlite_sequence SET seq=? WHERE name='segments'", (SEGMENT_ID - 1,))
     finally:
         c.close()
-    seg = I.allocate_segment(zr, BATCH, DOMAIN, kind='cc')
-    if seg['segment_id'] != SEGMENT_ID:
+    seg = I.allocate_segment(zr, batch, DOMAIN, kind='cc')
+    if first and seg['segment_id'] != SEGMENT_ID:
         raise ValueError(f'segment id {seg["segment_id"]} != {SEGMENT_ID}')
     return {**seg, 'status': 'allocated'}
 
 
-def chunk(roots: Roots, *, batch_docs=5000) -> dict:
-    import shutil
+def active_segments(zr: ZRoots) -> list[dict]:
+    """Active segments of the manifest ordered by segment id (= global chunk id order)."""
+    c = I.connect(zr)
+    try:
+        rows = c.execute("SELECT segment_id, name, batch, rows, docs_count FROM segments WHERE status='active' ORDER BY segment_id").fetchall()
+    finally:
+        c.close()
+    return [dict(zip(('segment_id', 'name', 'batch', 'rows', 'docs'), r)) for r in rows]
+
+
+def other_segments(zr: ZRoots, batch: str) -> list[dict]:
+    """Chunked or active segments of the other batches (their docs files are not part of `batch`)."""
+    c = I.connect(zr)
+    try:
+        rows = c.execute("SELECT segment_id, name, batch FROM segments WHERE status IN ('chunked','active') AND batch!=? ORDER BY segment_id", (batch,)).fetchall()
+    finally:
+        c.close()
+    return [dict(zip(('segment_id', 'name', 'batch'), r)) for r in rows]
+
+
+def docs_files_of(roots: Roots, segment_name: str) -> list[str]:
+    """Docs parquet files that fed a segment (docs_files.json; first batch: rebuilt from its docs.parquet doc ids)."""
+    f = roots.chunks / segment_name / 'docs_files.json'
+    if f.exists():
+        return json.loads(f.read_text('utf-8'))
+    ids = set(pq.read_table(roots.chunks / segment_name / 'docs.parquet', columns=['doc_id']).column('doc_id').to_pylist())
+    out = [p.name for p in sorted(roots.docs.glob('*.parquet'))
+           if {r[0] for r in pq.read_table(p, columns=['doc_ids']).column('doc_ids').to_pylist()} <= ids]
+    atomic_json(roots, f, out)
+    return out
+
+
+def chunk(roots: Roots, *, batch: str = BATCH, batch_docs=5000) -> dict:
     from r2ai.index.chunk import main as chunk_main
     zr = zroots(roots)
     roots.preflight()
-    seg = ensure_segment(zr)
+    done = {f for sg in other_segments(zr, batch) for f in docs_files_of(roots, sg['name'])}
+    seg = ensure_segment(zr, batch)
     if seg['status'] != 'allocated':
         return seg
     name = seg['name']
     ver = json.loads((roots.run / 'extract_summary.json').read_text(encoding='utf-8'))
     version = f'{ver["extractor"]}+trafilatura-{ver["trafilatura"]}'
-    files = sorted(roots.docs.glob('*.parquet'))
+    files = [p for p in sorted(roots.docs.glob('*.parquet')) if p.name not in done]
+    if not files:
+        raise ValueError('no new docs files for this batch')
+    src = roots.guard(roots.docs / f'_batch_{batch}')
+    if src.exists():
+        shutil.rmtree(src)
+    src.mkdir()
+    for p in files:
+        os.link(p, src / p.name)
     ids = []
     for f in files:
         for r in pq.read_table(f, columns=['doc_ids', 'status', 'n_tokens_bge_m3', 'body']).to_pylist():
@@ -74,13 +120,15 @@ def chunk(roots: Roots, *, batch_docs=5000) -> dict:
         shutil.rmtree(staging)
     staging.mkdir(parents=True)
     t0 = time.perf_counter()
-    chunk_main(['--docs-dir', str(roots.docs), '--out-dir', str(staging), '--targets', str(I.TARGET),
+    chunk_main(['--docs-dir', str(src), '--out-dir', str(staging), '--targets', str(I.TARGET),
                 '--min-body-tokens', str(I.MIN_BODY_TOKENS), '--batch-docs', str(batch_docs)])
     report = json.loads((staging / 'chunk_report.json').read_text(encoding='utf-8'))
     cfg = report['configs'][str(I.TARGET)]
     if cfg['verbatim_ok'] != f"{cfg['chunks_all']}/{cfg['chunks_all']}":
         raise ValueError(f'verbatim gate failed: {cfg["verbatim_ok"]}')
     os.replace(staging, out)
+    atomic_json(roots, out / 'docs_files.json', [p.name for p in files])
+    shutil.rmtree(src)
     cf = out / f'chunks_t{I.TARGET}.parquet'
     chunker = {'target': I.TARGET, 'min_body_tokens': I.MIN_BODY_TOKENS, 'batch_docs': batch_docs, 'module': 'r2ai.index.chunk'}
     stats = {'chunk_seconds': time.perf_counter() - t0, 'docs': report['docs'], 'chunks': cfg['chunks_all'], 'eligible_docs': len(ids)}
@@ -89,18 +137,18 @@ def chunk(roots: Roots, *, batch_docs=5000) -> dict:
     return {**seg, 'status': 'chunked', **stats}
 
 
-def embed(roots: Roots, *, min_available_gib=3.0, max_pauses=400) -> dict:
+def embed(roots: Roots, *, batch: str = BATCH, min_available_gib=3.0, max_pauses=400) -> dict:
     zr = zroots(roots)
     roots.preflight()
-    seg = ensure_segment(zr)
+    seg = ensure_segment(zr, batch, create=False)
     return I.embed_segment(zr, seg['name'], memory=MemoryGuard(zr, minimum_gib=min_available_gib, max_pauses=max_pauses))
 
 
-def verify(roots: Roots) -> dict:
+def verify(roots: Roots, *, batch: str = BATCH) -> dict:
     """No GPU. Chunk text verbatim vs docs.parquet doc_text; segment shape/ids/norms/NaN/sparse vs chunks; SHA of chunks file."""
     from r2ai.index.segments import load_segment
     zr = zroots(roots)
-    seg = ensure_segment(zr)
+    seg = ensure_segment(zr, batch, create=False)
     c = I.connect(zr)
     try:
         rec = c.execute('SELECT status, rows, docs_count, chunks_sha256, global_start FROM segments WHERE name=?', (seg['name'],)).fetchone()
@@ -120,19 +168,20 @@ def verify(roots: Roots) -> dict:
         s = load_segment(roots.index / seg['name'])
         dense = np.asarray(s.dense[:], dtype=np.float32)
         norms = np.linalg.norm(dense, axis=1)
-        out.update(segment_rows=len(s), global_start_ok=s.global_start == global_start(SEGMENT_ID), dense_nan=int((~np.isfinite(dense)).sum()),
+        out.update(segment_rows=len(s), global_start_ok=s.global_start == global_start(seg['segment_id']), dense_nan=int((~np.isfinite(dense)).sum()),
                    norm_min=float(norms.min()), norm_max=float(norms.max()),
                    doc_id_match=bool(np.array_equal(np.asarray(s.doc_id, dtype=np.int64), pq.read_table(cf, columns=['doc_id']).column(0).to_numpy())),
                    sparse_empty_rows=int((np.diff(np.asarray(s.sparse[2])) == 0).sum()), sparse_nnz=int(len(s.sparse[0])))
-    atomic_json(roots, roots.run / 'verify.json', out)
+    atomic_json(roots, roots.run / ('verify.json' if batch == BATCH else f'verify_{batch}.json'), out)
     return out
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('step', choices=['chunk', 'embed', 'verify'])
+    ap.add_argument('--batch', default=BATCH, help=f'batch label (default {BATCH}); later batches e.g. cc-longchau-b2')
     a = ap.parse_args(argv)
-    r = {'chunk': chunk, 'embed': embed, 'verify': verify}[a.step](Roots())
+    r = {'chunk': chunk, 'embed': embed, 'verify': verify}[a.step](Roots(), batch=a.batch)
     print(json.dumps(r, indent=1, default=str))
     return 0
 

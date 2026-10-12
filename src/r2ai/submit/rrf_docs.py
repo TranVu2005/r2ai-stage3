@@ -67,12 +67,12 @@ def rank_dist(x) -> dict:
 
 
 def rrf_doc_submission(base_json, out_zip, *, chunks, runs_dir, doc_ranking, hybrid_ranks, rerank_run, queries, chunks_dir,
-                       docs_dir, clusters, scope='content', k_cache=100, k_total=150, k_docs=150, k_chunk=50, rrf_k=60) -> dict:
+                       docs_dir, clusters, scope='content', k_cache=100, k_total=150, k_docs=150, k_chunk=50, rrf_k=60, cut=None) -> dict:
     """base JSON -> out_zip + its .json (see the module doc); returns the stats."""
     from types import SimpleNamespace
     a = SimpleNamespace(base=base_json, out=out_zip, chunks=chunks, runs_dir=runs_dir, doc_ranking=doc_ranking,
                         hybrid_ranks=hybrid_ranks, rerank_run=rerank_run, queries=queries, chunks_dir=chunks_dir, docs_dir=docs_dir,
-                        clusters=clusters, scope=scope, k_cache=k_cache, k_total=k_total, k_docs=k_docs, k_chunk=k_chunk, rrf_k=rrf_k)
+                        clusters=clusters, scope=scope, k_cache=k_cache, k_total=k_total, k_docs=k_docs, k_chunk=k_chunk, rrf_k=rrf_k, cut=cut)
     return _build(a)
 
 
@@ -92,6 +92,36 @@ def _build(a) -> dict:
     d50 = V.d50_docs(top, rest, a.k_total)
     groups = V.load_groups(a.chunks_dir)
     of, members = V.load_clusters(a.clusters, a.scope)
+    cut_stats = None
+    if getattr(a, 'cut', None):                     # opt-in adaptive cut (r2ai.submit.doc_cut), before the cluster expand
+        from r2ai.submit.doc_cut import pool_scores
+        chunk_ids = {}
+        with open(a.base, 'r', encoding='utf-8', newline='') as fb:
+            for line in fb:
+                line = line.strip()
+                if line.startswith('{'):
+                    r0 = json.loads(line.rstrip(','))
+                    chunk_ids[r0['id']] = {int(c['doc_id']) for c in r0['relevant_chunks']}
+        def covers(d):
+            ids = {int(x) for x in groups[d]}
+            c = of.get(d)
+            if c is not None:
+                ids |= {int(x) for m in members[c] for x in groups.get(m, [m])}
+            return ids
+        sc, kept, hf, hc, n_prot = pool_scores(a.rerank_run), {}, 0, 0, []
+        for q in qids:
+            prot = {d for d in docs[q] if chunk_ids[q] & covers(d)}
+            n_prot.append(len(prot))
+            kept[q], f, c = a.cut(docs[q], sc[q], prot)
+            hf, hc = hf + f, hc + c
+        n_cut = np.array([len(kept[q]) for q in qids], dtype=float)
+        cut_stats = {'primary_before_mean': round(float(np.mean([len(docs[q]) for q in qids])), 3),
+                     'primary_after_mean': round(float(n_cut.mean()), 3),
+                     'p10': float(np.percentile(n_cut, 10)), 'p50': float(np.percentile(n_cut, 50)), 'p90': float(np.percentile(n_cut, 90)),
+                     'queries_logit_rule_at_floor': hf, 'queries_logit_rule_at_ceil': hc,
+                     'protected_docs_mean': round(float(np.mean(n_prot)), 3),
+                     'queries_at_protect_min': int(sum(len(kept[q]) <= p for q, p in zip(qids, n_prot)))}
+        docs = kept
     extra = V.expand_lists(docs, of, members, groups)
     chunk_docs = {q: rrf_docs(pool[q], rr.get(q, {}), hy.get(q, {}), a.k_chunk, a.rrf_k) for q in qids} if a.chunks == 'rrf' else {}
     full, src = ({}, {})
@@ -147,6 +177,8 @@ def _build(a) -> dict:
          'docs_same_as_r150': dist(same_r), 'docs_not_in_r150': dist(not_r),
          'expand_ids_added': dist(len(extra[q]) for q in qids),
          'chunk_docs_outside_relevant_docs': {'total': int(sum(out_docs)), 'queries': out_q}}
+    if cut_stats:
+        m['doc_cut'] = cut_stats
     if a.chunks == 'rrf':
         m |= {'chunk_docs_changed_vs_base': dist(changed), 'docs_missing_text': missing, 'full_text_sources': src}
     m |= {'json_bytes': out_json.stat().st_size, 'json_sha256': R._sha256(out_json), 'zip_bytes': out_zip.stat().st_size,

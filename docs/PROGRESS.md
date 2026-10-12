@@ -262,6 +262,21 @@ Hai dòng ❓ từ CONTEXT:
 - D5: bỏ `qihuangzhishu` khỏi kế hoạch ingest/crawl.
 - D6: `b002` chỉ gồm `120ask` và `cnkang`.
 
+### upload-probe (S7, 13/10/2026)
+
+Tạo worktree `upload-probe` trên `483f4df` (A1-115 mặc định). K50 gate chạy bằng CLI chuẩn trong **431,1 s CPU**: JSON SHA256 `4ffbba8bceebb1a94565a819ab2385d1cdaa199c13d714c59fcb09631ed82c82`, ZIP SHA256 `666f74f5a7be0f7e2a3550501d0347b0fcbd07b42ad4375690717d24c1971c80` (đúng gate). P60/P75/P100 dùng cùng pipeline A1-115, full body như VS-append, chỉ đổi `--k-chunk`; doc-cut target mean 115, floor 20, ceiling 150, bảo vệ doc có chunk. Doc-cut primary mean đo được lần lượt 115,003 / 115,062 / 115,043 / 115,002 doc/query; bảng dưới đo số doc cuối sau expand/slug và bảo vệ.
+
+Query/corpus được đọc chỉ từ `D:/GitHub/r2ai-stage3-old/data/raw/`; cache, chunks, docs đọc từ NEW `D:/GitHub/r2ai-stage3/`. Lần chạy CLI đầu import nhầm editable package ở checkout chính; xác minh traceback và khắc phục bằng `PYTHONPATH=<worktree>/src`. Validator cuối chạy trên source worktree. Tất cả ZIP dùng DEFLATE mức 9, một JSON top-level, không thư mục con. Validator mặc định: 1.200 ID, 0 lỗi, verbatim 100%; chunk ngoài `relevant_docs` = 0. Chỉ CPU; không chạy scoring/model, không upload/push.
+
+| File | K | chunk/query TB (min–max) | doc/query TB cuối | JSON MB (10^6) | ZIP MiB / MB | ZIP byte | SHA256 | validator mặc định |
+|---|---:|---:|---:|---:|---:|---:|---|---|
+| `K50/sub_A1-115.zip` | 50 | 50 (50–50) | 136,483 | 402,302189 | 96,861 / 101,565905 | 101.565.905 | `666f74f5a7be0f7e2a3550501d0347b0fcbd07b42ad4375690717d24c1971c80` | 60.000 chunk, 0 lỗi |
+| `P60/sub_P60.zip` | 60 | 60 (60–60) | 136,514 | 481,105776 | 115,980 / 121,614100 | 121.614.100 | `7499fda93f0b45569646fd9918bed559d72f4f82377eccaef641877a6abf4af5` | 72.000 chunk, 0 lỗi |
+| `P75/sub_P75.zip` | 75 | 75 (75–75) | 136,455 | 599,221799 | 144,747 / 151,778512 | 151.778.512 | `aa92df644b5e4b142a31f9eaa156f1e2a5a0de956f60163fda96c2ffa77d6706` | 90.000 chunk, 0 lỗi |
+| `P100/sub_P100.zip` | 100 | 99,974 (79–100) | 136,313 | 792,615451 | 192,144 / 201,477743 | 201.477.743 | `7cefc99939150d46247e976d6810b77d4d3a4d0d7b4564532fc14ccdc9db3922` | 119.969 chunk, 0 lỗi |
+
+Artifact nằm trong `out/upload-probe/` (ignored); không commit corpus/cache/output.
+
 ## 7. Blockers
 
 1. **Recall còn thấp** (bản tốt nhất đã đo VS-append): Doc R 0,3716, Chunk R 0,2199 (chunk giống RD150). Độ phủ index NEW 623.805 doc / 4.394.718 URL corpus ≈ 14,2%; phần gold thiếu phần lớn nằm ngoài index (ước tính, không phải số đo).
@@ -342,3 +357,4 @@ Hai dòng ❓ từ CONTEXT:
 | 2026-10-13 | Claude Sonnet 5.5 | S3 nhánh `cc-longchau` (`89e269d`, `903207e`, `07b7ce7`; merge `doc-cut` `d0dd797`): module `r2ai.cc_longchau` (fetch Range có backoff/resume, extract `generic`, chunk t256, embed segment 20000 có kiểm toàn vẹn khối, first-stage + rerank, VS-cc-A / union / A-cut115). Nhóm ưu tiên 1 (11.207 URL slug có bản CC) fetch xong; segment 15.820 doc / 168.120 chunk; VS-cc-A 0,2223 và union 0,2200 (người dùng cung cấp); cc-A-cut115 (τ −1,66, 136,48 id/query, ZIP 96,861 MiB) sinh, chưa nộp. Fetch nhóm 2 chạy tiếp; VS-cc-B chưa làm. Không push. |
 | 2026-10-13 | Claude Sonnet 5.5 | S3: ghi điểm LB cc-A-cut115 (Final 0,2279, Doc F2 0,2593 · P 0,1603 · R 0,3630, người dùng cung cấp; (0,2593 + 0,1964)/2 = 0,22785) = bản tốt nhất đã đo; 37 lượt trên nhánh `cc-longchau`; `submission-best.yaml` chưa đổi (S6 hợp nhất). Chỉ sửa tài liệu; không nộp/push/merge. |
 | 2026-10-13 | Claude Sonnet 5.5 | S3: bước 2 và 3. Đợt ingest `r2ai.cc_longchau.batch` (segment mới, không ghi đè segment 20000; logit rerank cũ tái dùng: đợt b2 chỉ 44.395/401.470 cặp mới) chạy thử với b2. VS-cc-B sau cờ (`merge_b`, `build_b`; `slug_append(exclude_ids=None)` mặc định tắt): gate vi-only tái tạo `vi_k100.parquet` của deep và rerank200 giống bit; replay VS-append JSON `9c91c952…43e2e0` khớp; full suite pass. Sinh VS-cc-B (99,771 MiB), B-cut115 (99,584 MiB), B-k48 (95,820 MiB), B-cut115-k48 (95,631 MiB), chưa nộp. Chi tiết `submissions/LOG.md`. Không push/merge. |
+| 2026-10-13 03:04 | GPT-6 (Codex) | S7 upload-probe trên worktree `upload-probe` từ `483f4df`: K50 CLI A1-115 khớp JSON/ZIP SHA gate; sinh P60/P75/P100 chỉ đổi K, CPU, doc-cut mean 115 có bảo vệ chunk-doc; validator mặc định bốn file 0 lỗi/verbatim 100%; ghi bảng byte/MiB/MB và hash tại §6. Chẩn đoán import editable nhầm checkout chính, khóa `PYTHONPATH` về worktree. Không score/model, upload hoặc push. HEAD trước cập nhật: `483f4df9b7f32b76a7269e5d6a511ad3b579a7f3`. |

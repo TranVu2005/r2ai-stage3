@@ -206,11 +206,18 @@ def _commit(roots: Roots, db, results: list[dict], records: list[dict]):
         raise
 
 
-def run(roots: Roots, *, limit=None, workers=4, rps=4.0, shard_size=500, client=None, targets=None) -> dict:
+def slug_priority_ids(path) -> set:
+    """Doc ids that VS-append appended through slug_append (union over the 1,200 queries)."""
+    return {int(d) for v in json.loads(Path(path).read_text('utf-8')).values() for d in v['appended']}
+
+
+def run(roots: Roots, *, limit=None, workers=4, rps=4.0, shard_size=500, client=None, targets=None, priority_ids=None) -> dict:
     roots.preflight()
     targets = load_targets(roots) if targets is None else targets
     db = connect(roots)
     todo = pending_targets(roots, db, targets)
+    if priority_ids:                                         # stable: priority URLs first, each group in url_id order
+        todo = todo.assign(_p=~todo.url_id.isin(priority_ids)).sort_values(['_p', 'url_id'], kind='stable').drop(columns='_p')
     if limit is not None:
         todo = todo.head(limit)
     ledger = Ledger(roots.guard(roots.run / 'fetch_ledger.json'), max_bytes=MAX_BYTES, max_requests=MAX_REQUESTS)
@@ -251,13 +258,15 @@ def main(argv=None):
     ap.add_argument('--rps', type=float, default=4.0)
     ap.add_argument('--shard-size', type=int, default=500)
     ap.add_argument('--dry-run', action='store_true')
+    ap.add_argument('--priority-slug', help='query_append.json of VS-append: fetch its ids first')
     a = ap.parse_args(argv)
     roots = Roots()
     if a.dry_run:
         t = load_targets(roots)
         print(json.dumps({'targets': len(t), 'warc_bytes': int(t.warc_record_length.sum()), 'by_crawl': t.crawl.value_counts().to_dict()}, indent=1))
         return 0
-    print(json.dumps(run(roots, limit=a.limit, workers=a.workers, rps=a.rps, shard_size=a.shard_size), indent=1))
+    print(json.dumps(run(roots, limit=a.limit, workers=a.workers, rps=a.rps, shard_size=a.shard_size,
+                         priority_ids=slug_priority_ids(a.priority_slug) if a.priority_slug else None), indent=1))
     return 0
 
 

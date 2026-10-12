@@ -89,11 +89,11 @@ def chunk(roots: Roots, *, batch_docs=5000) -> dict:
     return {**seg, 'status': 'chunked', **stats}
 
 
-def embed(roots: Roots) -> dict:
+def embed(roots: Roots, *, min_available_gib=3.0, max_pauses=400) -> dict:
     zr = zroots(roots)
     roots.preflight()
     seg = ensure_segment(zr)
-    return I.embed_segment(zr, seg['name'], memory=MemoryGuard(zr))
+    return I.embed_segment(zr, seg['name'], memory=MemoryGuard(zr, minimum_gib=min_available_gib, max_pauses=max_pauses))
 
 
 def verify(roots: Roots) -> dict:
@@ -123,7 +123,7 @@ def verify(roots: Roots) -> dict:
         out.update(segment_rows=len(s), global_start_ok=s.global_start == global_start(SEGMENT_ID), dense_nan=int((~np.isfinite(dense)).sum()),
                    norm_min=float(norms.min()), norm_max=float(norms.max()),
                    doc_id_match=bool(np.array_equal(np.asarray(s.doc_id, dtype=np.int64), pq.read_table(cf, columns=['doc_id']).column(0).to_numpy())),
-                   sparse_empty_rows=int((np.diff(s.sparse.indptr) == 0).sum()) if hasattr(s, 'sparse') else None)
+                   sparse_empty_rows=int((np.diff(np.asarray(s.sparse[2])) == 0).sum()), sparse_nnz=int(len(s.sparse[0])))
     atomic_json(roots, roots.run / 'verify.json', out)
     return out
 

@@ -151,7 +151,7 @@ def test_plan_replace_vs_union():
     tail, picks, removed = A.plan_query('VS-cc-A', [1, 2], slug, cc, ranked)
     assert removed == [101, 102] and picks == [103, 101] and tail == [7, 8, 103, 101]
     tail, picks, removed = A.plan_query('VS-cc-A-union', [1, 2], slug, cc, ranked)
-    assert picks == [103, 104] and tail == slug + [103, 104] and removed == []
+    assert picks == [103, 101] and tail == slug + [103] and removed == []      # same picks as VS-cc-A; 101 is already a slug id
     tail, picks, _ = A.plan_query('VS-cc-A', [103], slug, cc, ranked)       # a doc already in RD150 is never picked
     assert 103 not in tail
 
@@ -169,3 +169,12 @@ def test_render_keeps_rd150_bytes():
     assert out[0]['relevant_docs'] == [1, 2, 7, 103] and out[1]['relevant_docs'] == [3, 101]
     assert out[0]['relevant_chunks'] == rows[0]['relevant_chunks']
     assert verify_gate(base, buf.getvalue(), sel)['queries'] == 2
+
+
+def test_priority_ids_fetched_first(tmp_path):
+    recs = [record(u) for u in U]
+    cc = Cc(recs)
+    roots = roots_for(tmp_path, U, cc.spans)
+    F.run(roots, workers=1, shard_size=2, limit=2, client=client_for(roots, cc), priority_ids={12, 13})
+    db = F.connect(roots)
+    assert sorted(r[0] for r in db.execute("select url_id from fetch")) == [12, 13]

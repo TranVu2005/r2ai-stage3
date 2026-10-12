@@ -2,7 +2,7 @@
 
   VS-cc-A        RD150 + [VS-append slug ids of every query that are NOT longchau docs with CC text] + the top-n CC docs by
                  max reranker logit (dense branch, not already present), n = number of slug ids removed (count preserved).
-  VS-cc-A-union  RD150 + all 20 slug ids of VS-append (unchanged) + the same CC picks (dedup by doc id).
+  VS-cc-A-union  RD150 + all 20 slug ids of VS-append (unchanged) + the same CC picks as VS-cc-A (dedup by doc id).
 relevant_chunks stay RD150's byte for byte (gate); no GPU, no model call here (the rerank cache comes from retrieve.py).
 
   python -m r2ai.cc_longchau.append_cc [--variants VS-cc-A VS-cc-A-union]
@@ -50,7 +50,7 @@ def plan_query(variant, rd150_ids, slug, cc_ids, ranked):
     replaced = [d for d in slug if d in cc_ids]
     kept = [d for d in slug if d not in cc_ids]
     n = len(replaced)
-    block = set(have) | (set(kept) if variant == 'VS-cc-A' else set(slug))
+    block = set(have) | set(kept)                 # same CC picks in both variants; union only differs in what it keeps
     picks = []
     for d in ranked:
         if len(picks) >= n:
@@ -59,7 +59,7 @@ def plan_query(variant, rd150_ids, slug, cc_ids, ranked):
             picks.append(d)
     if variant == 'VS-cc-A':
         return kept + picks, picks, replaced
-    return list(slug) + picks, picks, []
+    return list(slug) + [d for d in picks if d not in set(slug)], picks, []
 
 
 def render(base, variant, slug_by_q, cc_ids, ranking, groups, write):

@@ -1,4 +1,4 @@
-from r2ai.submit.doc_cut import cut_a1, cut_a2, make_cut
+from r2ai.submit.doc_cut import calibrate_tau_a1, cut_a1, cut_a2, make_cut
 
 DOCS = list(range(100, 130))                       # RRF order
 SCORE = {d: 5.0 - i * 0.2 for i, d in enumerate(DOCS)}   # logit falls 0.2 per doc
@@ -35,3 +35,12 @@ def test_make_cut_default_off_and_errors():
         pass
     else:
         raise AssertionError
+
+
+def test_calibrate_tau_a1_targets_mean_after_protected_docs():
+    docs = {1: list(range(10)), 2: list(range(10))}
+    scores = {q: {d: 10.0 - d for d in ids} for q, ids in docs.items()}
+    protect = {1: {9}, 2: {8, 9}}
+    tau = calibrate_tau_a1(docs, scores, target_mean=5.5, floor=2, ceil=10, protect=protect)
+    kept = [cut_a1(docs[q], scores[q], tau, floor=2, ceil=10, protect=protect[q])[0] for q in docs]
+    assert sum(map(len, kept)) / len(kept) == 5.5

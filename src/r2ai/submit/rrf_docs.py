@@ -67,12 +67,15 @@ def rank_dist(x) -> dict:
 
 
 def rrf_doc_submission(base_json, out_zip, *, chunks, runs_dir, doc_ranking, hybrid_ranks, rerank_run, queries, chunks_dir,
-                       docs_dir, clusters, scope='content', k_cache=100, k_total=150, k_docs=150, k_chunk=50, rrf_k=60, cut=None) -> dict:
+                       docs_dir, clusters, scope='content', k_cache=100, k_total=150, k_docs=150, k_chunk=50, rrf_k=60, cut=None,
+                       doc_cut_target_mean=None, doc_cut_tau=None, doc_cut_floor=20, doc_cut_ceil=150, doc_cut_protect_chunks=True) -> dict:
     """base JSON -> out_zip + its .json (see the module doc); returns the stats."""
     from types import SimpleNamespace
     a = SimpleNamespace(base=base_json, out=out_zip, chunks=chunks, runs_dir=runs_dir, doc_ranking=doc_ranking,
                         hybrid_ranks=hybrid_ranks, rerank_run=rerank_run, queries=queries, chunks_dir=chunks_dir, docs_dir=docs_dir,
-                        clusters=clusters, scope=scope, k_cache=k_cache, k_total=k_total, k_docs=k_docs, k_chunk=k_chunk, rrf_k=rrf_k, cut=cut)
+                        clusters=clusters, scope=scope, k_cache=k_cache, k_total=k_total, k_docs=k_docs, k_chunk=k_chunk, rrf_k=rrf_k,
+                        cut=cut, doc_cut_target_mean=doc_cut_target_mean, doc_cut_tau=doc_cut_tau, doc_cut_floor=doc_cut_floor,
+                        doc_cut_ceil=doc_cut_ceil, doc_cut_protect_chunks=doc_cut_protect_chunks)
     return _build(a)
 
 
@@ -93,7 +96,9 @@ def _build(a) -> dict:
     groups = V.load_groups(a.chunks_dir)
     of, members = V.load_clusters(a.clusters, a.scope)
     cut_stats = None
-    if getattr(a, 'cut', None):                     # opt-in adaptive cut (r2ai.submit.doc_cut), before the cluster expand
+    target_mean = getattr(a, 'doc_cut_target_mean', None)
+    abs_tau = getattr(a, 'doc_cut_tau', None)
+    if getattr(a, 'cut', None) or target_mean is not None or abs_tau is not None:  # opt-in; before cluster expansion
         from r2ai.submit.doc_cut import pool_scores
         chunk_ids = {}
         with open(a.base, 'r', encoding='utf-8', newline='') as fb:
@@ -108,11 +113,27 @@ def _build(a) -> dict:
             if c is not None:
                 ids |= {int(x) for m in members[c] for x in groups.get(m, [m])}
             return ids
-        sc, kept, hf, hc, n_prot = pool_scores(a.rerank_run), {}, 0, 0, []
+        sc, kept, hf, hc, n_prot, protections = pool_scores(a.rerank_run), {}, 0, 0, [], {}
         for q in qids:
-            prot = {d for d in docs[q] if chunk_ids[q] & covers(d)} if getattr(a.cut, 'protect_chunks', True) else set()
+            protect_chunks = getattr(a.cut, 'protect_chunks', getattr(a, 'doc_cut_protect_chunks', True))
+            prot = {d for d in docs[q] if chunk_ids[q] & covers(d)} if protect_chunks else set()
             n_prot.append(len(prot))
-            kept[q], f, c = a.cut(docs[q], sc[q], prot)
+            protections[q] = prot
+        tau = None
+        cut = getattr(a, 'cut', None)
+        if target_mean is not None:
+            from r2ai.submit.doc_cut import calibrate_tau_a1, make_cut
+            tau = calibrate_tau_a1(docs, sc, target_mean=target_mean, floor=a.doc_cut_floor, ceil=a.doc_cut_ceil,
+                                   protect=protections if protect_chunks else None)
+            cut = make_cut('a1', tau=tau, floor=a.doc_cut_floor, ceil=a.doc_cut_ceil, protect_chunks=protect_chunks)
+        elif abs_tau is not None:
+            from r2ai.submit.doc_cut import make_cut
+            tau = abs_tau
+            cut = make_cut('a1', tau=tau, floor=a.doc_cut_floor, ceil=a.doc_cut_ceil, protect_chunks=protect_chunks)
+        if cut is None:
+            raise ValueError('doc-cut needs a cut function, --doc-cut-target-mean, or --doc-cut-tau')
+        for q in qids:
+            kept[q], f, c = cut(docs[q], sc[q], protections[q])
             hf, hc = hf + f, hc + c
         n_cut = np.array([len(kept[q]) for q in qids], dtype=float)
         cut_stats = {'primary_before_mean': round(float(np.mean([len(docs[q]) for q in qids])), 3),
@@ -121,6 +142,9 @@ def _build(a) -> dict:
                      'queries_logit_rule_at_floor': hf, 'queries_logit_rule_at_ceil': hc,
                      'protected_docs_mean': round(float(np.mean(n_prot)), 3),
                      'queries_at_protect_min': int(sum(len(kept[q]) <= p for q, p in zip(qids, n_prot)))}
+        if tau is not None:
+            cut_stats['tau'] = tau
+            cut_stats['target_mean'] = target_mean
         docs = kept
     extra = V.expand_lists(docs, of, members, groups)
     chunk_docs = {q: rrf_docs(pool[q], rr.get(q, {}), hy.get(q, {}), a.k_chunk, a.rrf_k) for q in qids} if a.chunks == 'rrf' else {}
@@ -215,7 +239,14 @@ def main(argv=None):
     b.add_argument('--k-docs', type=int, default=150)
     b.add_argument('--k-chunk', type=int, default=50)
     b.add_argument('--rrf-k', type=int, default=60)
+    cut = b.add_mutually_exclusive_group()
+    cut.add_argument('--doc-cut-target-mean', type=float, help='bisect A1 tau to target this mean primary docs/query')
+    cut.add_argument('--doc-cut-tau', type=float, help='absolute A1 reranker-logit threshold')
+    b.add_argument('--doc-cut-floor', type=int, default=20)
+    b.add_argument('--doc-cut-ceil', type=int, default=150)
+    b.add_argument('--allow-chunk-outside-docs', action='store_true', help='do not protect docs that own retained chunks')
     a = ap.parse_args(argv)
+    a.doc_cut_protect_chunks = not a.allow_chunk_outside_docs
     return cmd_build(a)
 
 

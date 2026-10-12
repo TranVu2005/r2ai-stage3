@@ -25,13 +25,15 @@ build:    make_submission with submission.args, runs_dir / doc_ranking from the 
 """
 from __future__ import annotations
 
-from r2ai.paths import ROOT, resolve_path
+from r2ai.paths import ROOT, assert_writable, resolve_path
 
 import argparse
 import hashlib
 import json
+import os
 import sys
 import time
+import zipfile
 from pathlib import Path
 
 DEFAULT_CONFIG = ROOT / 'configs' / 'submission-best.yaml'
@@ -39,9 +41,21 @@ CAND_DOCS = 'vi_cand.docs.parquet'
 SLUG_K_DEFAULT = 20               # postprocess.slug_append.k when the key is absent (VS-append)
 
 
-def load_config(path: str | Path) -> dict:
+def load_config(path: str | Path, variant: str | None = None) -> dict:
     import yaml
-    return yaml.safe_load(Path(path).read_text(encoding='utf-8'))
+    raw = yaml.safe_load(Path(path).read_text(encoding='utf-8'))
+    variants = raw.pop('variants', {}) or {}
+    selected = variant if variant is not None else raw.pop('default_variant', None)
+    if selected is None:
+        return raw
+    if selected not in variants:
+        raise ValueError(f'unknown submission variant {selected!r}; available: {", ".join(sorted(variants))}')
+    def merge(base, override):
+        result = dict(base)
+        for key, value in override.items():
+            result[key] = merge(result[key], value) if isinstance(value, dict) and isinstance(result.get(key), dict) else value
+        return result
+    return merge(raw, variants[selected])
 
 
 def _p(x) -> str:
@@ -69,6 +83,26 @@ def sha256(path: Path) -> str:
         for b in iter(lambda: f.read(1 << 20), b''):
             h.update(b)
     return h.hexdigest()
+
+
+def normalize_zip_timestamp(path: str | Path, date_time: tuple[int, int, int, int, int, int]) -> None:
+    """Set the single submission member's DOS timestamp while preserving its payload and compression."""
+    path = assert_writable(path)
+    tmp = assert_writable(path.with_name(path.name + '.tmp'))
+    with zipfile.ZipFile(path, 'r') as source:
+        infos = source.infolist()
+        if len(infos) != 1:
+            raise ValueError(f'{path}: expected one submission member, found {len(infos)}')
+        info = infos[0]
+        payload = source.read(info)
+    info.date_time = tuple(date_time)
+    try:
+        with zipfile.ZipFile(tmp, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as target:
+            target.writestr(info, payload, compress_type=info.compress_type, compresslevel=9)
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            assert_writable(tmp).unlink()
 
 
 def cmd_retrieve(a, cfg) -> int:
@@ -159,9 +193,14 @@ def cmd_build(a, cfg) -> int:
                                     queries=arg('--queries'), chunks_dir=arg('--chunks-dir'), docs_dir=arg('--docs-dir'),
                                     clusters=_p(exp['clusters']), scope=exp.get('scope', 'content'), k_cache=int(arg('--k-doc')),
                                     k_total=int(arg('--k-doc-total')), k_docs=int(rds['k_docs']), k_chunk=int(arg('--k-chunk')),
-                                    rrf_k=int(rds['k']))
+                                    rrf_k=int(rds['k']),
+                                    doc_cut_target_mean=(rds.get('doc_cut') or {}).get('target_mean') if (rds.get('doc_cut') or {}).get('enabled') else None,
+                                    doc_cut_tau=(rds.get('doc_cut') or {}).get('tau') if (rds.get('doc_cut') or {}).get('enabled') else None,
+                                    doc_cut_floor=int((rds.get('doc_cut') or {}).get('floor', 20)),
+                                    doc_cut_ceil=int((rds.get('doc_cut') or {}).get('ceil', 150)),
+                                    doc_cut_protect_chunks=bool((rds.get('doc_cut') or {}).get('protect_chunks', True)))
             base['rrf_doc_set'] = {k: st[k] for k in ('docs_new_vs_d50', 'pool_docs_without_hybrid_rank',
-                                                      'chunk_docs_outside_relevant_docs', 'expand_ids_added')}
+                                                      'chunk_docs_outside_relevant_docs', 'expand_ids_added', 'doc_cut') if k in st}
         else:
             from r2ai.submit.slug_append import slug_append_submission
             print(f'slug_append: {json.dumps(sla)}', flush=True)
@@ -177,6 +216,11 @@ def cmd_build(a, cfg) -> int:
            'zip_bytes': zp.stat().st_size, 'zip_sha256': sha256(zp), 'expected_json_sha256': s['expected_json_sha256'],
            'max_zip_bytes': s['max_zip_bytes']} | base
     res['json_matches'] = res['json_sha256'] == s['expected_json_sha256']
+    if s.get('zip_timestamp'):
+        normalize_zip_timestamp(zp, tuple(s['zip_timestamp']))
+        res['zip_sha256'] = sha256(zp)
+        if s.get('uploaded_zip_sha256'):
+            res['zip_matches'] = res['zip_sha256'] == s['uploaded_zip_sha256']
     for key in (['base'] + steps[:-1]) if steps else []:                      # intermediate outputs, when a hash is configured
         if s.get(f'{key}_json_sha256'):
             res[f'{key}_json_matches'] = res[f'{key}_json_sha256'] == s[f'{key}_json_sha256']
@@ -185,7 +229,7 @@ def cmd_build(a, cfg) -> int:
     print(json.dumps(res, indent=1), flush=True)
     if not res['zip_within_ceiling']:
         return 1
-    return 0 if res['json_matches'] or a.no_check else 1
+    return 0 if (res['json_matches'] and res.get('zip_matches', True)) or a.no_check else 1
 
 
 def main(argv=None):
@@ -196,11 +240,12 @@ def main(argv=None):
     r.add_argument('--step', choices=('candidates', 'rerank', 'all'), default='all')
     b = sub.add_parser('build')
     b.add_argument('--config', default=str(DEFAULT_CONFIG))
+    b.add_argument('--variant', default=None, help='submission config variant, e.g. A1-115 or VS-append')
     b.add_argument('--from-retrieval', action='store_true', help='use the retrieval out dirs of the config, not the D50 caches')
     b.add_argument('--out', default=None, help='output zip (default submission.out of the config)')
     b.add_argument('--no-check', action='store_true', help='do not fail when the JSON SHA256 differs from the expected one')
     a = ap.parse_args(argv)
-    cfg = load_config(a.config)
+    cfg = load_config(a.config) if getattr(a, 'variant', None) is None else load_config(a.config, a.variant)
     return cmd_retrieve(a, cfg) if a.cmd == 'retrieve' else cmd_build(a, cfg)
 
 

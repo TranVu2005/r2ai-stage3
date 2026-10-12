@@ -44,6 +44,34 @@ def cut_a2(docs, score, floor=20, protect=()):
     return [d for d in docs if d in ks], i == floor, False
 
 
+def calibrate_tau_a1(docs_by_query, scores_by_query, *, target_mean, floor=20, ceil=150, protect=None):
+    """Bisect an absolute A1 threshold to target the mean kept primary docs/query."""
+    if target_mean <= 0:
+        raise ValueError('target_mean must be positive')
+    qids = list(docs_by_query)
+    if not qids:
+        raise ValueError('cannot calibrate without queries')
+    protect = protect or {}
+    values = [float(scores_by_query[q][d]) for q in qids for d in docs_by_query[q]]
+    if not values:
+        raise ValueError('cannot calibrate without candidate scores')
+    lo, hi = min(values) - 1.0, max(values) + 1.0
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        mean = sum(len(cut_a1(docs_by_query[q], scores_by_query[q], mid, floor, ceil,
+                              protect.get(q, ()))[0]) for q in qids) / len(qids)
+        if mean > target_mean:
+            lo = mid
+        else:
+            hi = mid
+    center = (lo + hi) / 2
+    candidates = {round(center + offset / 100, 2) for offset in range(-2, 3)}
+    def mean_at(tau):
+        return sum(len(cut_a1(docs_by_query[q], scores_by_query[q], tau, floor, ceil,
+                              protect.get(q, ()))[0]) for q in qids) / len(qids)
+    return min(candidates, key=lambda tau: (abs(mean_at(tau) - target_mean), -mean_at(tau), tau))
+
+
 def make_cut(mode, *, tau=None, floor=20, ceil=150, protect_chunks=True):
     """cut(docs, score, protect) -> (kept, hit_floor, hit_ceil) for `a1` / `a2`."""
     if mode == 'a1':

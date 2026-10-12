@@ -1,4 +1,4 @@
-# Best measured configuration: VS-append = RD150 (configs/submission-rd150.yaml, unchanged: retrieval, builder, expand, RRF chunk
+# Base replay configuration: VS-append = RD150 (configs/submission-rd150.yaml, unchanged: retrieval, builder, expand, RRF chunk
 # docs, RRF doc set) + postprocess.slug_append: up to k = 20 more vi doc ids per query, ranked by BM25 over the URL slugs of vi URLs
 # that have no text (crawl.db rows blocked_4xx / bot_challenge / soft404_or_home / dead_origin / network_error / pending, plus the
 # nhathuoclongchau.com.vn corpus URLs absent from crawl.db; 101,259 URLs). Appended after the RD150 ids, relevant_chunks stay
@@ -41,7 +41,7 @@ submission:
   doc_ranking: out/runs/ab-2026-10-05b/cand/vi_cand.docs.parquet
   chunks_dir: data/chunks
   docs_dir: data/docs_vi
-  out: out/runs/best/submission/sub_best_vsappend.zip
+  out: out/runs/replay/VS-append/VS_append.zip
   # K doc 150 primary docs (ranks 1..100 deep-rerank order, 101..150 hybrid order), each expanded to its whole
   # doc_ids_group; full chunks (whole answer if inside the body, else whole body; no cut) for the top 50 docs.
   args: [--k-doc, '100', --k-doc-total, '150', --k-chunk, '50', --chunk-mode, full, --dedupe-scope, doc]
@@ -53,6 +53,7 @@ submission:
   expected_json_sha256: 9c91c952863c4e33b992053d665d547ba1f483cd0be487047386ba09af43e2e0   # after slug_append = uploaded VS-append
   expected_json_bytes: 402631653
   uploaded_zip_sha256: 48da9d87a1140a732eb06caa5c5573a6bd68d877f155067718831f01930853fe   # out/runs/selective-check/VS-append (deflate level 9; zip bytes carry the file mtime, the JSON SHA256 is the gate)
+  zip_timestamp: [2026, 10, 6, 20, 17, 16]
 postprocess:
   expand_clusters:
     enabled: true                 # false (or no postprocess key) = plain D50
@@ -78,3 +79,31 @@ postprocess:
     k1: 1.2                       # BM25 over de-accented URL slug tokens (r2ai.selective.bm25 constants)
     b: 0.75
     scan_depth: 400               # candidates scanned per query while looking for k ids not already in relevant_docs
+default_variant: A1-115
+variants:
+  VS-append: {}
+  A1-115:
+    run_id: best-a1-115
+    leaderboard:
+      file: out/runs/doc-cut/A1-115/sub_A1-115.zip
+      final: 0.2218
+      doc_f2: 0.2471
+      doc_precision: 0.1529
+      doc_recall: 0.3452
+      chunk_f2: 0.1964
+      source: provided by the user 2026-10-12
+    submission:
+      out: out/runs/replay/A1-115/sub_A1-115.zip
+      rrf_doc_set_json_sha256: a93515f2a8f45dcd658df51e78756d6e544cd6361c6a2973ceda578b75fac3d6
+      expected_json_sha256: 4ffbba8bceebb1a94565a819ab2385d1cdaa199c13d714c59fcb09631ed82c82
+      expected_json_bytes: 402302189
+      uploaded_zip_sha256: 666f74f5a7be0f7e2a3550501d0347b0fcbd07b42ad4375690717d24c1971c80
+      zip_timestamp: [2026, 10, 12, 18, 34, 54]
+    postprocess:
+      rrf_doc_set:
+        doc_cut:
+          enabled: true
+          target_mean: 115
+          floor: 20
+          ceil: 150
+          protect_chunks: true

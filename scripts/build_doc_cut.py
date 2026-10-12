@@ -20,7 +20,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument('--variant', action='append', required=True, choices=sorted(VARIANTS))
 ap.add_argument('--out-dir', default='out/runs/doc-cut')
 a = ap.parse_args()
-cfg = load_config('configs/submission-best.yaml')
+cfg = load_config('configs/submission-best.yaml', 'VS-append')
 s, rds, sla, exp = cfg['submission'], cfg['postprocess']['rrf_doc_set'], cfg['postprocess']['slug_append'], cfg['postprocess']['expand_clusters']
 ab = lambda p: p if Path(p).is_absolute() else M + p
 assert sha256(Path(BASE)) == s['rrf_json_sha256'], 'base RRF json differs from the config hash'

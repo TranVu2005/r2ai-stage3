@@ -277,6 +277,42 @@ Query/corpus được đọc chỉ từ `D:/GitHub/r2ai-stage3-old/data/raw/`; c
 
 Artifact nằm trong `out/upload-probe/` (ignored); không commit corpus/cache/output.
 
+#### Nén thử theo giới hạn upload (2026-10-13)
+
+Đo byte UTF-8 trên các chuỗi chunk_text; duy nhất = chuỗi nguyên văn phân biệt toàn submission. JSON hiện không compact (separators=(', ', ': ') và newline); cột cuối là kích thước khi serialize lại compact bằng ensure_ascii=False, separators=(',',':').
+
+| K | Tổng byte chunk_text | Byte chuỗi duy nhất | Tỉ lệ lặp | JSON hiện tại → compact (byte) | Giảm compact |
+|---:|---:|---:|---:|---:|---:|
+| 60 | 472.939.662 | 301.191.461 | 36,315% | 481.105.776 → 480.649.157 | 456.619 B (0,095%) |
+| 75 | 589.364.489 | 354.832.794 | 39,794% | 599.221.799 → 598.693.251 | 528.548 B (0,088%) |
+| 100 | 779.965.898 | 434.722.117 | 44,264% | 792.615.451 → 791.967.197 | 648.254 B (0,082%) |
+
+ZIP mỗi file có đúng một JSON top-level. Các phép Python zipfile dùng mặc định của ZIP_LZMA/ZIP_BZIP2; không truyền mức nén. Ngưỡng đo: 101.800.000 byte.
+
+| File | Phương thức | Byte | MiB / MB (10^6) | ≤ ngưỡng | SHA256 | Python | Đọc ngoài Python |
+|---|---|---:|---:|---|---|---|---|
+| P60_LZMA.zip | ZIP_LZMA | 74.737.999 | 71,276 / 74,737999 | Có | 8ac27bc207d96760529657649b7aa5a2db3540993003de87feee576a25da372b | pass | tar -xOf, hash khớp |
+| P60_BZIP2.zip | ZIP_BZIP2 | 80.252.182 | 76,534 / 80,252182 | Có | 3eb4220ebc6968551781c150210fdc5fde3a9ed68ffd42d190e5dc4e2bd86036 | pass | unzip -p, hash khớp |
+| P75_LZMA.zip | ZIP_LZMA | 93.011.779 | 88,703 / 93,011779 | Có | febfc1bb7917c8347993ec8535d9621ed9e38348f4e61f26ec4f3e285e7238ce | pass | tar -xOf, hash khớp |
+| P75_BZIP2.zip | ZIP_BZIP2 | 99.416.017 | 94,811 / 99,416017 | Có | 0a67382a0ceada9f0016861678a4b4f5ee03624492a6dd8d35013eef3d45fdc0 | pass | unzip -p, hash khớp |
+| P100_LZMA.zip | ZIP_LZMA | 123.025.703 | 117,326 / 123,025703 | Không | 4d4d2e190e9df8be23bd49e272b64b2852dbe85c4c624449d1f775ff8f279bbb | pass | tar -xOf, hash khớp |
+| P100_BZIP2.zip | ZIP_BZIP2 | 130.890.694 | 124,827 / 130,890694 | Không | 5d076faf7775eaaffc4ea61676eeca57bae23bd04f15cde74f20df82be81b03e | pass | unzip -p, hash khớp |
+
+7z/7zz không có trong PATH hoặc vị trí cài đặt thông dụng, nên bỏ qua ZIP LZMA dictionary 64 MiB. Info-ZIP 6.00 có sẵn không đọc được ZIP_LZMA (PK compatibility 6.3); với LZMA dùng tar.exe để giải nén streaming và xác nhận SHA. BZIP2 được xác minh bằng unzip. Cả sáu ZIP: Python giải nén được và SHA JSON giải nén khớp file nguồn.
+
+Quét K theo bội số 5 dùng cùng pipeline RRF chunks → doc-cut A1-115 (target 115, bảo vệ doc có chunk) → VS-append; chỉ K đổi. ZIP_LZMA nhỏ nhất trong các phương thức Python đọc được.
+
+| K | ZIP_LZMA byte | Kết quả so ngưỡng |
+|---:|---:|---|
+| 75 | 93.011.779 | dưới |
+| 80 | 99.035.033 | dưới; K lớn nhất đạt |
+| 85 | 105.040.966 | vượt |
+| 90 | 111.066.925 | vượt |
+| 95 | 117.040.281 | vượt |
+| 100 | 123.025.703 | vượt |
+
+K80 artifact out/upload-probe/K80/sub_K80_LZMA.zip: JSON 638.098.632 byte, SHA256 91fd6049245313dde4a7d42c8f86bae851acb43cf1aa7f6ccc8fd8e73b373a44; ZIP SHA256 cc765eead79003ec28b422cd420f5e2ad7fea31d5ea4b23bb6b11c4b03182d02. ZIP = 94,447 MiB / 99,035033 MB; duy nhất sub_K80.json, không subfolder. Validator mặc định: 1.200 ID, 95.999 chunks, 0 lỗi, verbatim 100%, bảo vệ chunk.doc_id thuộc relevant_docs; TB sau bảo vệ: 79,999 chunk/query và 136,344 doc/query. Python và tar -xOf giải nén K80, SHA JSON đều khớp. Không score, GPU, upload hoặc push.
+
 ## 7. Blockers
 
 1. **Recall còn thấp** (bản tốt nhất đã đo VS-append): Doc R 0,3716, Chunk R 0,2199 (chunk giống RD150). Độ phủ index NEW 623.805 doc / 4.394.718 URL corpus ≈ 14,2%; phần gold thiếu phần lớn nằm ngoài index (ước tính, không phải số đo).
@@ -358,3 +394,4 @@ Artifact nằm trong `out/upload-probe/` (ignored); không commit corpus/cache/o
 | 2026-10-13 | Claude Sonnet 5.5 | S3: ghi điểm LB cc-A-cut115 (Final 0,2279, Doc F2 0,2593 · P 0,1603 · R 0,3630, người dùng cung cấp; (0,2593 + 0,1964)/2 = 0,22785) = bản tốt nhất đã đo; 37 lượt trên nhánh `cc-longchau`; `submission-best.yaml` chưa đổi (S6 hợp nhất). Chỉ sửa tài liệu; không nộp/push/merge. |
 | 2026-10-13 | Claude Sonnet 5.5 | S3: bước 2 và 3. Đợt ingest `r2ai.cc_longchau.batch` (segment mới, không ghi đè segment 20000; logit rerank cũ tái dùng: đợt b2 chỉ 44.395/401.470 cặp mới) chạy thử với b2. VS-cc-B sau cờ (`merge_b`, `build_b`; `slug_append(exclude_ids=None)` mặc định tắt): gate vi-only tái tạo `vi_k100.parquet` của deep và rerank200 giống bit; replay VS-append JSON `9c91c952…43e2e0` khớp; full suite pass. Sinh VS-cc-B (99,771 MiB), B-cut115 (99,584 MiB), B-k48 (95,820 MiB), B-cut115-k48 (95,631 MiB), chưa nộp. Chi tiết `submissions/LOG.md`. Không push/merge. |
 | 2026-10-13 03:04 | GPT-6 (Codex) | S7 upload-probe trên worktree `upload-probe` từ `483f4df`: K50 CLI A1-115 khớp JSON/ZIP SHA gate; sinh P60/P75/P100 chỉ đổi K, CPU, doc-cut mean 115 có bảo vệ chunk-doc; validator mặc định bốn file 0 lỗi/verbatim 100%; ghi bảng byte/MiB/MB và hash tại §6. Chẩn đoán import editable nhầm checkout chính, khóa `PYTHONPATH` về worktree. Không score/model, upload hoặc push. HEAD trước cập nhật: `483f4df9b7f32b76a7269e5d6a511ad3b579a7f3`. |
+| 2026-10-13 04:37 | GPT-6 (Codex) | S7 đo trùng lặp/compact và ZIP_LZMA/BZIP2 cho P60/P75/P100; mọi ZIP Python-readable, BZIP2 đọc bằng unzip, LZMA đọc bằng tar (Info-ZIP cũ không hỗ trợ PK 6.3); 7z không cài. Tạo K80 tối đa đạt trần 101.800.000 B (99.035.033 B, ZIP SHA cc765eea…), K85/K90/K95/K100 vượt; validator 1.200 ID / 95.999 chunk / 0 lỗi / verbatim 100%. Chỉ CPU, không upload/push. |

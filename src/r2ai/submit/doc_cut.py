@@ -44,15 +44,18 @@ def cut_a2(docs, score, floor=20, protect=()):
     return [d for d in docs if d in ks], i == floor, False
 
 
-def make_cut(mode, *, tau=None, floor=20, ceil=150):
+def make_cut(mode, *, tau=None, floor=20, ceil=150, protect_chunks=True):
     """cut(docs, score, protect) -> (kept, hit_floor, hit_ceil) for `a1` / `a2`."""
     if mode == 'a1':
         if tau is None:
             raise ValueError('a1 needs tau')
-        return lambda docs, score, protect=(): cut_a1(docs, score, tau, floor, ceil, protect)
-    if mode == 'a2':
-        return lambda docs, score, protect=(): cut_a2(docs, score, floor, protect)
-    raise ValueError(f'unknown cut mode {mode}')
+        fn = lambda docs, score, protect=(): cut_a1(docs, score, tau, floor, ceil, protect)
+    elif mode == 'a2':
+        fn = lambda docs, score, protect=(): cut_a2(docs, score, floor, protect)
+    else:
+        raise ValueError(f'unknown cut mode {mode}')
+    fn.protect_chunks = protect_chunks      # False: rrf_docs passes no protected docs (chunk doc_ids may leave relevant_docs)
+    return fn
 
 
 def pool_scores(rerank_run) -> dict[int, dict[int, float]]:

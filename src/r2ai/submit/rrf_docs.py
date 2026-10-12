@@ -110,7 +110,7 @@ def _build(a) -> dict:
             return ids
         sc, kept, hf, hc, n_prot = pool_scores(a.rerank_run), {}, 0, 0, []
         for q in qids:
-            prot = {d for d in docs[q] if chunk_ids[q] & covers(d)}
+            prot = {d for d in docs[q] if chunk_ids[q] & covers(d)} if getattr(a.cut, 'protect_chunks', True) else set()
             n_prot.append(len(prot))
             kept[q], f, c = a.cut(docs[q], sc[q], prot)
             hf, hc = hf + f, hc + c

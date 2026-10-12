@@ -12,8 +12,9 @@ from r2ai.submit.slug_append import slug_append_submission
 from r2ai.submit.doc_cut import make_cut
 
 M = 'D:/GitHub/r2ai-stage3/'
+DECOUPLED_TAU = 2.14  # filled by scripts/doc_cut_calibrate.py (protect off, target mean 40)
 BASE = M + 'out/runs/best-vsappend/gate-best/sub_rrf.json'
-VARIANTS = {'GATE': ('a1', -99.0), 'A1-60': ('a1', 2.44), 'A1-100': ('a1', -0.62), 'A1-130': ('a1', -3.02), 'A2': ('a2', None)}
+VARIANTS = {'GATE': ('a1', -99.0), 'A1-60': ('a1', 2.44), 'A1-100': ('a1', -0.62), 'A1-130': ('a1', -3.02), 'A2': ('a2', None), 'A1-40-decoupled': ('a1', None)}
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--variant', action='append', required=True, choices=sorted(VARIANTS))
@@ -26,13 +27,16 @@ assert sha256(Path(BASE)) == s['rrf_json_sha256'], 'base RRF json differs from t
 args = s['args']; arg = lambda k: args[args.index(k) + 1]
 for v in a.variant:
     mode, tau = VARIANTS[v]
+    decoupled = v.endswith('decoupled')
+    if decoupled:
+        tau = float(DECOUPLED_TAU)
     d = Path(a.out_dir) / v; d.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
     st1 = rrf_doc_submission(BASE, d / 'mid.zip', chunks='base', runs_dir=ab(s['runs_dir']), doc_ranking=ab(s['doc_ranking']),
         hybrid_ranks=ab(rds['hybrid_ranks']), rerank_run=ab(rds['reranker_cache']), queries=cfg['queries'], chunks_dir=ab(s['chunks_dir']),
         docs_dir=ab(s['docs_dir']), clusters=ab(exp['clusters']), scope=exp.get('scope', 'content'), k_cache=int(arg('--k-doc')),
         k_total=int(arg('--k-doc-total')), k_docs=int(rds['k_docs']), k_chunk=int(arg('--k-chunk')), rrf_k=int(rds['k']),
-        cut=make_cut(mode, tau=tau, floor=20, ceil=150))
+        cut=make_cut(mode, tau=tau, floor=20, ceil=150, protect_chunks=not decoupled))
     st2 = slug_append_submission(d / 'mid.json', d / f'sub_{v}.zip', pin=ab(sla['pin']), pin_sha256=sla['pin_sha256'], queries=cfg['queries'],
         k=int(sla.get('k', 20)), k1=float(sla['k1']), b=float(sla['b']), scan_depth=int(sla['scan_depth']))
     (d / 'mid.json').unlink(); (d / 'mid.zip').unlink()

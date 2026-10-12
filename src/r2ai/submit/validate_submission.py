@@ -43,6 +43,8 @@ def main(argv=None):
     ap.add_argument('--dedupe-scope', choices=('doc', 'query'), default='doc')
     ap.add_argument('--max-zip-mib', type=float, default=0, help='fail if the file is larger (0 = off)')
     ap.add_argument('--skip-near', action='store_true')
+    ap.add_argument('--allow-chunk-outside-docs', action='store_true',
+                    help='do not fail when a chunk doc_id is not in relevant_docs (internal rule, not in the official format)')
     ap.add_argument('--skip-verbatim', action='store_true')
     a = ap.parse_args(argv)
     a.path, a.queries, a.corpus, a.docs_dir = map(lambda x: str(resolve_path(x)), (a.path,a.queries,a.corpus,a.docs_dir))
@@ -107,7 +109,7 @@ def main(argv=None):
             if not c['chunk_text'].strip():
                 errs.append(f'id {qid} chunk {j}: empty chunk_text')
                 continue
-            if c['doc_id'] not in dset:
+            if c['doc_id'] not in dset and not a.allow_chunk_outside_docs:
                 errs.append(f'id {qid} chunk {j}: doc_id {c["doc_id"]} not in relevant_docs')
             key = normalize_metric(c['chunk_text']) if a.dedupe_scope == 'query' else (c['doc_id'], normalize_metric(c['chunk_text']))
             if key in keys:

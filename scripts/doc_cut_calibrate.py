@@ -49,3 +49,11 @@ for target in (60, 100, 130):
     print(target, 'tau', t, stats(C.make_cut('a1', tau=t)))
 print('a2', stats(C.make_cut('a2')))
 print(json.dumps(res))
+
+lo, hi = -8.0, 8.0
+for _ in range(40):
+    mid = (lo + hi) / 2
+    m = np.mean([len(C.cut_a1(docs[q], sc[q], mid)[0]) for q in qids])     # no protection
+    lo, hi = (mid, hi) if m > 40 else (lo, mid)
+t = round((lo + hi) / 2, 2)
+print('decoupled 40 tau', t, stats(lambda d, s_, p_: C.cut_a1(d, s_, t)))

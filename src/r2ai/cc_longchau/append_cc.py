@@ -103,7 +103,7 @@ def load_inputs(roots: Roots):
     return qids, slug, groups, ranking
 
 
-def run_variant(roots: Roots, base, variant, qids, slug, groups, ranking):
+def run_variant(roots: Roots, base, variant, qids, slug, groups, ranking, *, plan=None, base_label=None):
     t0 = time.perf_counter()
     cc_ids = set(groups)
     out = roots.guard(roots.run / variant)
@@ -111,7 +111,7 @@ def run_variant(roots: Roots, base, variant, qids, slug, groups, ranking):
     stem = variant.replace('-', '_')
     tmp_json, tmp_zip = out / f'{stem}.json.tmp', out / f'{stem}.pending.zip'
     with open(roots.guard(tmp_json), 'w', encoding='utf-8', newline='') as f:
-        sel = render(base, variant, slug, cc_ids, ranking, groups, f.write)
+        sel = render(base, plan or variant, slug, cc_ids, ranking, groups, f.write)
         f.flush()
         os.fsync(f.fileno())
     with open(tmp_json, encoding='utf-8', newline='') as f:
@@ -126,14 +126,18 @@ def run_variant(roots: Roots, base, variant, qids, slug, groups, ranking):
     os.replace(tmp_json, final_json)
     os.replace(tmp_zip, final_zip)
     n_ids = [len(s['appended']) for s in sel.values()]
+    with open(final_json, encoding='utf-8', newline='') as f:
+        totals = sorted(len(r['relevant_docs']) for r, _ in _rows(f.read()))
+    pct = lambda p: totals[min(len(totals) - 1, int(p * len(totals)))]
     slug_total = sum(s['slug_total'] for s in sel.values())
     lc_with_cc = sum(len([d for d in slug[q] if d in cc_ids]) for q in sel)
     picks = [d for s in sel.values() for d in s['cc_picks']]
     overlap = sum(d in set(slug[q]) for q, s in sel.items() for d in s['cc_picks'])
-    stats = {'variant': variant, 'diagnostic_only': True, 'LB': 'chua do', 'base': str(RD150), 'gate': gate, 'validator': validator,
+    stats = {'variant': variant, 'diagnostic_only': True, 'LB': 'chua do', 'base': base_label or str(RD150), 'gate': gate, 'validator': validator,
              'json_bytes': final_json.stat().st_size, 'json_sha256': sha256_file(final_json), 'zip_bytes': final_zip.stat().st_size,
              'zip_mib': round(final_zip.stat().st_size / 2 ** 20, 3), 'zip_sha256': sha256_file(final_zip),
              'zip_vs_largest_accepted_VS40_bytes': final_zip.stat().st_size - KNOWN_ACCEPTED_ZIP,
+             'relevant_docs_per_query': {'mean': statistics.fmean(totals), 'p10': pct(.1), 'p50': pct(.5), 'p90': pct(.9), 'min': totals[0], 'max': totals[-1]},
              'ids_appended_per_query': {'mean': statistics.fmean(n_ids), 'min': min(n_ids), 'max': max(n_ids)},
              'slug_ids_total_VS_append': slug_total, 'slug_ids_longchau_with_cc_text': lc_with_cc,
              'slug_ids_replaced': sum(len(s['slug_removed']) for s in sel.values()),

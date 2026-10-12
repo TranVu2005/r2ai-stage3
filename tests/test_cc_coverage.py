@@ -307,7 +307,7 @@ def _pq(rows):
     return buf.getvalue()
 
 
-def _mock(sorted_layout=True, fail=None):
+def _mock(sorted_layout=True, fail=None, crawls=None, extra=None):
     info = [{'id': f'CC-MAIN-{y}-{w:02d}', 'from': f'{d}T00:00:00', 'to': f'{d}T23:00:00'} for (y, w, d) in
             [(2025, 38, '2025-09-14'), (2026, 17, '2026-04-10'), (2026, 21, '2026-05-08'), (2026, 25, '2026-06-05'),
              (2026, 30, '2026-07-10'), (2026, 34, '2026-08-07'), (2026, 39, '2026-09-04'), (2026, 43, '2026-10-05')]]
@@ -317,7 +317,8 @@ def _mock(sorted_layout=True, fail=None):
                             (HOST + 'benh/b1.html', '2026-08-08T10:00:00', 200, 'text/html', 66)],
         'CC-MAIN-2026-30': [(HOST + 'benh/b1.html', '2026-07-12T10:00:00', 200, 'text/html', 61)]}
     files = {}
-    for c in S0.CR.OLD_SIX:
+    data.update(extra or {})
+    for c in (crawls or S0.CR.OLD_SIX):
         mid = sorted([r for r in data.get(c, [])] + [(HOST + 'zzz-other.html', '2026-01-01T00:00:00', 301, 'text/html', 1)])
         parts = [[('vn,a)/x', '2026-01-01T00:00:00', 200, 'text/html', 1), ('vn,b)/x', '2026-01-01T00:00:00', 200, 'text/html', 1)], mid,
                  [('vn,z)/x', '2026-01-01T00:00:00', 200, 'text/html', 1), ('vn,zz)/x', '2026-01-01T00:00:00', 200, 'text/html', 1)]]
@@ -388,3 +389,73 @@ def test_step0_unsorted_file_order_is_handled_by_the_footer_map(tmp_path, monkey
 def test_step0_403_stops_everything(tmp_path, monkeypatch):
     rc, rep = _run(tmp_path, monkeypatch, _mock(fail=lambda req: 'part-00001' in str(req.url)))
     assert rc == 2 and rep['status'] == 'stopped_blocked' and '403' in rep['reason']
+
+
+# ---------------------------------------------------------------- footer map workers and the full runner
+
+def test_footer_map_with_workers_equals_sequential_and_stops_on_403(tmp_path):
+    files = _crawl_files()
+    paths = sorted(files)
+    c, _, _ = _client(tmp_path, _server(files, []), rps=1000)
+    seq = IX.footer_map(c, paths, 'vn,com,e00123)/', workers=1)
+    par = IX.footer_map(c, paths, 'vn,com,e00123)/', workers=4)
+    assert seq == par and [h['file'] for h in par['row_group_hits']] == [2]
+    ok = _server(files, [])
+
+    def h(req):
+        return httpx.Response(403) if 'part-00002' in str(req.url) else ok(req)
+    (tmp_path / 'b').mkdir()
+    c2, _, _ = _client(tmp_path / 'b', h, rps=1000)
+    with pytest.raises(N.Blocked):
+        IX.footer_map(c2, paths, 'vn,com,e00123)/', workers=4)
+
+
+from r2ai.cc_coverage import run_all as RA  # noqa: E402
+
+ALL8 = ['CC-MAIN-2025-38', 'CC-MAIN-2026-17', 'CC-MAIN-2026-21', 'CC-MAIN-2026-25', 'CC-MAIN-2026-30', 'CC-MAIN-2026-34',
+        'CC-MAIN-2026-39', 'CC-MAIN-2026-43']
+EXTRA = {'CC-MAIN-2026-43': [(HOST + 'bai-viet/s3.html', '2026-10-06T00:00:00', 200, 'text/html', 77)],
+         'CC-MAIN-2025-38': [(HOST + 'bai-viet/s2.html', '2025-09-10T00:00:00', 200, 'text/html', 33)]}
+
+
+def _run_all(tmp_path, monkeypatch, handler, rps=1000):
+    monkeypatch.setattr(RA, 'corpus_urls', lambda: CORPUS)
+    monkeypatch.setattr(RA, 'old_sample', lambda: OLD)
+    monkeypatch.setattr(RA, 'Client', partial(N.Client, transport=httpx.MockTransport(handler), sleep=lambda s: None))
+    monkeypatch.setattr(N, 'BACKOFF_S', (0, 0, 0, 0, 0))
+    rc = RA.main(['--ua', UA, '--out-dir', str(tmp_path / 'cc'), '--rps', str(rps), '--workers', '4'])
+    return rc, json.loads((tmp_path / 'cc' / 'run_all_report.json').read_text(encoding='utf-8'))
+
+
+def test_run_all_newest_first_coverage_curve_summary_and_resume(tmp_path, monkeypatch):
+    rc, rep = _run_all(tmp_path, monkeypatch, _mock(crawls=ALL8, extra=EXTRA))
+    assert rc == 0 and rep['status'] == 'ok' and list(rep['crawls']) == list(reversed(ALL8))
+    curve = {c['crawl']: c for c in rep['coverage_curve']}
+    assert [c['crawl'] for c in rep['coverage_curve']] == list(reversed(ALL8))
+    assert [c['cumulative'] for c in rep['coverage_curve']] == [1, 2, 3, 3, 3, 3, 3, 4]
+    assert curve['CC-MAIN-2025-38']['marginal_points'] == 25.0 and rep['ask_before_extending_back'] is True
+    sm = rep['summary']
+    assert sm['with_200_html'] == 4 and sm['after_corpus_chosen'] == 1 and sm['warc_bytes_chosen'] == 55 + 66 + 77 + 33
+    assert sm['chosen_by_crawl'] == {'CC-MAIN-2025-38': 1, 'CC-MAIN-2026-34': 1, 'CC-MAIN-2026-39': 1, 'CC-MAIN-2026-43': 1}
+    six = sm['sample_vs_old_six_crawls']
+    assert (six['n'], six['old_found'], six['new_found_in_the_same_six_crawls'], six['agree']) == (4, 2, 2, 4)
+    assert (tmp_path / 'cc' / 'snapshots.parquet').exists() and (tmp_path / 'cc' / 'coverage.parquet').exists()
+    cov = pq.read_table(tmp_path / 'cc' / 'coverage.parquet').to_pydict()
+    assert sorted(zip(cov['url_id'], cov['crawl'])) == [(1, 'CC-MAIN-2026-39'), (2, 'CC-MAIN-2025-38'), (3, 'CC-MAIN-2026-34'), (4, 'CC-MAIN-2026-43')]
+    first = rep['run_requests']
+    rc, rep2 = _run_all(tmp_path, monkeypatch, _mock(crawls=ALL8, extra=EXTRA))
+    assert rc == 0 and rep2['run_requests'] < first / 3 and rep2['summary'] == rep['summary']             # caches: only paths + collinfo again
+
+
+def test_run_all_stops_when_the_next_crawl_would_pass_the_request_cap(tmp_path, monkeypatch):
+    monkeypatch.setattr(RA, 'REQUESTS_PER_CRAWL', 10_000)
+    rc, rep = _run_all(tmp_path, monkeypatch, _mock(crawls=ALL8, extra=EXTRA))
+    assert rc == 2 and rep['status'] == 'stopped_projected_budget' and rep['crawls'] == {}
+
+
+def test_run_all_403_midway_keeps_the_finished_crawls(tmp_path, monkeypatch):
+    def deny(req):
+        return 'crawl=CC-MAIN-2026-34' in str(req.url) and 'part-00001' in str(req.url)
+    rc, rep = _run_all(tmp_path, monkeypatch, _mock(crawls=ALL8, extra=EXTRA, fail=deny))
+    assert rc == 2 and rep['status'] == 'stopped_blocked' and list(rep['crawls']) == ['CC-MAIN-2026-43', 'CC-MAIN-2026-39']
+    assert (tmp_path / 'cc' / 'rows_CC-MAIN-2026-39.parquet').exists() and not (tmp_path / 'cc' / 'rows_CC-MAIN-2026-34.parquet').exists()

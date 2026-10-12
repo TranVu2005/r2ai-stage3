@@ -60,7 +60,7 @@ def records_of(table: pa.Table, crawl: str):
     return [{'crawl': crawl, **{c: cols[c][i] for c in cols}} for i in range(table.num_rows)]
 
 
-def scan_crawl(client: Client, crawl: str, out: Path) -> dict:
+def scan_crawl(client: Client, crawl: str, out: Path, workers: int = 1) -> dict:
     t0, b0, r0 = time.time(), client.ledger.bytes, client.ledger.requests
     paths = IX.list_parquet_paths(client, crawl)
     info = {'crawl': crawl, 'parquet_files': len(paths)}
@@ -71,7 +71,7 @@ def scan_crawl(client: Client, crawl: str, out: Path) -> dict:
         fm = json.loads(cache.read_text(encoding='utf-8'))
         info['footer_map_from_cache'] = True
     else:
-        fm = IX.footer_map(client, paths, HOST_PREFIX)
+        fm = IX.footer_map(client, paths, HOST_PREFIX, workers=workers)
         cache.write_text(json.dumps(fm, ensure_ascii=False), encoding='utf-8')
         info['footer_map_from_cache'] = False
     ranged = sorted((f for f in fm['file_list'] if f['range']), key=lambda f: f['range'][0])

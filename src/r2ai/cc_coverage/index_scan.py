@@ -127,28 +127,54 @@ def read_prefix(pf: pq.ParquetFile, prefix: str, *, columns=COLUMNS, max_bytes: 
     return table, {'row_groups_read': groups, 'compressed_bytes_planned': cost, 'rows_matched': table.num_rows}
 
 
-def footer_map(client: Client, paths: list[str], prefix: str, known: dict | None = None, columns=COLUMNS) -> dict:
+def footer_map(client: Client, paths: list[str], prefix: str, known: dict | None = None, columns=COLUMNS, workers: int = 1) -> dict:
     """Read the footer of every file (one 64 KiB tail request each; `known` = {index: (ParquetFile, file_bytes)} already open) and
     return, per file, its key range, row-group ranges and the exact compressed byte cost of `columns` per row group; plus which row
-    groups may hold `prefix` and what reading them would cost. No row group is read."""
+    groups may hold `prefix` and what reading them would cost. No row group is read. `workers` threads share the client's pacing
+    (so the request rate stays below its rps); the first error stops the others and is raised."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
     known = known or {}
     hi = upper_bound(prefix)
+    stop = Event()
+
+    def one(i):
+        if stop.is_set():
+            return None
+        try:
+            if i in known:
+                pf, size = known[i]
+            else:
+                pf, rf = open_parquet(client, paths[i])
+                size = rf.size
+            ranges = key_ranges(pf)
+            rec = {'i': i, 'file_bytes': size, 'footer_bytes': pf.metadata.serialized_size, 'rows': pf.metadata.num_rows,
+                   'row_groups': pf.metadata.num_row_groups, 'range': file_range(ranges)}
+            hits_i = []
+            for g, r in enumerate(ranges):
+                if r is None or (r[0] < hi and r[1] >= prefix):
+                    hits_i.append({'file': i, 'row_group': g, 'rows': pf.metadata.row_group(g).num_rows,
+                                   'cost_columns_bytes': row_group_cost(pf, g, columns),
+                                   'cost_surtkey_only_bytes': row_group_cost(pf, g, ('url_surtkey',)),
+                                   'rg_total_bytes': pf.metadata.row_group(g).total_byte_size, 'range': r})
+            return rec, hits_i
+        except BaseException:
+            stop.set()
+            raise
     files, hits = [], []
-    for i, path in enumerate(paths):
-        if i in known:
-            pf, size = known[i]
-        else:
-            pf, rf = open_parquet(client, path)
-            size = rf.size
-        ranges = key_ranges(pf)
-        rec = {'i': i, 'file_bytes': size, 'footer_bytes': pf.metadata.serialized_size, 'rows': pf.metadata.num_rows,
-               'row_groups': pf.metadata.num_row_groups, 'range': file_range(ranges)}
-        files.append(rec)
-        for g, r in enumerate(ranges):
-            if r is None or (r[0] < hi and r[1] >= prefix):
-                hits.append({'file': i, 'row_group': g, 'rows': pf.metadata.row_group(g).num_rows,
-                             'cost_columns_bytes': row_group_cost(pf, g, columns), 'cost_surtkey_only_bytes': row_group_cost(pf, g, ('url_surtkey',)),
-                             'rg_total_bytes': pf.metadata.row_group(g).total_byte_size, 'range': r})
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
+        futs = [ex.submit(one, i) for i in range(len(paths))]
+        try:
+            for f in futs:
+                out = f.result()
+                if out is not None:
+                    files.append(out[0])
+                    hits.extend(out[1])
+        except BaseException:
+            stop.set()
+            for f in futs:
+                f.cancel()
+            raise
     ranged = sorted((f['range'][0], f['range'][1], f['i']) for f in files if f['range'])
     overlaps = sum(1 for a, b in zip(ranged, ranged[1:]) if a[1] > b[0])
     fb = [f['footer_bytes'] for f in files]

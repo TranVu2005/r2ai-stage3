@@ -14,7 +14,7 @@ from r2ai.submit.doc_cut import make_cut
 M = 'D:/GitHub/r2ai-stage3/'
 DECOUPLED_TAU = 2.14  # filled by scripts/doc_cut_calibrate.py (protect off, target mean 40)
 BASE = M + 'out/runs/best-vsappend/gate-best/sub_rrf.json'
-VARIANTS = {'GATE': ('a1', -99.0), 'A1-60': ('a1', 2.44), 'A1-100': ('a1', -0.62), 'A1-130': ('a1', -3.02), 'A2': ('a2', None), 'A1-40-decoupled': ('a1', None)}
+VARIANTS = {'GATE': ('a1', -99.0), 'A1-60': ('a1', 2.44), 'A1-100': ('a1', -0.62), 'A1-115': ('a1', -1.66), 'A1-130': ('a1', -3.02), 'A2': ('a2', None), 'A1-40-decoupled': ('a1', None)}
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--variant', action='append', required=True, choices=sorted(VARIANTS))

@@ -38,7 +38,7 @@ def stats(fn):
     return dict(mean=round(float(n.mean()), 2), p10=float(np.percentile(n, 10)), p50=float(np.percentile(n, 50)), p90=float(np.percentile(n, 90)), floor=fl, ceil=ce)
 
 res = {}
-for target in (60, 100, 130):
+for target in (60, 100, 115, 130):
     lo, hi = -8.0, 8.0
     for _ in range(40):
         mid = (lo + hi) / 2

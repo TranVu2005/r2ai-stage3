@@ -1,10 +1,10 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-13 20:50 (UTC+7)
+- Cập nhật: 2026-10-14 00:33 (UTC+7)
 - Model thực hiện: GPT-6 (Codex)
-- Commit HEAD đã kiểm trước cập nhật này: `f7f656493a033b987c3220a89d65f62657bb1f0a`, nhánh `diag-lang`
+- Commit HEAD đã kiểm trước cập nhật này: `63b744bb15e02cdffec62c3462a7bc01be965154`, nhánh `diag-lang`
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
-- **Best đo mới do Vu cung cấp: S6-a Final0,2483 / DocF20,2594 / ChunkF20,2371. S8 gói Z1-A/Z2-A đã kiểm; B chờ S6-d thắng và zh config dương. Xem docs/s8_v2_language_probes.md. Config cũ giữ mặc định.**
+- **Best đo mới do Vu cung cấp: S6-d K100 Final 0,2522 / Doc F2 0,2577 / Chunk F2 0,2467. A zh có LB dương; Z2-D/ZL-D đã kiểm, chưa nộp. Xem docs/s8_v2_language_probes_D.md.**
 - **Snapshot best/config v1: VS-append Final 0,2168** (07/10, người dùng cung cấp; (0,2373 + 0,1964)/2 = 0,21685 làm tròn): Doc F2 0,2373 · Doc P 0,1353 · Doc R 0,3716 · Chunk F2 0,1964 · Chunk P 0,2340 · Chunk R 0,2199 (chunk giống RD150); RD150 giữ nguyên byte + 20 id/query theo BM25 slug từ URL vi không crawl được. File `out/runs/selective-check/VS-append/VS_append.zip`, ZIP SHA256 `48da9d87…53fe`, JSON `9c91c952…43e2e0`. **Config best = VS-append từ `a6cd723`**: `configs/submission-best.yaml` = RD150 (`configs/submission-rd150.yaml`, nội dung best cũ giữ nguyên) + `postprocess.slug_append`; `k` là tham số config, mặc định 20 (`0644009`); gate tol 0 JSON `9c91c952…43e2e0` khớp file đã nộp; pin slug `out/runs/best-vsappend/slug_pool_pin.parquet` SHA256 `196f2e50…371f` (30.920.581 byte, trong `out/` ignored), bản sao ngoài repo `D:/r2ai-pins/`. Bản nền RD150 Final 0,2139 (06/10), Doc F2 0,2313 · Doc P 0,1431 · Doc R 0,3412 · Chunk F2 0,1964 · Chunk P 0,2340 · Chunk R 0,2199. File `out/runs/rrf-docs-2026-10-06/RD150/sub_RD150.zip`; ZIP SHA256 `9eaf78b4…ccfd`, JSON `136c2591…e950`. Trần ZIP 104.857.600 byte. Tổng **34 lượt nộp** (người dùng cung cấp).
 - Z-append (RD150 + ≤ 100 doc zh mẫu 2% nối cuối, chẩn đoán) Final 0,1916, **Doc R 0,3429 (+0,0017 so với RD150, trên ngưỡng 0,0002)** → **quyết định crawl toàn bộ zh** (agent zh làm); chưa nộp bản trộn zh trước khi có calibration. P300 (RRF trên pool rerank 300 doc) đã nộp 06/10: Final 0,2135, thua RD150 → dừng phía doc vi; luồng slug dừng ở k = 20 sau VS40 (11/10); ZF-100/ZF-10/ZF-120ask-5/ZG/ZGp-hi/ZGp đã nộp 11/10 (nối zh theo top-k chưa có lời; ZG lọc logit ≥ 0,96 hoà VS-append, xem bên dưới và mục 8). Chi tiết mục 5, M9/M10, `submissions/LOG.md`.
 - 07/10 (người dùng cung cấp): **VS-append 0,2168 (+0,0029 Final, Doc R +0,0304 so với RD150)**, VS-longchau 0,2165 (Doc R +0,0271; phần còn lại +0,0033), P300 0,2135 (−0,0004, dừng phía doc vi), ZA-120ask Doc R +0,0007, ZA-cnkang +0,0005 (13 domain còn lại suy ra +0,0005). Chi tiết mục 5, `submissions/LOG.md`.
@@ -148,6 +148,8 @@ ZGp và ZGp-hi (11/10 23:21–23:32, commit `07574d7` và `794bd2c` nhánh `zh-f
 
 ## 6. Lệch so với `R2AI_STAGE3_CONTEXT.md`
 
+S8 D (2026-10-14 00:33, GPT-6): A đã đo Z1 Final 0,2497/FD 0,2622 P 0,1563 R 0,3790; Z2 Final 0,2500/FC 0,2379 P 0,2053 R 0,2989. Inverse conditional doc 12,651312% / chunk P 15,611457%, rounding ranges trong report. D K100 Final 0,2522 FD 0,2577 PD 0,1525 RD 0,3805 FC 0,2467 PC 0,1868 RC 0,3292; Z2-D K99 ZIP 102064951B/662 chunk zh, ZL-D K98 ZIP 101896118B/1611 chunk zh/tau L 0,44287109375/cap 20 / 6 doc/query; cap 102600000 / dict 64. Giữ doc vi / cắt đuôi chunk vi theo Vu; native 0 lỗi/v2/CRC/SHA/parity, 31 CPU tests. Forecast có loss giảm K / sensitivity p 3/6/10/13, chưa đo D probes. Không GPU/crawl/nộp/push; docs/s8_v2_language_probes_D.md.
+
 S8 A (2026-10-13 20:50, GPT-6): Vu báo LB S6-a Final0,2483/DocF20,2594 P0,1563 R0,3726/ChunkF20,2371 P0,2056 R0,2976. Z1-A 101149603B, Z2-A 101862687B, cap101870962, dict8 props5d00008000/lc-lp-pb3-0-2; Z2 preset9extreme theo Vu, zh chunk bỏ73. Native validator0lỗi từngfile, v2/CRC/JSON SHA/vi prefix/doc arrays khớp; 3601docID và 589chunkzh thêm; coverage77523/240000. Forecast sensitivity từ base thật p3/6/10/15/25% với common gold và novelty assumptions, chưa đo LB zh. B đã dừng/chờ S6-d thắng và zh config dương; không GPU/crawl/nộp/push. Gói duyệt out/diag-lang/v2/prebuild và docs/s8_v2_language_probes.md;21synthetic testpass.
 
 S8 v2 duyệt sửa (2026-10-13 19:24, GPT-6): base chờ điểm tốt nhất S6-a/S6-d tối13/10, chưa sinh ZIP thật. Candidate S11 SHA `b7a03d58…345ed3`, đủ60.000row/1.200query/top50; τ0,96/cap10 trước overlap có3601doc/3601ID,538query0doc; top1 Z2 662query/662ID. Coverage77523/240000 (32,30%). Vu chốt Z1 không thêm chunk, cả nhóm ID v2; Z2 nguyên docs.parquet.doc_text, một chunk/ID v2, bảo vệ doc. Source624doc/14segment kiểm hash, textUTF8 1.725.179B trước JSON/nén; byte ZIP chưa đo. Generator zg_pair có gate measured-base/validator/nén cùngbase; 18synthetic tests pass. Inverse multi-ID và chunk có giả định macro/nhiều-nhiều; chưa dự báo số LB trước khi có base. Probe-en chờ S10 fetch14/10, τQ75, bỏtitle_only. Không GPU/crawl/nộp/push.
@@ -273,6 +275,7 @@ Hai dòng ❓ từ CONTEXT:
 
 | Thời gian (UTC+7) | Ai | Thay đổi |
 |---|---|---|
+| 2026-10-14 00:33 | GPT-6 (Codex) | S8 inverse A, probes D dict 64/cap/K/v2/SHA/native 0 lỗi, giữ docs vi; sensitivity loss K/precision biên, 31 tests; chưa nộp. |
 | 2026-10-13 20:50 | GPT-6 (Codex) | S8 A: LB S6-a thật; Z1/Z2 ZIP/cap/header/SHA/native0error; Z2 preset9extreme/fallback theo Vu, sensitivity và gói duyệt; B deferred, chưa nộp. |
 | 2026-10-13 19:24 | GPT-6 (Codex) | S8 sửa theo duyệt Vu: S6 base pending, Z1/Z2; candidate đủ1200, doc_text/source/hash;18synthetic tests pass, chưa sinh probe thật. |
 | 2026-10-13 15:31 | GPT-6 (Codex) | S8 v2: taxonomy1.200, thiết kế inverse/probe/byte; generator11 synthetic pass; bỏ en title_only; chờ S10/S11/S6, chưa nộp. |

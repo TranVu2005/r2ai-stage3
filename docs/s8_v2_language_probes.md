@@ -2,6 +2,10 @@
 
 2026-10-13 20:50 UTC+7 · GPT-6 (Codex) · HEAD kiểm trước commit `f7f656493a033b987c3220a89d65f62657bb1f0a`, nhánh `diag-lang`.
 
+## LB A đã đo và probes D
+
+Vu báo Z1-A Final 0,2497 Doc F2 0,2622 P 0,1563 R 0,3790; Z2-A Final 0,2500 Chunk F2 0,2379 P 0,2053 R 0,2989. Inverse conditional doc 12,651312%, chunk P 15,611457%; [gói D và inverse](C:/Users/Admin/.codex/worktrees/diag-lang/r2ai-stage3/docs/s8_v2_language_probes_D.md). Sensitivity A dưới đây là bản trước LB giữ để đối chiếu. S6-d K100 Final 0,2522 là best đo hiện tại do Vu cung cấp.
+
 ## Base và trạng thái
 
 Base **S6-a K80**, ZIP-LZMA dict 8 MiB, ZIP 101.131.654 B; SHA ZIP `e58a53bbf5404084608bfe96f4657c665871bce72a55900639db31b455f1b430`, JSON `799b16358508113e79b76e04abab70b903fd10fd6b2f88c588d23d6859070e69`. Điểm **LB thật do Vu cung cấp**: Final **0,2483**; Doc F2 **0,2594**, P0,1563/R0,3726; Chunk F2 **0,2371**, P0,2056/R0,2976. Không dùng proxy.

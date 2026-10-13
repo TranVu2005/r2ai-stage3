@@ -37,23 +37,26 @@ là bài chỉ có đoạn dẫn nhưng là nội dung thật.
   kèm tiếp theo là chặn quảng cáo hoặc "Cùng chuyên mục"), `giadinhonline_related` ("Nên đọc" / "Tin liên quan" đến hết, 2 host
   giadinhonline), `baonghean_onecms_footer`. Không bao giờ làm doc rỗng.
 - Loại cả doc: `lottery_result` (title kiểu XSDN/XSMB/KQXS/"Kết quả xổ số" **và** có ngày dd/mm; tin về Vietlott không dính),
+  `non_medical_template` (chỉ suckhoecongdongonline.vn, title bắt đầu bằng "Dự báo thời tiết" / "Lịch thi đấu" / "Giá vàng" / "Soi kèo" /
+  "Dự đoán kết quả tỉ số" / "Nhận định bóng đá" / "Tỷ giá"; không áp cho suckhoedoisong.vn vì "Thời tiết …" ở đó là lời khuyên sức khỏe),
   `error_title` (title là `…/404`), `menu_only` (≥ 80% dòng body là mục menu, ≥ 10 dòng), `title_is_site` (title chỉ là tên host).
 
 ## 3. Kết quả quét (index-wide)
 
 | host | doc | loại | % | strip | % | ký tự cắt |
 |---|---:|---:|---:|---:|---:|---:|
-| suckhoecongdongonline.vn | 154.230 | 5.793 | 3,76% | 0 | 0 | 0 |
+| suckhoecongdongonline.vn | 154.230 | 9.348 | 6,06% | 0 | 0 | 0 |
 | thanhnien.vn | 71.607 | 4 | 0,01% | 0 | 0 | 0 |
 | baonghean.vn | 15.728 | 2 | 0,01% | 96 | 0,61% | 3.736 |
 | laodong.vn | 27.184 | 0 | 0 | 1.539 | 5,66% | 232.956 |
 | giadinhonline.vn | 16.726 | 0 | 0 | 554 | 3,31% | 537.888 |
 | phunusuckhoe.giadinhonline.vn | 27.575 | 0 | 0 | 19 | 0,07% | 21.299 |
 | 38 host còn lại | | 0 | 0 | 0 | 0 | 0 |
-| **Tổng** | **623.805** | **5.799** | 0,93% | **2.208** | 0,35% | 795.879 |
+| **Tổng** | **623.805** | **9.354** | 1,50% | **2.208** | 0,35% | 795.879 |
 
-`title_is_site` = 0 doc. Danh sách: `reports/s12_vi_drop_doc_ids.tsv` (5.799), `reports/s12_vi_strip_doc_ids.tsv` (2.208).
-Tác động chunk index-wide (`chunks_t256`): chunk bị bỏ 38.481 (30,36 MB text; submittable answer/body 30.444 chunk, 29,72 MB),
+`title_is_site` = 0 doc. Theo lý do: `lottery_result` 5.793, `non_medical_template` 3.555 (thời tiết 1.180, lịch thi đấu 927, giá vàng 780,
+soi kèo 248, dự đoán tỉ số 176, nhận định bóng đá 122, tỷ giá 122), `menu_only` 4, `error_title` 2. Danh sách: `reports/s12_vi_drop_doc_ids.tsv` (9.354), `reports/s12_vi_strip_doc_ids.tsv` (2.208).
+Tác động chunk index-wide (`chunks_t256`, chưa áp): xem `reports/s12_vi_scan.json` (`chunk_impact`; lần quét đầu, chỉ lottery: chunk bỏ 38.481 = 30,36 MB),
 chunk bị cắt cụt 2.201 (1,51 MB). Đây là cận trên cho index; byte trong ZIP phụ thuộc chunk nào được nộp (xem mục 4).
 
 ## 4. Byte giải phóng trong ZIP K80
@@ -70,8 +73,9 @@ chunk bị cắt cụt 2.201 (1,51 MB). Đây là cận trên cho index; byte tr
 
 ZIP LZMA giảm tối đa bằng số byte thô này (≈ 0,09 MB, thực tế nhỏ hơn vì phần cắt là text lặp, nén tốt). **Dưới ngưỡng 2 MB của Vu:
 dừng ở rule strip, không đề xuất re-fetch, không đề xuất tăng K từ phần này.** Lý do chính: doc rác gần như không được truy hồi cho
-query y khoa (3/95.999 chunk), và đuôi bình luận/liên quan nằm trong doc ít được chọn. Mục 7 (probe chunk cấu trúc) là hướng duy
-nhất còn có thể đổi byte đáng kể; chưa dựng.
+query y khoa (3/95.999 chunk), và đuôi bình luận/liên quan nằm trong doc ít được chọn.
+Probe chunk cấu trúc (mục 7) đã bị C0 bác bỏ nên không còn hướng đổi byte nào từ S12.
+
 ## 5. Ghi chú lệch so với yêu cầu
 
 - Bản tin COVID trùng title ở suckhoecongdongonline (ví dụ "Việt Nam ghi nhận 1 ca tử vong do COVID-19", 30 doc): 30/30 doc có
@@ -79,8 +83,8 @@ nhất còn có thể đổi byte đáng kể; chưa dựng.
   sẽ mất sự kiện riêng của từng bản tin nên **chưa gộp**; chỉ dedupe khi text trùng nguyên văn (mục sau).
 - Trùng nguyên văn sau strip: 2.233 doc (`reports/s12_vi_dup_map.tsv`, drop_id → keep_id). Cả 2.233 đã nằm cùng cụm với
   keeper trong `out/runs/H1/clusters.parquet` (cụm H1 dùng cho expand của best), nên ánh xạ ID đã có sẵn; không áp thêm.
-- Ngoài phạm vi (c) nhưng cùng loại trang mẫu, không phải y khoa, ở suckhoecongdongonline: dự báo thời tiết 1.180, lịch thi đấu 927,
-  giá vàng 780, soi kèo 248, dự đoán tỉ số 176, nhận định bóng đá 122, tỷ giá 122 (tổng ≈ 4.100 theo title). Chưa áp; cần Vu quyết.
+- Các trang mẫu phi y khoa khác (thời tiết, lịch thi đấu, giá vàng, soi kèo, tỉ số, bóng đá, tỷ giá) đã thành rule `non_medical_template`
+  theo quyết định 13/10; chưa áp vào index hay submission. Trên K80 rule này loại thêm 0 chunk (không doc nào trong 95.999 chunk khớp).
 
 ## 6. Chunker theo cấu trúc (`src/r2ai/vi_quality/chunker.py`, chưa nối vào pipeline)
 
@@ -108,13 +112,11 @@ So với chunker index hiện tại (t256, `index.chunk.chunk_paragraphs`) trên
 
 Đọc kết quả: ZIP giảm ít hơn JSON vì phần overlap bị bỏ nén rất tốt. Mẫu chỉ có 13 cặp hỏi-đáp (vinmec), chưa đủ nói về tỉ lệ
 hỏi-đáp toàn corpus. Chunk < 32 token tăng (mục cuối cùng của section nhỏ không gộp được); chưa chỉnh.
-Lưu ý quan trọng: `chunk_mode full` của builder hiện nộp **cả body** của doc, không nộp chunk t256, nên chunker chỉ đổi byte ZIP nếu
+Lưu ý: `chunk_mode full` của builder nộp **cả body** của doc, không nộp chunk t256, nên chunker chỉ đổi byte ZIP nếu
 bản nộp dùng chunk con (kiểu `window`/c2). Không có gold offline: chưa đo Chunk F2, mọi con số trên là cấu trúc/dung lượng.
 
-## 7. Đề xuất 1 probe LB (không tự nộp)
+## 7. Probe LB chunk cấu trúc: bác bỏ
 
-Dựa trên K80 (mục 4): giữ doc set và thứ tự doc của K80, giữ nguyên số doc nhận chunk; thay `chunk_text` body đầy đủ bằng
-chunk cấu trúc ≤ 256 token chứa chunk t256 có điểm reranker cao nhất (ánh xạ theo tâm span, không cần chấm lại reranker), cộng
-phần body còn lại không đổi cho doc ngoài top. Byte giải phóng dùng để tăng `k_chunk`. Chưa có số byte vì cần JSON K80; Chunk F2
-chỉ đo được bằng 1 lượt LB. Rủi ro đã biết: A/B trước đây cho thấy chunk full thắng chunk ngắn ở cùng K (c2 0,0158 → full 0,0273),
-nên probe chỉ đáng nộp nếu byte giải phóng cho phép tăng K đáng kể.
+Không làm. C0 (cửa sổ ±1, thay body bằng chunk con) đã bác bỏ hướng này: Chunk F2 0,1312 so với 0,2222 của K80 (quyết định 13/10).
+Chunker cấu trúc vì vậy chỉ dùng cho index (en, S10b); zh giữ t256 để không lệch τ = 0,96; submission giữ `chunk_mode full`.
+Xem `src/r2ai/vi_quality/README.md`.

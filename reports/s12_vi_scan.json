@@ -1,14 +1,14 @@
 {
  "docs": 623805,
- "dropped": 5799,
+ "dropped": 9354,
  "stripped": 2208,
  "dup": 2233,
  "chunk_impact": {
   "removed": {
-   "chunks": 38481,
-   "bytes": 30355761,
-   "submittable_chunks": 30444,
-   "submittable_bytes": 29724900
+   "chunks": 57431,
+   "bytes": 44176708,
+   "submittable_chunks": 45839,
+   "submittable_bytes": 43292712
   },
   "truncated": {
    "chunks": 2201,
@@ -22,7 +22,8 @@
    "docs": 154230,
    "chars": 470059234,
    "dup_text": 70,
-   "drop_lottery_result": 5793
+   "drop_lottery_result": 5793,
+   "drop_non_medical_template": 3555
   },
   "suckhoedoisong.vn": {
    "docs": 82618,

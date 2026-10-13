@@ -50,3 +50,14 @@ def test_menu_only_needs_most_lines_to_be_nav():
     assert menu_only('Tiêu đề\n\n' + nav)
     assert not menu_only('Tiêu đề\n\n' + nav + '\n\n' + '\n\n'.join(f'Đoạn văn số {i} của bài viết thật.' for i in range(20)))
     assert not menu_only('Tiêu đề\n\nTrang chủ\n\nVideo')
+
+
+def test_non_medical_template_titles_only_on_suckhoecongdongonline():
+    host = 'suckhoecongdongonline.vn'
+    for title in ['Dự báo thời tiết ngày mai 5/6: Bắc Bộ có mưa', 'Lịch thi đấu bóng đá hôm nay ngày 8/6', 'Giá vàng hôm nay 29/1',
+                  'Soi kèo Real Madrid vs Osasuna', 'Dự đoán kết quả tỉ số trận Anh vs Pháp', 'Nhận định bóng đá Arsenal vs Chelsea',
+                  'Tỷ giá USD hôm nay']:
+        assert drop_reason(host, title + '\n\nbody') == 'non_medical_template', title
+    assert drop_reason('suckhoedoisong.vn', 'Dự báo thời tiết: nắng nóng gây say nắng\n\nb') is None
+    assert drop_reason(host, 'Thời tiết nắng nóng, cách phòng say nắng\n\nb') is None
+    assert drop_reason(host, 'Cách đọc tỷ giá khi đi khám ở nước ngoài\n\nb') is None

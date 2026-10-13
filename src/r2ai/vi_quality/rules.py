@@ -4,8 +4,9 @@ doc_text = "\n\n".join([title, body]) as written by r2ai.index.chunk (data/chunk
 
 * strip_tail(domain, text): cut a boilerplate block that runs to the end of the doc (comment widget, related-article
   list, CMS footer). Returns (new_text, rule, cut_start) or (text, None, None). The head is kept as is, rstripped.
-* drop_reason(domain, text): reason a doc carries no article (lottery result page, error page as title, menu only,
-  title is only the site name) or None.
+* drop_reason(domain, text): reason a doc carries no article or no medical content (lottery result page, templated
+  weather / fixtures / gold / betting / football / exchange-rate page, error page as title, menu only, title is only the
+  site name) or None.
 Thresholds come from the scan in reports/s12_vi_quality.md; every rule is exact-pattern, none is a fuzzy score.
 """
 from __future__ import annotations
@@ -26,6 +27,10 @@ STRIP_RULES = (
 
 LOTTERY_TITLE = re.compile(r'^(?:XS[A-Z]{0,6}\b|KQXS\b|SXMB\b|SXMT\b|Kết quả (?:xổ số|xố số|XS)|Trực tiếp (?:kết quả )?(?:xổ số|XS)'
                            r'|Xổ số|Dự đoán (?:XS|xổ số|kết quả XS))', re.I)
+# templated non-medical pages (weather, fixtures, gold, betting, football, exchange rates); title prefix, one host only because
+# suckhoedoisong.vn titles starting with "Thời tiết" are health advice
+NON_MEDICAL_HOSTS = frozenset({'suckhoecongdongonline.vn'})
+NON_MEDICAL_TITLE = re.compile(r'^(?:Dự báo thời tiết|Lịch thi đấu|Giá vàng|Soi kèo|Dự đoán kết quả tỉ số|Nhận định bóng đá|Tỷ giá)', re.I)
 RESULT_DATE = re.compile(r'\d{1,2}/\d{1,2}')   # result pages carry a draw date; news about the lottery does not
 ERROR_TITLE = re.compile(r'^(?:https?://\S+/)?(?:404|error)(?:\.html?)?$|^(?:404 )?(?:page )?not found$|^không tìm thấy trang', re.I)
 NAV_LINES = frozenset({
@@ -69,6 +74,8 @@ def drop_reason(domain: str, text: str) -> str | None:
     title = first_line(text)
     if LOTTERY_TITLE.search(title) and RESULT_DATE.search(title):
         return 'lottery_result'
+    if domain in NON_MEDICAL_HOSTS and NON_MEDICAL_TITLE.search(title):
+        return 'non_medical_template'
     if ERROR_TITLE.search(title):
         return 'error_title'
     m = HOST_SITE_NAME.match(title)

@@ -133,3 +133,20 @@ def test_membership_counts_outside_ids(tmp_path, monkeypatch):
     p.write_text(format_submission(rows), encoding='utf-8')
     m = s6.membership(p)
     assert m == {'docs': 4, 'docs_outside': 1, 'chunks': 2, 'chunks_outside': 1, 'rows_changed': 1}
+
+
+def test_chunk_lists_inset_and_hybrid():
+    from r2ai.cc_longchau.s6 import chunk_lists_hybrid, chunk_lists_inset
+    new = {1: [10, 11, 12, 13, 14, 15]}
+    texts = {d: f't{d}' for d in new[1]}
+    texts[12] = '  '                       # no text: never a chunk and not counted as a rank
+    docs = {1: [10, 13, 15]}
+    assert [d for d, _ in chunk_lists_inset([1], new, texts, 2, docs)[1]] == [10, 13]
+    assert [d for d, _ in chunk_lists_inset([1], new, texts, 9, docs)[1]] == [10, 13, 15]
+    # ranks (with text): 10=1, 11=2, 13=3, 14=4, 15=5
+    h = chunk_lists_hybrid([1], new, texts, 5, docs, split=2)[1]
+    assert [d for d, _ in h] == [10, 11, 13, 15]          # 14 (rank 4) is outside the set and past the split
+    h = chunk_lists_hybrid([1], new, texts, 3, docs, split=2)[1]
+    assert [d for d, _ in h] == [10, 11, 13]
+    h = chunk_lists_hybrid([1], new, texts, 5, {1: [10]}, split=4)[1]
+    assert [d for d, _ in h] == [10, 11, 13, 14]          # 15 at rank 5 is not in the set nor added at rank <= 4

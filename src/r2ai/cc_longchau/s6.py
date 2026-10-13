@@ -129,6 +129,37 @@ def chunk_lists(qids, new, texts, k: int) -> dict[int, list[tuple[int, str]]]:
     return {q: [(d, texts[d]) for d in new[q][:k] if texts.get(d, '').strip()] for q in qids}
 
 
+def chunk_lists_inset(qids, new, texts, k: int, docs_by_q) -> dict[int, list[tuple[int, str]]]:
+    """S6-f: first k docs of the RRF order that have a full text AND are already in the fixed relevant_docs (no doc is ever added)."""
+    out = {}
+    for q in qids:
+        have = set(docs_by_q[q])
+        out[q] = [(d, texts[d]) for d in new[q] if d in have and texts.get(d, '').strip()][:k]
+    return out
+
+
+def chunk_lists_hybrid(qids, new, texts, k: int, docs_by_q, split: int = 80) -> dict[int, list[tuple[int, str]]]:
+    """S6-g: rank = position among docs with full text. Ranks 1..split as chunk_lists (docs missing from relevant_docs get added by
+    protection); ranks split+1..k only from docs already in relevant_docs (fixed set + docs protection added at ranks <= split)."""
+    out = {}
+    for q in qids:
+        allowed = set(docs_by_q[q])
+        res, rank = [], 0
+        for d in new[q]:
+            if not texts.get(d, '').strip():
+                continue
+            rank += 1
+            if rank > k:
+                break
+            if rank <= split:
+                allowed.add(d)
+                res.append((d, texts[d]))
+            elif d in allowed:
+                res.append((d, texts[d]))
+        out[q] = res
+    return out
+
+
 # ------------------------------------------------------------------ render
 
 def render(path, qids, docs_by_q, chunks_by_q, *, protect: bool, cc_ids=frozenset()) -> dict:
@@ -245,7 +276,12 @@ def cmd_build(a) -> int:
         raise ValueError(f'--k {a.k} > --k-cap {a.k_cap}')
     from .build_b import cc_doc_ids
     cc = cc_doc_ids(roots)
-    chunks = chunk_lists(qids, new, texts, a.k)
+    if a.mode == 'inset':
+        chunks = chunk_lists_inset(qids, new, texts, a.k, docs)
+    elif a.mode == 'hybrid':
+        chunks = chunk_lists_hybrid(qids, new, texts, a.k, docs, a.split)
+    else:
+        chunks = chunk_lists(qids, new, texts, a.k)
     del texts, new
     stem = a.name.replace('-', '_')
     jp = guard(d / f'{stem}.json')
@@ -255,7 +291,7 @@ def cmd_build(a) -> int:
     counts['render_seconds'] = round(time.time() - t0, 1)
     st = finish(a.name, jp, method=a.zip_method, docs_dir=docs_dir, allow_outside=not a.protect, counts=counts, probe_only=a.probe, reuse_zip=a.reuse_zip,
                 lzma_dict_mib=a.lzma_dict_mib, ceiling=a.ceiling,
-                extra={'k': a.k, 'pool': a.pool, 'protect': a.protect, 'docs_source': f'cc-A-cut115 {CC_A_CUT115_SHA256[:8]}'})
+                extra={'k': a.k, 'pool': a.pool, 'protect': a.protect, 'mode': a.mode, 'split': a.split if a.mode == 'hybrid' else None, 'docs_source': f'cc-A-cut115 {CC_A_CUT115_SHA256[:8]}'})
     print(json.dumps(st, ensure_ascii=False, indent=1))
     return 0
 
@@ -473,6 +509,9 @@ def main(argv=None):
     b.add_argument('--lzma-dict-mib', type=int, default=None, help='LZMA dictionary (default: stdlib 8 MiB)')
     b.add_argument('--ceiling', type=int, default=None, help=f'ZIP byte limit (default {CEILING})')
     b.add_argument('--k-cap', type=int, default=K_CAP, help='chunk docs per query held in the pool cache')
+    b.add_argument('--mode', choices=('all', 'inset', 'hybrid'), default='all',
+                   help='all: first K docs (S6-a..e); inset: only docs already in relevant_docs (S6-f); hybrid: ranks <= --split as all, deeper only in-set (S6-g)')
+    b.add_argument('--split', type=int, default=80)
     b.add_argument('--no-cache', action='store_true')
     dd = sub.add_parser('dict')
     dd.add_argument('--name', required=True, help='an existing s6 variant directory holding the JSON')

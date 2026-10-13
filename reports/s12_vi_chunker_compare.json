@@ -1,0 +1,49 @@
+{
+ "docs": 12636,
+ "hosts": 44,
+ "target": 256,
+ "body_chars": 48677726,
+ "chars_in_chunks": {
+  "old": 60226204,
+  "new": 49036802
+ },
+ "struct": {
+  "old": {
+   "list_runs": 4646,
+   "chunks_ending_in_heading": 6036,
+   "list_runs_split": 1649,
+   "qa_pairs": 13
+  },
+  "new": {
+   "list_runs": 4646,
+   "list_runs_split": 847,
+   "chunks_ending_in_heading": 162,
+   "qa_pairs": 13,
+   "qa_pairs_same_chunk": 13
+  }
+ },
+ "old": {
+  "chunks": 72738,
+  "tokens_mean": 246.22983859880668,
+  "tokens_p50": 219.0,
+  "tokens_p95": 254.0,
+  "tokens_max": 26620,
+  "over_1.5x_target": 0.003684456542659958,
+  "under_32": 0.005526684813989937,
+  "json_bytes": 78979129,
+  "zip_deflate9": 18593041,
+  "lzma": 12085888
+ },
+ "new": {
+  "chunks": 70101,
+  "tokens_mean": 213.2034921042496,
+  "tokens_p50": 188.0,
+  "tokens_p95": 253.0,
+  "tokens_max": 26620,
+  "over_1.5x_target": 0.0038515855693927333,
+  "under_32": 0.022453317356385786,
+  "json_bytes": 64090072,
+  "zip_deflate9": 17767899,
+  "lzma": 11607384
+ }
+}

@@ -50,7 +50,7 @@ là bài chỉ có đoạn dẫn nhưng là nội dung thật.
 | giadinhonline.vn | 16.726 | 0 | 0 | 554 | 3,31% | 537.888 |
 | phunusuckhoe.giadinhonline.vn | 27.575 | 0 | 0 | 19 | 0,07% | 21.299 |
 | 38 host còn lại | | 0 | 0 | 0 | 0 | 0 |
-| **Tổng** | **623.805** | **5.799** | 0,93% | **2.208** | 0,35% | 796.000 |
+| **Tổng** | **623.805** | **5.799** | 0,93% | **2.208** | 0,35% | 795.879 |
 
 `title_is_site` = 0 doc. Danh sách: `reports/s12_vi_drop_doc_ids.tsv` (5.799), `reports/s12_vi_strip_doc_ids.tsv` (2.208).
 Tác động chunk index-wide (`chunks_t256`): chunk bị bỏ 38.481 (30,36 MB text; submittable answer/body 30.444 chunk, 29,72 MB),
@@ -70,3 +70,40 @@ Sẽ báo số doc/chunk rác đang nộp và MB giải phóng; nếu < 2 MB th�
   keeper trong `out/runs/H1/clusters.parquet` (cụm H1 dùng cho expand của best), nên ánh xạ ID đã có sẵn; không áp thêm.
 - Ngoài phạm vi (c) nhưng cùng loại trang mẫu, không phải y khoa, ở suckhoecongdongonline: dự báo thời tiết 1.180, lịch thi đấu 927,
   giá vàng 780, soi kèo 248, dự đoán tỉ số 176, nhận định bóng đá 122, tỷ giá 122 (tổng ≈ 4.100 theo title). Chưa áp; cần Vu quyết.
+
+## 6. Chunker theo cấu trúc (`src/r2ai/vi_quality/chunker.py`, chưa nối vào pipeline)
+
+Luật: heading (từ `headings` của extractor, nhãn kết thúc bằng ":", tiêu đề đánh số ngắn) đi cùng khối bên dưới và không đứng cuối
+chunk; cặp hỏi-đáp chung một chunk nếu vừa `target`; list/bảng là một khối, chỉ tách ở ranh giới mục khi bản thân vượt `target`;
+section vừa `target` là một chunk, gộp section liền kề chỉ khi chunk đang mở < 64 token; không overlap; chunk luôn là substring
+nguyên văn của `doc_text` (số, đơn vị, phủ định giữ nguyên, test `tests/test_vi_chunker.py`). Tái dùng cho en/zh (S10b, S11): chỉ cần
+đoạn + `headings` tùy chọn, heuristic heading không phụ thuộc tiếng Việt (dấu câu cuối gồm `。！？`; chưa chạy thử trên zh).
+
+So với chunker index hiện tại (t256, `index.chunk.chunk_paragraphs`) trên cùng 12.636 doc (300 doc đầu mỗi host theo thứ tự shard,
+44 host, 48,68 triệu ký tự body), tokenizer BGE-M3 thật, `target` = 256 (`reports/s12_vi_chunker_compare.json`):
+
+| | t256 hiện tại | theo cấu trúc |
+|---|---:|---:|
+| số chunk answer/body | 72.738 | 70.101 (−3,6%) |
+| token/chunk mean · p50 · p95 | 246 · 219 · 254 | 213 · 188 · 253 |
+| ký tự trong chunk (body gốc 48,68 M) | 60,23 M (+23,7% do overlap) | 49,04 M (+0,7%) |
+| JSON các chunk | 78,98 MB | 64,09 MB (−18,9%) |
+| ZIP deflate-9 các chunk | 18,59 MB | 17,77 MB (−4,4%) |
+| LZMA các chunk | 12,09 MB | 11,61 MB (−4,0%) |
+| chunk kết thúc bằng heading | 6.036 (8,3%) | 162 (0,2%) |
+| list/bảng bị cắt ngang / tổng | 1.649 / 4.646 (35%) | 847 / 4.646 (18%; phần còn lại dài hơn `target`) |
+| cặp hỏi-đáp chung chunk | 0 / 13 | 13 / 13 |
+| chunk < 32 token | 0,55% | 2,25% |
+
+Đọc kết quả: ZIP giảm ít hơn JSON vì phần overlap bị bỏ nén rất tốt. Mẫu chỉ có 13 cặp hỏi-đáp (vinmec), chưa đủ nói về tỉ lệ
+hỏi-đáp toàn corpus. Chunk < 32 token tăng (mục cuối cùng của section nhỏ không gộp được); chưa chỉnh.
+Lưu ý quan trọng: `chunk_mode full` của builder hiện nộp **cả body** của doc, không nộp chunk t256, nên chunker chỉ đổi byte ZIP nếu
+bản nộp dùng chunk con (kiểu `window`/c2). Không có gold offline: chưa đo Chunk F2, mọi con số trên là cấu trúc/dung lượng.
+
+## 7. Đề xuất 1 probe LB (không tự nộp)
+
+Chỉ đề xuất sau khi có K80: giữ doc set và thứ tự doc của K80, giữ nguyên số doc nhận chunk; thay `chunk_text` body đầy đủ bằng
+chunk cấu trúc ≤ 256 token chứa chunk t256 có điểm reranker cao nhất (ánh xạ theo tâm span, không cần chấm lại reranker), cộng
+phần body còn lại không đổi cho doc ngoài top. Byte giải phóng dùng để tăng `k_chunk`. Chưa có số byte vì cần JSON K80; Chunk F2
+chỉ đo được bằng 1 lượt LB. Rủi ro đã biết: A/B trước đây cho thấy chunk full thắng chunk ngắn ở cùng K (c2 0,0158 → full 0,0273),
+nên probe chỉ đáng nộp nếu byte giải phóng cho phép tăng K đáng kể.

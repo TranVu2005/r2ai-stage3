@@ -1,6 +1,7 @@
-"""Build the best submission (configs/submission-best.yaml) and check its JSON SHA256 against the uploaded file.
+"""Build the configured best variant (A1-115 by default) and check its JSON / configured ZIP SHA256.
 
-    python scripts/build_best_submission.py [--config configs/submission-best.yaml] [--from-retrieval] [--out X.zip]
+    python scripts/build_best_submission.py [--config configs/submission-best.yaml] [--variant A1-115|VS-append]
+                                               [--from-retrieval] [--out X.zip]
 """
 import sys
 

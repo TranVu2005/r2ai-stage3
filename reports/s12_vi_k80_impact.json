@@ -1,0 +1,39 @@
+{
+ "docs": {
+  "total": 163613,
+  "removed": 4,
+  "outside_index": 24000
+ },
+ "chunks": {
+  "total": 95999,
+  "stripped": 83,
+  "removed": 3
+ },
+ "bytes": {
+  "total": 627677038,
+  "stripped": 82543,
+  "removed": 3589
+ },
+ "queries": {
+  "n": 1200
+ },
+ "host": {
+  "giadinhonline.vn": {
+   "chunks_stripped": 60,
+   "bytes_stripped": 79311
+  },
+  "suckhoecongdongonline.vn": {
+   "docs_removed": 4,
+   "chunks_removed": 3,
+   "bytes_removed": 3589
+  },
+  "laodong.vn": {
+   "chunks_stripped": 20,
+   "bytes_stripped": 3106
+  },
+  "baonghean.vn": {
+   "chunks_stripped": 3,
+   "bytes_stripped": 126
+  }
+ }
+}

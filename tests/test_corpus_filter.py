@@ -63,7 +63,7 @@ def test_filter_drops_outside_docs_and_chunks_keeps_rest(tmp_path, ids, as_zip):
     assert out == format_submission(got)
     assert out.split('\n')[2] + '\n' in text
     assert st == {
-        'rows': 3, 'rows_changed': 2, 'rows_empty_docs': 1, 'docs': 7, 'docs_outside': 3, 'docs_distinct_outside': 2,
+        'rows': 3, 'rows_changed': 2, 'rows_empty_docs': 1, 'docs': 7, 'docs_outside': 3, 'docs_distinct_outside': 2, 'docs_dropped_host': 0, 'chunks_dropped_host': 0,
         'chunks': 6, 'chunks_outside': 3, 'chunks_distinct_docs_outside': 2, 'docs_kept': 4, 'chunks_kept': 3,
         'zip_bytes': dst.stat().st_size, 'json_bytes': len(out.encode('utf-8')),
         'json_sha256': st['json_sha256'], 'src_json_bytes': len(text.encode('utf-8')),
@@ -99,3 +99,16 @@ def test_filter_big_lzma_dict_roundtrips(tmp_path, ids):
         assert z.infolist()[0].compress_type == zipfile.ZIP_LZMA
         assert json.loads(z.read('big_v2.json'))[0]['relevant_docs'] == [10, 11]
     assert zipfile.LZMACompressor.__module__ == 'zipfile' and 'dict_size' not in zipfile.LZMACompressor._init.__code__.co_names
+
+
+def test_filter_drop_hosts_removes_docs_and_chunks_of_that_host(tmp_path, ids):
+    src, _ = _write(tmp_path, False)
+    dst = tmp_path / 'novin_v2.zip'
+    st = F.filter_submission(src, dst, ids_path=ids, drop_hosts=['vinmec.com'])
+    with zipfile.ZipFile(dst) as z:
+        got = json.loads(z.read('novin_v2.json'))
+    assert got[0]['relevant_docs'] == [10]                       # 11 is vinmec, 90 outside
+    assert got[0]['relevant_chunks'] == [_chunk(10)]
+    assert got[1]['relevant_docs'] == [12, 10]                    # id 12 is 39.net, untouched
+    assert (st['docs_dropped_host'], st['chunks_dropped_host']) == (1, 1)
+    assert (st['docs_outside'], st['chunks_outside']) == (3, 3)

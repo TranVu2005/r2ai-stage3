@@ -148,7 +148,7 @@ def test_replay_does_not_change_when_the_crawl_db_changes(tmp_path, crawl):
 
 
 def test_configs_best_is_rd150_plus_slug_append():
-    b, r = best.load_config(ROOT / 'configs' / 'submission-best.yaml'), best.load_config(ROOT / 'configs' / 'submission-rd150.yaml')
+    b, r = best.load_config(ROOT / 'configs' / 'submission-best.yaml', 'VS-append'), best.load_config(ROOT / 'configs' / 'submission-rd150.yaml')
     assert r['submission']['expected_json_sha256'] == RD150_SHA and best.slug_append_config(r) is None
     sl = best.slug_append_config(b)
     assert sl['enabled'] is True and len(sl['pin_sha256']) == 64

@@ -1,0 +1,244 @@
+{
+ "docs": 623805,
+ "dropped": 9354,
+ "stripped": 2208,
+ "dup": 2233,
+ "chunk_impact": {
+  "removed": {
+   "chunks": 57431,
+   "bytes": 44176708,
+   "submittable_chunks": 45839,
+   "submittable_bytes": 43292712
+  },
+  "truncated": {
+   "chunks": 2201,
+   "bytes": 1514003,
+   "submittable_chunks": 2201,
+   "submittable_bytes": 1514003
+  }
+ },
+ "host": {
+  "suckhoecongdongonline.vn": {
+   "docs": 154230,
+   "chars": 470059234,
+   "dup_text": 70,
+   "drop_lottery_result": 5793,
+   "drop_non_medical_template": 3555
+  },
+  "suckhoedoisong.vn": {
+   "docs": 82618,
+   "chars": 312146722,
+   "dup_text": 320
+  },
+  "thanhnien.vn": {
+   "docs": 71607,
+   "chars": 160647952,
+   "dup_text": 116,
+   "drop_menu_only": 4
+  },
+  "phunusuckhoe.giadinhonline.vn": {
+   "docs": 27575,
+   "chars": 85904081,
+   "dup_text": 346,
+   "strip_giadinhonline_related": 19,
+   "strip_chars": 21299
+  },
+  "laodong.vn": {
+   "docs": 27184,
+   "chars": 57624863,
+   "strip_laodong_comment": 1539,
+   "strip_chars": 232956,
+   "dup_text": 1
+  },
+  "vinmec.com": {
+   "docs": 26124,
+   "chars": 128696164,
+   "dup_text": 8
+  },
+  "medlatec.vn": {
+   "docs": 24709,
+   "chars": 143142086,
+   "dup_text": 9
+  },
+  "giadinhonline.vn": {
+   "docs": 16726,
+   "chars": 59740425,
+   "strip_giadinhonline_related": 554,
+   "strip_chars": 537888,
+   "dup_text": 26
+  },
+  "baohaiphong.vn": {
+   "docs": 16246,
+   "chars": 41311624,
+   "dup_text": 14
+  },
+  "baonghean.vn": {
+   "docs": 15728,
+   "chars": 47296586,
+   "strip_baonghean_onecms_footer": 96,
+   "strip_chars": 3736,
+   "dup_text": 8,
+   "drop_error_title": 2
+  },
+  "baodanang.vn": {
+   "docs": 14447,
+   "chars": 40206861,
+   "dup_text": 3
+  },
+  "vietnamnet.vn": {
+   "docs": 13840,
+   "chars": 41343654,
+   "dup_text": 124
+  },
+  "tiemchunglongchau.com.vn": {
+   "docs": 13277,
+   "chars": 87476176,
+   "dup_text": 37
+  },
+  "baocantho.com.vn": {
+   "docs": 12008,
+   "chars": 32156080,
+   "dup_text": 9
+  },
+  "hellobacsi.com": {
+   "docs": 11742,
+   "chars": 79398175,
+   "dup_text": 702
+  },
+  "baoangiang.com.vn": {
+   "docs": 10695,
+   "chars": 32468425,
+   "dup_text": 33
+  },
+  "khoahocphothong.vn": {
+   "docs": 8096,
+   "chars": 29152727,
+   "dup_text": 16
+  },
+  "vov2.vov.vn": {
+   "docs": 6898,
+   "chars": 19131713,
+   "dup_text": 4
+  },
+  "phuyen.baodaklak.vn": {
+   "docs": 6248,
+   "chars": 15579106,
+   "dup_text": 13
+  },
+  "suckhoeviet.org.vn": {
+   "docs": 5625,
+   "chars": 24755685,
+   "dup_text": 4
+  },
+  "baoquangtri.vn": {
+   "docs": 5481,
+   "chars": 17984957
+  },
+  "nhandan.vn": {
+   "docs": 5222,
+   "chars": 19507730,
+   "dup_text": 215
+  },
+  "baovinhlong.com.vn": {
+   "docs": 5107,
+   "chars": 16668900,
+   "dup_text": 3
+  },
+  "tamanhhospital.vn": {
+   "docs": 4259,
+   "chars": 26058094
+  },
+  "tuoitre.vn": {
+   "docs": 3893,
+   "chars": 13366607,
+   "dup_text": 30
+  },
+  "qdnd.vn": {
+   "docs": 3699,
+   "chars": 11588581,
+   "dup_text": 3
+  },
+  "vietnamplus.vn": {
+   "docs": 3695,
+   "chars": 11301574,
+   "dup_text": 7
+  },
+  "baogialai.com.vn": {
+   "docs": 3287,
+   "chars": 8820520,
+   "dup_text": 2
+  },
+  "tienphong.vn": {
+   "docs": 3021,
+   "chars": 11028703,
+   "dup_text": 13
+  },
+  "baoquangninh.vn": {
+   "docs": 2909,
+   "chars": 10742631,
+   "dup_text": 2
+  },
+  "bachmai.gov.vn": {
+   "docs": 2509,
+   "chars": 9348529,
+   "dup_text": 1
+  },
+  "baochinhphu.vn": {
+   "docs": 2301,
+   "chars": 9433968,
+   "dup_text": 1
+  },
+  "dantri.com.vn": {
+   "docs": 2063,
+   "chars": 7957127
+  },
+  "vnexpress.net": {
+   "docs": 2055,
+   "chars": 6227871
+  },
+  "sggp.org.vn": {
+   "docs": 1853,
+   "chars": 4492233,
+   "dup_text": 1
+  },
+  "baophutho.vn": {
+   "docs": 1288,
+   "chars": 15102958
+  },
+  "hanoimoi.vn": {
+   "docs": 1283,
+   "chars": 5128154
+  },
+  "baotayninh.vn": {
+   "docs": 1198,
+   "chars": 3302083
+  },
+  "benhviennhitrunguong.gov.vn": {
+   "docs": 1193,
+   "chars": 4797034,
+   "dup_text": 1
+  },
+  "baothanhhoa.vn": {
+   "docs": 782,
+   "chars": 6412844,
+   "dup_text": 1
+  },
+  "thaythuocvietnam.vn": {
+   "docs": 592,
+   "chars": 2572334,
+   "dup_text": 90
+  },
+  "benhvienvietduc.org": {
+   "docs": 425,
+   "chars": 1628844
+  },
+  "pharmacity.vn": {
+   "docs": 65,
+   "chars": 554431
+  },
+  "mega.vietnamplus.vn": {
+   "docs": 2,
+   "chars": 16783
+  }
+ }
+}

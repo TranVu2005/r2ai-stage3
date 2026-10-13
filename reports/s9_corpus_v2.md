@@ -15,7 +15,7 @@ Nhánh `feat/corpus-v2` (worktree `D:/GitHub/r2ai-stage3-corpusv2`), base `main@
 | Dataset | `AIGuruTinix/ViBioMIR` (public, không gated), last_modified 2026-10-12 13:52:14 UTC |
 | Revision hash | `71be0e1239a19dfd7a717e2bc13e3bec21bd0334` |
 | File | `links_corpus_vi_en_zh.parquet`, 37.689.434 B, SHA256 `87e44a792d7a99fb0fde5dff7f09f1a38a0a1fdf02ddd1ac93a005736e00b0a7` |
-| Lưu tại | `data/raw/links_corpus_vi_en_zh.parquet` (ignored); `query.parquet` trên HF vẫn 81.826 B như v1 (chưa so hash) |
+| Lưu tại | `data/raw/links_corpus_vi_en_zh.parquet` (ignored); `query.parquet` trên HF không đổi so với v1 (81.826 B, SHA256 `ce13508b…c08` trùng bản OLD) |
 | Schema | `id: int64`, `url: string` — **không có cột lang** (parquet-cpp-arrow 17.0.0, không metadata) |
 | Dòng | 1.220.598; `id` duy nhất, `url` duy nhất, không null |
 | id min/max | 583 / 7.466.161 (v1: 583 / 4.420.561, 4.394.718 dòng) |
@@ -260,3 +260,46 @@ PYTHONPATH=src python -m r2ai.submit.corpus_filter SRC DST_v2.zip [--lzma-dict-m
 ```
 
 Biến môi trường lấy từ `.env` (đã sao vào worktree). Tải v2 cần `HF_HUB_OFFLINE=0` cho riêng lệnh tải (`.env` đặt =1).
+
+## 8. Bổ sung 13/10: vinmec trong K80, biến thể không vinmec, kiểm HF revision
+
+Nhánh `feat/corpus-v2-vinmec`. K80 = `sub_K80_LZMA.zip` (JSON `sub_K80.json`, SHA256 `91fd6049…73a44`, 1.200 query, 163.613 doc id, 95.999 chunk, 627.677.038 B chunk_text). Số liệu: `out/runs/s9/vinmec_k80_stats.json` (lệnh `python -m r2ai.submit.host_stats SUB --host vinmec.com`). `vinmec.com` có 26.129 id trong v2; host lấy từ `data/corpus_v2_ids.parquet`.
+
+### 8.1 vinmec.com trong K80
+
+| Chỉ số | vinmec | Cả file | Tỉ lệ |
+|:--|--:|--:|--:|
+| doc_id (cặp query–doc) | 17.413 | 163.613 | 10,64% |
+| doc_id khác nhau | 9.887 | — | — |
+| chunk | 12.909 | 95.999 | 13,45% |
+| doc khác nhau có chunk | 8.145 | — | — |
+| byte `chunk_text` (UTF-8) | 74.964.861 | 627.677.038 | 11,94% |
+| doc / query (trung bình trên 1.200) | 14,51 | 136,34 | — |
+| chunk / query | 10,76 | 80,00 | — |
+| byte chunk_text / query | 62.470,7 | 523.064,2 | — |
+| query có ≥ 1 doc vinmec | 1.180 / 1.200 | — | 98,3% |
+| query có ≥ 1 chunk vinmec | 1.166 / 1.200 | — | 97,2% |
+
+### 8.2 Biến thể K80 không vinmec (chưa nộp)
+
+`out/runs/s9/sub_K80_LZMA_v2_novinmec.zip`: bỏ mọi doc id và mọi chunk có `doc_id` thuộc `vinmec.com` (cộng việc lọc ngoài v2, vốn bằng 0).
+
+| Mục | Giá trị |
+|:--|:--|
+| ZIP | 86.945.528 B (ZIP_LZMA, từ điển mặc định 8 MiB, một file `sub_K80_LZMA_v2_novinmec.json` ở gốc) < 99 MB |
+| JSON | 561.820.556 B, SHA256 `8ad4218c1680a4d1c78cf26e54ed2d26216c3d301c1b26995418f97fce005636` (Python và bsdtar cùng ra SHA này) |
+| Doc id | 146.200 (−17.413), TB 121,83 / query |
+| Chunk | 83.090 (−12.909), TB 69,24 / query |
+| Query bị đổi | 1.180; không query nào hết doc (`rows_empty_docs` = 0) |
+
+Kiểm độc lập (`out/runs/s9/verify_novinmec.py`): 1.200/1.200 query khớp "K80 trừ vinmec" theo từng phần tử (thứ tự và chunk_text giữ nguyên), 0 chunk có `doc_id` ngoài `relevant_docs` của query đó, không còn id vinmec nào. Validator verbatim đầy đủ chưa chạy lại (chunk là tập con nguyên văn của K80 đã pass).
+
+Hệ quả cho người quyết nộp: bản này chỉ còn 69 chunk/query (K80 gốc 80), nên không so được với K80 tại cùng số chunk; muốn bù cần bơm chunk khác (không làm ở S9). ZIP dư ≈ 12 MB so với trần 99 MB.
+
+### 8.3 Lệnh kiểm HF revision trước mỗi lần nộp
+
+```
+PYTHONPATH=src python -m r2ai.corpus_v2 check
+```
+
+Exit 0 = an toàn, 1 = lệch, 2 = không kết nối được HF (không xác minh được thì coi là không nộp). Lệnh gọi HTTP thẳng `https://huggingface.co/api/datasets/AIGuruTinix/ViBioMIR?blobs=true` nên không bị `HF_HUB_OFFLINE=1` trong `.env` chặn; chỉ đọc, không tải file. Kiểm: (1) revision HF = `71be0e12…`; (2) SHA256 và kích thước file corpus trên HF = bản đã ghim; (3) SHA256 `query.parquet` trên HF = bản ghim; (4) SHA256 file corpus cục bộ = bản ghim; (5) `data/corpus_v2_ids.parquet` có đúng tập id của file cục bộ; (6) SHA256 `query.parquet` cục bộ nếu có. Chạy 13/10 14:3x: cả 6 mục PASS, exit 0. Lệnh chưa được nối vào script nộp nào (repo chưa có script nộp tự động); người nộp chạy tay. Nếu BTC đổi revision, `HF_REVISION`/`RAW_SHA256` trong `src/r2ai/corpus_v2.py` phải được cập nhật có chủ đích sau khi diff lại.

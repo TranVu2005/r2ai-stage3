@@ -126,6 +126,35 @@ def reopen_urls(conn, domain, url_norms):
         conn.execute('ROLLBACK'); raise
 
 
+def defer_urls(conn, url_norms):
+    """Defer an explicit list of selected open rows (scope cut; inverse of reopen_urls).
+
+    urls.status AND select_meta.new_status both become deferred_select: the watchdog treats a fetch of a row still
+    marked selected there as fine and one marked deferred as a violation, so the two must move together. rank and
+    old_status are kept, so reopen_urls/rollback still restore the row. All-or-nothing: every URL must be unique,
+    present, open (pending/network_error) and in select_meta. Returns [(url_norm, previous status)].
+    """
+    url_norms = list(url_norms)
+    if not url_norms or len(set(url_norms)) != len(url_norms):
+        raise ValueError('Empty or duplicate defer list')
+    conn.execute('BEGIN IMMEDIATE')
+    try:
+        conn.execute('CREATE TEMP TABLE IF NOT EXISTS defer_list(url_norm TEXT PRIMARY KEY)')
+        conn.execute('DELETE FROM defer_list')
+        conn.executemany('INSERT INTO defer_list VALUES(?)', [(u,) for u in url_norms])
+        rows = conn.execute("""SELECT u.url_norm,u.status FROM urls u JOIN select_meta m USING(url_norm)
+            JOIN defer_list l USING(url_norm) WHERE u.status IN ('pending','network_error')""").fetchall()
+        if len(rows) != len(url_norms):
+            raise ValueError(f'{len(url_norms) - len(rows)} URLs are missing, terminal, already deferred or not selected')
+        conn.execute("UPDATE urls SET status='deferred_select' WHERE url_norm IN (SELECT url_norm FROM defer_list)")
+        conn.execute("UPDATE select_meta SET new_status='deferred_select' WHERE url_norm IN (SELECT url_norm FROM defer_list)")
+        conn.execute('DROP TABLE defer_list')
+        conn.execute('COMMIT')
+        return rows
+    except BaseException:
+        conn.execute('ROLLBACK'); raise
+
+
 def rollback(conn, version):
     conn.execute('BEGIN IMMEDIATE')
     try:
@@ -165,6 +194,60 @@ def backup(path):
     with path.open('rb') as f: backup_sha=hashlib.file_digest(f,'sha256').hexdigest()
     if source_sha!=backup_sha: raise ValueError('Backup byte SHA256 mismatch')
     return backup_sha
+
+
+def verify_defer(original, conn, url_norms):
+    """Only status of the listed rows changed (to deferred_select); every other row/column is byte-identical."""
+    listed, columns = set(url_norms), [r[1] for r in conn.execute('PRAGMA table_info(urls)')]
+    status, changed = columns.index('status'), 0
+    for a, b in zip(original.execute('SELECT * FROM urls ORDER BY url_norm'), conn.execute('SELECT * FROM urls ORDER BY url_norm'), strict=True):
+        if a[0] != b[0]:
+            raise ValueError('URL identity/count changed')
+        if a == b:
+            if a[0] in listed:
+                raise ValueError(f'listed URL unchanged: {a[0]}')
+            continue
+        changed += 1
+        if a[0] not in listed or b[status] != 'deferred_select' or a[:status] + a[status + 1:] != b[:status] + b[status + 1:]:
+            raise ValueError(f'unexpected row change: {a[0]}')
+    if changed != len(listed):
+        raise ValueError(f'changed {changed} rows, expected {len(listed)}')
+    return changed
+
+
+def defer_and_gate(path, backup_name):
+    """Backup (byte SHA256) -> defer the listed URLs -> verify against the backup. Crawler must be stopped, WAL 0."""
+    import pandas as pd
+    preflight()
+    urls = list(pd.read_parquet(path, columns=['url_norm']).url_norm)
+    with exclusive('crawl'):
+        stopped_wal0()
+        backup_path = guard(DB.parent / backup_name)
+        sha = backup(backup_path)
+        conn = writer(DB)
+        original = ro(backup_path, immutable=True)
+        prev = []
+        try:
+            before = dict(conn.execute('SELECT status,count(*) FROM urls GROUP BY status'))
+            prev = defer_urls(conn, urls)
+            changed = verify_defer(original, conn, urls)
+            after = dict(conn.execute('SELECT status,count(*) FROM urls GROUP BY status'))
+            record = {'backup': str(backup_path), 'backup_sha256': sha, 'deferred': len(prev),
+                      'previous_status': dict(Counter(s for _, s in prev)), 'verified_changed_rows': changed,
+                      'status_before': before, 'status_after': after, 'plan': str(path), 'at': time.time()}
+            atomic_json(RUN / 'defer-zh-v2.json', record)
+            return record
+        except BaseException:
+            # Gate failed after the commit: put every listed row back to the status it had (no fetch can run under the lock).
+            if prev:
+                conn.execute('BEGIN IMMEDIATE')
+                conn.executemany('UPDATE urls SET status=? WHERE url_norm=?', [(st, u) for u, st in prev])
+                conn.executemany('UPDATE select_meta SET new_status=? WHERE url_norm=?', [(st, u) for u, st in prev])
+                conn.execute('COMMIT')
+            raise
+        finally:
+            conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+            conn.close(); original.close()
 
 
 def load_plan():
@@ -273,8 +356,11 @@ def main(argv=None):
     r=sub.add_parser('reopen-urls'); r.add_argument('--domain',required=True); r.add_argument('--file',required=True,help='parquet with url_norm')
     r=sub.add_parser('rollback'); r.add_argument('--cut-version',required=True)
     sub.add_parser('sync-reopened')
+    r=sub.add_parser('defer-urls'); r.add_argument('--file',required=True,help='parquet with url_norm'); r.add_argument('--backup',required=True,help='backup file name under state/zh_full')
     args=parser.parse_args(argv)
     if args.step=='apply': apply_and_gate(); return 0
+    if args.step=='defer-urls':
+        print(json.dumps(defer_and_gate(args.file,args.backup),ensure_ascii=False)); return 0
     preflight()
     if args.step=='reopen-urls':
         import pandas as pd

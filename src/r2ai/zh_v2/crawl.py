@@ -49,6 +49,10 @@ LANES = (
     ('article.iiyi.com', 'bingli.iiyi.com', 'ask.familydoctor.com.cn'),
 )
 DOMAINS = frozenset(d for lane in LANES for d in lane)
+# D13: the 39.net subdomains answer /robots.txt with a redirect to the 404 page of www.39.net. Under RFC 9309 a 4xx robots.txt
+# (also reached through a redirect) means no restrictions, so the redirect inside the 39.net family is followed instead of failing
+# closed. Every other cross-host robots redirect still fails closed. Pacing stays the tuner default group.
+ROBOTS_REDIRECT_SUFFIX = ('.39.net',)
 
 
 def guard(path) -> Path:
@@ -119,6 +123,13 @@ def engine():
     m.LANES, m.DOMAINS = LANES, DOMAINS
     m.MAX_CONNS_OVERRIDE = {}
     m.guard, m.preflight, m.atomic_json, m.exclusive = guard, preflight, atomic_json, exclusive
+    load_runtime = m.network_runtime
+
+    def network_runtime():
+        runtime = load_runtime()
+        runtime.PoliteClient.ROBOTS_REDIRECT_SUFFIX = ROBOTS_REDIRECT_SUFFIX
+        return runtime
+    m.network_runtime = network_runtime
     return m
 
 

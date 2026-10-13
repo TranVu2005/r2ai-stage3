@@ -61,3 +61,15 @@ def test_engine_runs_on_zh_v2_roots_not_zh_full(env):
     assert m.RUN == zc.RUN and m.RAW == zc.RAW and m.DB == zc.DB and m.LANES == zc.LANES
     from r2ai.zh_full import crawl as base
     assert base.RUN != zc.RUN and base.LANES != zc.LANES
+
+
+def test_robots_redirect_inside_39net_family_is_followed_others_fail_closed(env):
+    m = zc.engine()
+    rt = m.network_runtime()
+    pc = rt.PoliteClient
+    assert pc.ROBOTS_REDIRECT_SUFFIX == ('.39.net',)
+    assert pc._robots_redirect_ok(pc, 'baby.39.net', 'www.39.net')
+    assert not pc._robots_redirect_ok(pc, 'baby.39.net', 'evil.com')
+    assert not pc._robots_redirect_ok(pc, 'familydoctor.com.cn', 'www.39.net')
+    from r2ai.zh_sample import crawl as sample
+    assert sample.PoliteClient.ROBOTS_REDIRECT_SUFFIX == ()

@@ -1,9 +1,11 @@
 """Filter a finished submission to corpus v2 and repack it as ZIP_LZMA (decision D7).
 
 Drops every relevant_docs id and every relevant_chunks entry whose doc_id is not in v2; nothing else changes (row
-order, field order, chunk text and the writer's layout stay byte-identical for untouched rows).
+order, field order, chunk text and the writer's layout stay byte-identical for untouched rows). `--drop-host H`
+additionally removes every doc and chunk of host H (in v2 but unwanted), counted apart from the outside-v2 ones.
 
     python -m r2ai.submit.corpus_filter SRC.(zip|json) DST_v2.zip [--max-zip-bytes 98999999]
+        [--lzma-dict-mib N] [--drop-host HOST ...]
 """
 from __future__ import annotations
 
@@ -19,6 +21,8 @@ import struct
 import zipfile
 from contextlib import contextmanager
 from pathlib import Path
+
+import numpy as np
 
 from r2ai import corpus_v2 as C
 
@@ -62,7 +66,7 @@ def _dumps(row) -> str:
     return json.dumps(row, ensure_ascii=False, separators=(', ', ': '))
 
 
-def filter_submission(src, dst, ids_path=None, max_zip_bytes=DEFAULT_MAX_ZIP, lzma_dict_mib=None) -> dict:
+def filter_submission(src, dst, ids_path=None, max_zip_bytes=DEFAULT_MAX_ZIP, lzma_dict_mib=None, drop_hosts=()) -> dict:
     src, dst = Path(src), Path(dst)
     if dst.suffix.lower() != '.zip':
         raise ValueError('dst must end with .zip')
@@ -71,7 +75,8 @@ def filter_submission(src, dst, ids_path=None, max_zip_bytes=DEFAULT_MAX_ZIP, lz
     tmp = assert_writable(dst.with_name(dst.name + '.tmp'))
     inner = dst.stem + '.json'
     st = dict.fromkeys(('rows', 'rows_changed', 'rows_empty_docs', 'docs', 'docs_outside', 'docs_kept', 'chunks',
-                        'chunks_outside', 'chunks_kept', 'src_json_bytes', 'json_bytes'), 0)
+                        'chunks_outside', 'chunks_kept', 'docs_dropped_host', 'chunks_dropped_host', 'src_json_bytes', 'json_bytes'), 0)
+    dropped = C.host_ids(drop_hosts, ids_path) if drop_hosts else None   # members that are removed on purpose
     out_docs: set[int] = set()
     out_chunk_docs: set[int] = set()
     sha = hashlib.sha256()
@@ -110,17 +115,21 @@ def filter_submission(src, dst, ids_path=None, max_zip_bytes=DEFAULT_MAX_ZIP, lz
                 st['chunks'] += len(chunks)
                 out_docs.update(d for d, ok in zip(docs, dm) if not ok)
                 out_chunk_docs.update(c['doc_id'] for c, ok in zip(chunks, cm) if not ok)
-                if dm.all() and cm.all():
+                dd = np.isin(np.asarray(docs, dtype=np.int64), dropped) if dropped is not None else np.zeros(len(docs), bool)
+                cd = np.isin(np.asarray([c['doc_id'] for c in chunks], dtype=np.int64), dropped) if dropped is not None else np.zeros(len(chunks), bool)
+                if dm.all() and cm.all() and not dd.any() and not cd.any():
                     pending = body
                     st['docs_kept'] += len(docs)
                     st['chunks_kept'] += len(chunks)
                     continue
-                row['relevant_docs'] = [d for d, ok in zip(docs, dm) if ok]
-                row['relevant_chunks'] = [c for c, ok in zip(chunks, cm) if ok]
+                row['relevant_docs'] = [d for d, ok, x in zip(docs, dm, dd) if ok and not x]
+                row['relevant_chunks'] = [c for c, ok, x in zip(chunks, cm, cd) if ok and not x]
                 st['rows_changed'] += 1
                 st['rows_empty_docs'] += not row['relevant_docs']
                 st['docs_outside'] += int((~dm).sum())
                 st['chunks_outside'] += int((~cm).sum())
+                st['docs_dropped_host'] += int((dm & dd).sum())
+                st['chunks_dropped_host'] += int((cm & cd).sum())
                 st['docs_kept'] += len(row['relevant_docs'])
                 st['chunks_kept'] += len(row['relevant_chunks'])
                 pending = _dumps(row)
@@ -151,9 +160,10 @@ def main(argv=None) -> int:
     ap.add_argument('src')
     ap.add_argument('dst')
     ap.add_argument('--max-zip-bytes', type=int, default=DEFAULT_MAX_ZIP)
+    ap.add_argument('--drop-host', action='append', default=[], help='also drop every doc/chunk of this host (repeatable)')
     ap.add_argument('--lzma-dict-mib', type=int, default=None, help='raise the LZMA dictionary (stdlib default 8 MiB)')
     args = ap.parse_args(argv)
-    print(json.dumps(filter_submission(args.src, args.dst, max_zip_bytes=args.max_zip_bytes, lzma_dict_mib=args.lzma_dict_mib), indent=1))
+    print(json.dumps(filter_submission(args.src, args.dst, max_zip_bytes=args.max_zip_bytes, lzma_dict_mib=args.lzma_dict_mib, drop_hosts=args.drop_host), indent=1))
     return 0
 
 

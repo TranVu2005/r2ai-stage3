@@ -34,6 +34,28 @@ def test_config_matches_d50_commands(cfg):
     assert cfg['submission']['max_zip_bytes'] == 104857600
 
 
+def test_submission_best_defaults_to_a1_115_and_keeps_vs_append_variant():
+    path = ROOT / 'configs' / 'submission-best.yaml'
+    a1 = best.load_config(path)
+    vs = best.load_config(path, 'VS-append')
+    assert a1['run_id'] == 'best-a1-115'
+    assert a1['postprocess']['rrf_doc_set']['doc_cut']['target_mean'] == 115
+    assert a1['submission']['uploaded_zip_sha256'] == '666f74f5a7be0f7e2a3550501d0347b0fcbd07b42ad4375690717d24c1971c80'
+    assert vs['submission']['expected_json_sha256'] == '9c91c952863c4e33b992053d665d547ba1f483cd0be487047386ba09af43e2e0'
+
+
+def test_zip_timestamp_normalization_preserves_payload(tmp_path):
+    from zipfile import ZIP_DEFLATED, ZipFile
+    source = tmp_path / 'submission.zip'
+    with ZipFile(source, 'w', ZIP_DEFLATED, compresslevel=9) as archive:
+        archive.writestr('submission.json', b'[{"id":1}]')
+    best.normalize_zip_timestamp(source, (2026, 10, 12, 18, 34, 54))
+    with ZipFile(source) as archive:
+        info = archive.infolist()[0]
+        assert info.date_time == (2026, 10, 12, 18, 34, 54)
+        assert archive.read(info) == b'[{"id":1}]'
+
+
 @pytest.mark.parametrize('payload,rc', [(b'[\n]\n', 0), (b'other', 1)])
 def test_build_checks_json_sha(cfg, tmp_path, monkeypatch, payload, rc):
     from r2ai.submit import make_submission

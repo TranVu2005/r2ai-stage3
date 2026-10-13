@@ -1,6 +1,6 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-13 17:00 (UTC+7)
+- Cập nhật: 2026-10-13 19:40 (UTC+7)
 - Model thực hiện: Claude Sonnet 5.5
 - Commit HEAD đã kiểm trước cập nhật này: `b9246c3` (`main`, gồm S9); nhánh làm việc `tmp/s12-merge` = `main` + merge `--no-ff` `feat/vi-quality` (`e5f1721`)
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
@@ -263,6 +263,7 @@ Hai dòng ❓ từ CONTEXT:
 - D4: xóa `out/runs/zh-full-ingest/ZF/ZF-5p` và `ZF-10p`.
 - D5: bỏ `qihuangzhishu` khỏi kế hoạch ingest/crawl.
 - D6: `b002` chỉ gồm `120ask` và `cnkang`.
+- D11 (S11): phạm vi zh = 240.000 URL zh của corpus v2; D6 bỏ. D13: mọi host có trong v2 (D5 không còn áp dụng cho v2); 19 subdomain `*.39.net` được crawl (robots.txt redirect sang 404 = không hạn chế theo RFC 9309, tốc độ nhóm default); host bị robots chặn đi qua index Common Crawl (chỉ metadata, không tải WARC).
 
 ## 7. Blockers
 
@@ -345,3 +346,4 @@ Hai dòng ❓ từ CONTEXT:
 | 2026-10-13 14:10 | Claude Sonnet 5.5 | S12 `feat/vi-quality`: rebase lên `483f4df`; thêm `r2ai.vi_quality` (rules, scan, chunker theo cấu trúc, compare_chunkers), 14 test mới, `reports/s12_vi_*`; đo K80: 86.132 B giải phóng; chưa merge, không nộp LB |
 | 2026-10-13 14:20 | Claude Sonnet 5.5 | S9: nhánh `feat/corpus-v2` từ `main` (`c0d5c87`): tải corpus v2 (rev `71be0e12…`), diff v1/v2, `data/corpus_v2_ids.parquet` + `r2ai.corpus_v2.is_member`, `r2ai.submit.corpus_filter`, đo tài sản còn hiệu lực, lọc K80/B-cut115/cc-A-cut115 sang `*_v2.zip` (0 doc/chunk bị loại; nén LZMA), top host en/zh; full suite 658 passed/2 deselected (348,61 s). Báo cáo `reports/s9_corpus_v2.md`. Không fetch, không đổi retrieval, không nộp LB, chưa push |
 | 2026-10-13 16:00 | Claude Sonnet 5.5 | S12 đóng: rule `non_medical_template` (3.555 doc, chưa áp), `k80_impact` (86.132 B trên K80), README `r2ai.vi_quality`, bỏ probe mục 7; full suite 658 pass / 2 deselected; merge `--no-ff` vào `main` local trên `b9246c3`, chưa push |
+| 2026-10-13 19:40 | Claude Sonnet 5.5 | S11 zh v2 (`feat/zh-v2`, HEAD `28265c0`+commit docs): crawler zh_full giới hạn v2 (backup+SHA, `defer_urls`), mở lại 883 URL (D13), crawler zh_v2 cho host mới (71.564 URL) kèm watchdog (task Windows chưa đăng ký, cần Vu), ngoại lệ robots-redirect cho `*.39.net`, index zh v2 (448.858 chunk / 77.523 doc), ZG-v2 τ=0,96 = 3,00 doc/query, `artifacts/cand_zh_v2.parquet` SHA `b7a03d58…f345ed3`, quét CC index (zysjonline/baidu: 0 dòng sau 4/13 crawl), full suite 717 pass / 2 deselected (mốc 682). Chi tiết `reports/s11_zh_v2.md`; ask.39.net đang chờ robots timeout, ingest đợt 1 chưa chạy |

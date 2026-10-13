@@ -3,7 +3,7 @@
 A chunk is kept when its doc (`doc_id` = primary id) has at least one id of `doc_ids_group` in the v2 zh ids. Dense fp16 rows,
 CSR rows and texts of kept chunks are copied byte for byte in the original row order (docs stay contiguous, so doc-aligned
 scan blocks and tie order are unchanged); only the local row numbers change. New segment = same name and global_start as its
-source, rows renumbered 0..n-1; `row_map.parquet` gives new -> old local row. qihuangzhishu is left out (D5).
+source, rows renumbered 0..n-1; `row_map.parquet` gives new -> old local row. No host is left out (D13 replaces D5 for v2).
 
     python -m r2ai.zh_v2.index build [--verify]
     python -m r2ai.zh_v2.index status
@@ -31,7 +31,7 @@ CHUNKS_SRC = WORK_DATA_DIR / 'chunks_zh_full'
 CHUNKS_V2 = WORK_DATA_DIR / 'chunks_zh_v2'
 RUN = RUNS_DIR / 'zh-v2'
 MANIFEST = ZH_V2_INDEX_ROOT / 'manifest.json'
-EXCLUDED_DOMAINS = ('qihuangzhishu.com',)       # D5
+EXCLUDED_DOMAINS = ()       # D5 (qihuangzhishu) no longer applies to v2 (D13)
 BLOCK = 8192
 
 

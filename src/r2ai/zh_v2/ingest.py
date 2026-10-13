@@ -150,7 +150,7 @@ def run(batch: str, first: str | None, interval: float = 30.0):
         log(step='adopt', **adopt(roots))
 
 
-def cut_zh_full(roots: V2Roots, batch: str, domains: list[str]) -> dict:
+def cut_zh_full(roots: V2Roots, batch: str, domains: list[str], zf=None, v2_ids=None) -> dict:
     """Cut the zh_full crawl rows that are v2 zh docs and were never ingested (zh_full_ingest batch_urls), without touching zh_full.
 
     Reads state/zh_full/crawl.db (mode=ro) and the zh_full ingest manifest (mode=ro), writes a small filtered copy of the urls
@@ -159,8 +159,8 @@ def cut_zh_full(roots: V2Roots, batch: str, domains: list[str]) -> dict:
     """
     import dataclasses
     from r2ai.zh_full_ingest.common import Roots as ZfRoots
-    zf = ZfRoots()
-    v2 = set(zindex.scope.v2_zh()['id'].to_list())
+    zf = zf or ZfRoots()
+    v2 = set(zindex.scope.v2_zh()['id'].to_list() if v2_ids is None else v2_ids)
     taken = set()
     m = base_ingest._ro(zf.manifest)
     try:

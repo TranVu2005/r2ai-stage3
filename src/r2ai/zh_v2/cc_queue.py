@@ -8,6 +8,7 @@ Rate <= 2 req/s through the metered cc_coverage Client (ledger caps 5,000 reques
 
     python -m r2ai.zh_v2.cc_queue scan --hosts zysjonline.com baidu.com [--rps 2]
     python -m r2ai.zh_v2.cc_queue queue --hosts zysjonline.com baidu.com        # build cc_queue.parquet from cached rows
+    python -m r2ai.zh_v2.cc_queue scan --hosts 120ask.com --tag 120ask --only-missing   # own ledger/budget, cc_queue_120ask.parquet
 """
 from __future__ import annotations
 
@@ -123,9 +124,22 @@ def scan_crawl(client, crawl, prefixes: dict, out: Path, workers=1) -> dict:
             'seconds': round(time.time() - t0, 1)}
 
 
-def build_queue(hosts, out: Path = OUT, ids_path=None) -> dict:
+def indexed_v2_ids() -> set:
+    """v2 zh ids already covered by a doc in the zh v2 index (their pages were crawled, no CC fetch needed)."""
+    from . import index as zindex
+    out = set()
+    for f in zindex.CHUNKS_V2.glob('*/docs.parquet'):
+        t = pl.read_parquet(f)
+        out.update(i for g in t['doc_ids_v2' if 'doc_ids_v2' in t.columns else 'doc_ids_group'].to_list() for i in g)
+    return out
+
+
+def build_queue(hosts, out: Path = OUT, ids_path=None, tag: str = '', only_missing: bool = False) -> dict:
     """cc_queue.parquet: for every v2 URL of `hosts` the chosen snapshot (newest usable <= corpus date, else oldest later)."""
     df = host_urls(hosts, ids_path)
+    if only_missing:
+        have = indexed_v2_ids()
+        df = df.filter(~pl.col('id').is_in(sorted(have)))
     rows = []
     by_key = {}
     crawls = sorted((f.name[5:].rsplit('_', 1)[0] for f in out.glob('rows_*_*.parquet')), key=lambda c: CR.crawl_key(c) or (0, 0))
@@ -151,12 +165,14 @@ def build_queue(hosts, out: Path = OUT, ids_path=None) -> dict:
                      strict=False) if rows else pl.DataFrame()
     q = q.with_columns(pl.col('fetch_time').cast(pl.String))
     found = q.filter(pl.col('crawl').is_not_null())
-    found.write_parquet(guard(out / 'cc_queue.parquet'), compression='zstd')
+    found.write_parquet(guard(out / f'cc_queue{tag}.parquet'), compression='zstd')
     report = {'hosts': {h: {'v2_urls': int((q['host'] == h).sum()), 'with_200_html': int(((q['host'] == h) & q['crawl'].is_not_null()).sum()),
                             'warc_bytes': int(found.filter(pl.col('host') == h)['warc_record_length'].sum() or 0)} for h in hosts},
               'queue_rows': found.height, 'by_crawl': dict(found.group_by('crawl').len().sort('crawl').iter_rows()),
               'after_corpus': int(found['after_corpus'].sum() or 0), 'note': 'metadata only; no WARC downloaded by S11'}
-    atomic_report(out / 'cc_queue_report.json', report)
+    report['coverage'] = {h: (v['with_200_html'] / v['v2_urls'] if v['v2_urls'] else None) for h, v in report['hosts'].items()}
+    report['only_missing'] = only_missing
+    atomic_report(out / f'cc_queue_report{tag}.json', report)
     return report
 
 
@@ -173,17 +189,20 @@ def main(argv=None):
     ap.add_argument('--hosts', nargs='+', required=True)
     ap.add_argument('--rps', type=float, default=2.0)
     ap.add_argument('--workers', type=int, default=2)
+    ap.add_argument('--tag', default='', help='suffix for ledger/log/report/queue files (own budget per host group)')
+    ap.add_argument('--only-missing', action='store_true', help='queue/coverage only over v2 ids not yet in the zh v2 index')
     a = ap.parse_args(argv)
     if a.rps > 2.0:
         raise SystemExit('rps above 2 is not allowed for this scan')
     out = guard(OUT)
     out.mkdir(parents=True, exist_ok=True)
+    suffix = f'_{a.tag}' if a.tag else ''
     if a.step == 'queue':
-        print(json.dumps(build_queue(a.hosts, out), ensure_ascii=False, indent=1))
+        print(json.dumps(build_queue(a.hosts, out, tag=suffix, only_missing=a.only_missing), ensure_ascii=False, indent=1))
         return 0
     prefixes = prefixes_of(host_urls(a.hosts))
-    ledger = Ledger(out / 'ledger.json')
-    client = Client(ua=UA, ledger=ledger, log_path=out / 'requests.jsonl', rps=a.rps)
+    ledger = Ledger(out / f'ledger{suffix}.json')
+    client = Client(ua=UA, ledger=ledger, log_path=out / f'requests{suffix}.jsonl', rps=a.rps)
     report = {'started': time.strftime('%Y-%m-%d %H:%M:%S'), 'ua': UA, 'rps': a.rps, 'prefixes': prefixes, 'crawls': {}}
     try:
         info = json.loads(client.get(COLLINFO).content)
@@ -202,10 +221,10 @@ def main(argv=None):
         report['status'] = f'stopped: {type(e).__name__}: {e}'
     finally:
         client.close()
-        atomic_report(out / 'scan_report.json', report)
+        atomic_report(out / f'scan_report{suffix}.json', report)
     print(json.dumps({k: v for k, v in report.items() if k != 'crawls'}, ensure_ascii=False, default=str))
     if report.get('status') == 'ok':
-        print(json.dumps(build_queue(a.hosts, out), ensure_ascii=False))
+        print(json.dumps(build_queue(a.hosts, out, tag=suffix, only_missing=a.only_missing), ensure_ascii=False))
     return 0 if report.get('status') == 'ok' else 2
 
 

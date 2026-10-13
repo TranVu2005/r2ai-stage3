@@ -1,6 +1,6 @@
 # S12 – chất lượng doc vi
 
-Nền: `483f4df` (A1-115 là best mặc định trong repo; K80 chưa commit nên chưa đo ZIP, xem mục 4).
+Nền: `483f4df` (A1-115 là best mặc định trong repo). K80 đo từ file upload-probe (mục 4).
 Nhánh `feat/vi-quality`. Không dùng LLM. Số liệu đo trên 623.805 doc đã index (`data/chunks/docs.parquet`,
 `chunks_t256.parquet` 3.909.586 chunk). Mẫu duyệt: `reports/s12_vi_samples.md`.
 
@@ -58,9 +58,20 @@ chunk bị cắt cụt 2.201 (1,51 MB). Đây là cận trên cho index; byte tr
 
 ## 4. Byte giải phóng trong ZIP K80
 
-Chưa đo: chờ đường dẫn bản K80 (Final 0,2334; B-cut115 + pool chunk B + k_chunk 80, ZIP_LZMA). Không dùng A1-115 thay thế.
-Sẽ báo số doc/chunk rác đang nộp và MB giải phóng; nếu < 2 MB thì dừng ở rule strip, không đề xuất re-fetch.
+Đo trên `sub_K80.json` (upload-probe, ZIP_LZMA 99.035.033 B; JSON 638.098.632 B, SHA256 `91fd6049…3a44`; 1.200 query,
+95.999 chunk, 163.613 id doc, trong đó 24.000 id ngoài index là id slug/CC). Công cụ: `python -m r2ai.vi_quality.k80_impact`
+(`reports/s12_vi_k80_impact.json`). Chỉ tính chunk_text; số chunk/doc dưới đây là số đang nộp.
 
+| | doc/chunk | byte UTF-8 |
+|---|---:|---:|
+| chunk của doc phải loại (xổ số suckhoecongdongonline) | 3 chunk / 4 id relevant_docs | 3.589 |
+| chunk bị cắt đuôi (giadinhonline 60, laodong 20, baonghean 3) | 83 chunk | 82.543 |
+| **tổng giải phóng** | 86 chunk | **86.132 B (0,014% của 627,68 MB chunk_text)** |
+
+ZIP LZMA giảm tối đa bằng số byte thô này (≈ 0,09 MB, thực tế nhỏ hơn vì phần cắt là text lặp, nén tốt). **Dưới ngưỡng 2 MB của Vu:
+dừng ở rule strip, không đề xuất re-fetch, không đề xuất tăng K từ phần này.** Lý do chính: doc rác gần như không được truy hồi cho
+query y khoa (3/95.999 chunk), và đuôi bình luận/liên quan nằm trong doc ít được chọn. Mục 7 (probe chunk cấu trúc) là hướng duy
+nhất còn có thể đổi byte đáng kể; chưa dựng.
 ## 5. Ghi chú lệch so với yêu cầu
 
 - Bản tin COVID trùng title ở suckhoecongdongonline (ví dụ "Việt Nam ghi nhận 1 ca tử vong do COVID-19", 30 doc): 30/30 doc có
@@ -102,7 +113,7 @@ bản nộp dùng chunk con (kiểu `window`/c2). Không có gold offline: chưa
 
 ## 7. Đề xuất 1 probe LB (không tự nộp)
 
-Chỉ đề xuất sau khi có K80: giữ doc set và thứ tự doc của K80, giữ nguyên số doc nhận chunk; thay `chunk_text` body đầy đủ bằng
+Dựa trên K80 (mục 4): giữ doc set và thứ tự doc của K80, giữ nguyên số doc nhận chunk; thay `chunk_text` body đầy đủ bằng
 chunk cấu trúc ≤ 256 token chứa chunk t256 có điểm reranker cao nhất (ánh xạ theo tâm span, không cần chấm lại reranker), cộng
 phần body còn lại không đổi cho doc ngoài top. Byte giải phóng dùng để tăng `k_chunk`. Chưa có số byte vì cần JSON K80; Chunk F2
 chỉ đo được bằng 1 lượt LB. Rủi ro đã biết: A/B trước đây cho thấy chunk full thắng chunk ngắn ở cùng K (c2 0,0158 → full 0,0273),

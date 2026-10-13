@@ -1,6 +1,6 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-13 19:40 (UTC+7)
+- Cập nhật: 2026-10-14 01:55 (UTC+7)
 - Model thực hiện: Claude Sonnet 5.5
 - Commit HEAD đã kiểm trước cập nhật này: `b9246c3` (`main`, gồm S9); nhánh làm việc `tmp/s12-merge` = `main` + merge `--no-ff` `feat/vi-quality` (`e5f1721`)
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
@@ -347,3 +347,4 @@ Hai dòng ❓ từ CONTEXT:
 | 2026-10-13 14:20 | Claude Sonnet 5.5 | S9: nhánh `feat/corpus-v2` từ `main` (`c0d5c87`): tải corpus v2 (rev `71be0e12…`), diff v1/v2, `data/corpus_v2_ids.parquet` + `r2ai.corpus_v2.is_member`, `r2ai.submit.corpus_filter`, đo tài sản còn hiệu lực, lọc K80/B-cut115/cc-A-cut115 sang `*_v2.zip` (0 doc/chunk bị loại; nén LZMA), top host en/zh; full suite 658 passed/2 deselected (348,61 s). Báo cáo `reports/s9_corpus_v2.md`. Không fetch, không đổi retrieval, không nộp LB, chưa push |
 | 2026-10-13 16:00 | Claude Sonnet 5.5 | S12 đóng: rule `non_medical_template` (3.555 doc, chưa áp), `k80_impact` (86.132 B trên K80), README `r2ai.vi_quality`, bỏ probe mục 7; full suite 658 pass / 2 deselected; merge `--no-ff` vào `main` local trên `b9246c3`, chưa push |
 | 2026-10-13 19:40 | Claude Sonnet 5.5 | S11 zh v2 (`feat/zh-v2`, HEAD `28265c0`+commit docs): crawler zh_full giới hạn v2 (backup+SHA, `defer_urls`), mở lại 883 URL (D13), crawler zh_v2 cho host mới (71.564 URL) kèm watchdog (task Windows chưa đăng ký, cần Vu), ngoại lệ robots-redirect cho `*.39.net`, index zh v2 (448.858 chunk / 77.523 doc), ZG-v2 τ=0,96 = 3,00 doc/query, `artifacts/cand_zh_v2.parquet` SHA `b7a03d58…f345ed3`, quét CC index (zysjonline/baidu: 0 dòng sau 4/13 crawl), full suite 717 pass / 2 deselected (mốc 682). Chi tiết `reports/s11_zh_v2.md`; ask.39.net đang chờ robots timeout, ingest đợt 1 chưa chạy |
+| 2026-10-14 01:55 | Claude Sonnet 5.5 | S11 đợt ingest 1 (Vu: ≥15k doc, ưu tiên ask.39.net+cnkang): `v2n-002` 6.178 doc + `v2n-001` 36.329 doc (embed GPU, xong 00:59); thêm `ingest cut-zf` (dòng zh_full chưa ingest có id v2), `adopt` bỏ segment trùng, sửa `index build` làm mất segment đã adopt. Index v2: 652.406 chunk / 120.028 doc = 50,0% của 240.000 (trước 32,3%). Rerank `--reuse` 1.888 s; `artifacts/cand_zh_v2.parquet` SHA `180174d7…475f87bd` (60.000 dòng); ZG-v2 τ=0,96 3,23 doc/query (trước 3,00). Quét CC xong 13/13 crawl: zysjonline/baidu 0 dòng, `cc_queue.parquet` rỗng. GPU rảnh từ 01:36 cho S10 |

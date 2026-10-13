@@ -1,6 +1,6 @@
 # S11 — zh v2 (240.000 URL zh của corpus v2, D11 + D13)
 
-Nhánh `feat/zh-v2`, worktree `D:/GitHub/r2ai-stage3-zhv2`. Cập nhật 2026-10-13 19:35 (UTC+7). Số liệu đo từ `state/zh_full/crawl.db`, `state/zh_v2/crawl.db` (mode=ro), `data/corpus_v2_ids.parquet`, `out/runs/zh-v2/`. Chưa push.
+Nhánh `feat/zh-v2`, worktree `D:/GitHub/r2ai-stage3-zhv2`. Cập nhật 2026-10-14 01:50 (UTC+7). Số liệu đo từ `state/zh_full/crawl.db`, `state/zh_v2/crawl.db` (mode=ro), `data/corpus_v2_ids.parquet`, `out/runs/zh-v2/`. Chưa push.
 
 ## 1. Bảng theo host zh của v2 (lúc bàn giao D11)
 
@@ -69,7 +69,7 @@ Tình trạng 19:27: familydoctor.com.cn xong (`ok` 26.814, blocked_4xx 5), ask.
 
 `python -m r2ai.zh_v2.cc_queue scan|queue`: quét **chỉ index cột** (parquet, range request, 13 crawl cửa sổ corpus) ≤ 2 req/s qua ledger (5.000 request / 2 GB), không bao giờ gọi WARC, không chạm site đích. Đầu ra `out/runs/zh-v2/cc_queue.parquet` (URL, crawl, WARC file, offset, length) cho fetcher của S3.
 
-Tiến độ: 4/13 crawl xong (2026-39, 34, 30, 25): zysjonline.com **0** dòng, baidu.com **0** dòng (CC tôn trọng robots nên không có là hợp lý). Dùng 1.720 request / 433 MB. Quét 9 crawl còn lại chạy nền (~25 phút/crawl); kết thúc tự dựng `cc_queue.parquet`. Nếu cuối vẫn 0 thì queue rỗng và phủ CC cho 6.602 id = 0%.
+Kết quả: **13/13 crawl xong** (2025-38 … 2026-39): zysjonline.com **0** dòng, baidu.com **0** dòng (CC không chứa URL robots chặn). 4.673 request / 1,48 GB (trần 5.000 / 2 GB). `out/runs/zh-v2/cc_queue.parquet` (bản sao `cc/cc_queue.parquet`, SHA256 `b467b0c9640b679cfe840d76e7bb8ec9fd321b3e8c823b6764f93456cb397dcf`) có **0 dòng**, đủ schema; phủ CC cho 6.602 id = 0%. Fetcher của S3 không có gì để xếp hàng cho 2 host này; zysjonline.com (6.591 id) chỉ lấy được nếu Vu cho phép nguồn khác.
 
 **120ask (74.898 pending + 102 network_error): chưa quét CC.** Robots vẫn 521. Theo D13 chỉ làm nếu 16/10 robots còn 521, và hỏi Vu trước.
 
@@ -82,16 +82,25 @@ Tiến độ: 4/13 crawl xong (2026-39, 34, 30, 25): zysjonline.com **0** dòng,
 
 ## 7. Ingest theo đợt
 
-Code: `r2ai.zh_v2.extract` (extractor theo host; hỏi-đáp ask.39.net và baby.39.net giữ câu hỏi + trả lời trong body), `r2ai.zh_v2.ingest cut|launch|adopt` (chunker t256, segment id ≥ 100), `retrieve rerank --reuse` (chỉ rerank cặp mới) + `export` + `zg`. Mỗi đợt xuất lại `cand_zh_v2.parquet` kèm SHA và độ phủ.
-**Đợt 1 chưa chạy.** Điều kiện của Vu: ask.39.net + cnkang ≥ 30.000 doc mới. Hiện: ask.39.net 7.263 `ok` + cnkang b003 ≈ 3.350 → ≈ 10,6 nghìn < 30.000, và ask.39.net đang chờ robots. familydoctor.com.cn đã có 26.814 `ok` sẵn sàng; nếu tính gộp là ≈ 37 nghìn (cần Vu cho phép đổi điều kiện).
+Code: `r2ai.zh_v2.extract` (extractor theo host; hỏi-đáp ask.39.net và baby.39.net giữ câu hỏi + trả lời trong body), `r2ai.zh_v2.ingest cut|cut-zf|launch|adopt` (chunker t256, segment id ≥ 100), `retrieve rerank --reuse` + `export` + `zg`. `cut-zf` cắt dòng của crawl.db zh_full chưa từng ingest và có ≥ 1 id v2 (cnkang…): lọc theo v2 nên 45 nghìn dòng cnkang ngoài v2 không bị embed.
+
+**Đợt 1 (cắt theo lệnh Vu: ≥ 15k doc mới, ưu tiên ask.39.net và cnkang; chạy 13–14/10):**
+- `v2n-002` (cnkang 5.471+27, wujue 661, zydcd 197, qihuangzhishu 29, zhongyibaodian 316; 6.701 URL): 6.178 doc / 32.290 chunk, 5 segment (id 100–104), embed ≈ 100 chunk/s.
+- `v2n-001` (ask.39.net 7.316, baby.39.net 3.364, familydoctor.com.cn 26.814, familydoctor.cn 2; 37.496 URL, 3.786 shard): 36.329 doc / 171.270 chunk (id 105–108), xong 00:59.
+- Hai doc familydoctor.cn đã có trong segment mẫu 2% (seg00006): bỏ segment trùng seg00106, `adopt` giờ tự bỏ segment trùng và từ chối segment trùng một phần; `index build` giờ giữ segment đã adopt (trước đó ghi đè manifest và làm mất chúng, đã sửa).
+- Index sau đợt 1: 37 segment có dữ liệu (qihuangzhishu sample 0 doc v2), **652.406 chunk, 120.028 doc = 50,0% của 240.000** (trước: 77.523 = 32,3%).
+- Rerank `--reuse` (cache 1.200 query, chỉ chấm cặp mới): 1.888 s (1,57 s/query) khi GPU rảnh; lượt chạy lại sau khi bỏ segment trùng 113 s.
+- **`artifacts/cand_zh_v2.parquet` batch 1**: 60.000 dòng (1.200 × top-50), SHA256 `180174d76dadd9b476712f5f97483192d17efbaaebd66be4f3f47eb5475f87bd`, độ phủ 120.028 / 240.000 doc. Bản batch 0 (SHA `b7a03d58…f345ed3`, 77.523 doc) giữ ở `out/runs/zh-v2/cand_zh_v2.batch0.parquet`. Top-50: 25,9% dòng từ segment mới; 71,6% cặp (query, doc) của batch 0 còn trong top-50; domain đứng đầu 120ask 26.318, cnkang 13.614, familydoctor.com.cn 8.446, ask.39.net 4.309.
+- **ZG-v2 batch 1** (τ = 0,96): 3.880 doc / 1.200 query = **3,23 doc/query** (batch 0: 3,00); 508 query = 0 doc (batch 0: 538); 245 query chạm trần 10 (212). Doc ≥ τ không thuộc base 7,37/query (6,09). Không dựng JSON/ZIP.
+- Chưa vào index: 18 sub 39.net (≈ 7,8 nghìn URL đã `ok`) và phần ask.39.net crawl thêm sau khi cắt (ok 9.693 / 32.772 lúc 01:50) → đợt 2.
+- Điều phối GPU: tôi dùng GPU xong lúc 01:36; từ đó GPU rảnh cho S10 (S10 fetch từ 14/10 08:05, cần GPU sau đó). Đợt 2 chỉ chạy khi S10 báo xong, hoặc ngoài khung S10 dùng.
 
 ## 8. Kiểm thử
 
-Full suite sau khi thêm cc_queue/ingest/retrieve/watchdog: **717 passed, 2 deselected** (387,7 s), so với mốc 682 pass: +35 test; 0 lỗi. Log `out/runs/zh-v2/pytest_full.log`.
+Full suite sau khi thêm cc_queue/ingest/retrieve/watchdog (trước đợt 1; sau đó chạy lại 3 file test ingest/index/scope: 11 pass): **717 passed, 2 deselected** (387,7 s), so với mốc 682 pass: +35 test; 0 lỗi. Log `out/runs/zh-v2/pytest_full.log`.
 
 ## Việc cần Vu
 
 1. Chạy `scripts\register_zh_v2_watchdog.ps1` (admin, mật khẩu của Vu) để có task tự khởi động lại sau khi tắt máy.
-2. Đợt ingest 1: giữ điều kiện ≥ 30k từ ask.39.net + cnkang, hay gộp cả familydoctor.com.cn (26.814 doc đã sẵn)?
-3. 120ask: nếu 16/10 robots còn 521, cho phép quét CC (75.000 URL)?
-4. ask.39.net robots đang timeout (site chậm/chặn tạm): chỉ chờ, không có bước nào vượt robots.
+2. 120ask: nếu 16/10 robots còn 521, cho phép quét CC (75.000 URL)?
+3. zysjonline.com (6.591 id): CC không có; có nguồn nào khác Vu cho phép không?

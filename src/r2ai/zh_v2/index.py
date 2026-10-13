@@ -223,6 +223,7 @@ def build(*, verify=False, only=None) -> dict:
         rows.append(row)
         print(json.dumps(row, ensure_ascii=False), flush=True)
         write_manifest(rows, ids)
+    rows += [r for r in done.values() if r.get('source') == 'zh_v2_ingest']    # adopted by r2ai.zh_v2.ingest: keep
     write_manifest(rows, ids)
     return {'segments': len(rows), 'rows_v2': sum(r['rows_v2'] for r in rows), 'docs_v2': sum(r['docs_v2'] for r in rows),
             'seconds': round(time.perf_counter() - t0, 1)}

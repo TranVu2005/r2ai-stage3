@@ -8,6 +8,7 @@
 * `adopt` registers finished segments in the v2 index manifest (all their docs are v2 by construction).
 
   python -m r2ai.zh_v2.ingest cut --batch v2n-001 [--domains a,b]
+  python -m r2ai.zh_v2.ingest cut-zf --batch v2n-002 --domains cnkang.com,...   # zh_full rows never ingested, v2 ids only
   python -m r2ai.zh_v2.ingest launch --batch v2n-001      # detached driver (extract -> chunk -> embed -> adopt)
   python -m r2ai.zh_v2.ingest status --batch v2n-001
   python -m r2ai.zh_v2.ingest adopt
@@ -81,17 +82,30 @@ def adopt(roots: V2Roots | None = None) -> dict:
     manifest = json.loads(zindex.MANIFEST.read_text('utf-8'))
     have = {r['name'] for r in manifest['segments']}
     added = []
+    skipped = []
+    seen = set()    # a doc already in the index (2% sample segment, earlier batch) must not be indexed twice
+    for r in manifest['segments']:
+        f = (zindex.CHUNKS_V2 / r['name'] / 'docs.parquet')
+        if f.exists():
+            seen.update(pl.read_parquet(f, columns=['doc_id'])['doc_id'].to_list())
     for seg in base_ingest.segment_rows(roots):
         if seg['name'] in have:
             continue
         docs = pl.read_parquet(roots.chunks / seg['name'] / 'docs.parquet', columns=['doc_id'])
+        ids = set(docs['doc_id'].to_list())
+        if ids & seen:
+            if not ids <= seen:
+                raise ValueError(f"{seg['name']}: {len(ids & seen)} of {len(ids)} docs already indexed; filter the batch")
+            skipped.append(seg['name'])
+            continue
+        seen |= ids
         added.append({'name': seg['name'], 'segment_id': seg['segment_id'], 'batch': seg['batch'], 'domain': seg['domain'],
                       'rows_source': seg['rows'], 'rows_v2': seg['rows'], 'docs_v2': docs.height, 'source': 'zh_v2_ingest',
                       'global_start': base_ingest.global_start(seg['segment_id'])})
     if added:
         import numpy as np
         zindex.write_manifest(manifest['segments'] + added, np.array(zindex.scope.v2_zh()['id'].to_numpy()))
-    return {'added': [a['name'] for a in added], 'rows': sum(a['rows_v2'] for a in added), 'docs': sum(a['docs_v2'] for a in added)}
+    return {'added': [a['name'] for a in added], 'skipped_duplicate': skipped, 'rows': sum(a['rows_v2'] for a in added), 'docs': sum(a['docs_v2'] for a in added)}
 
 
 def launch(batch: str, first: str | None = None) -> dict:
@@ -136,9 +150,49 @@ def run(batch: str, first: str | None, interval: float = 30.0):
         log(step='adopt', **adopt(roots))
 
 
+def cut_zh_full(roots: V2Roots, batch: str, domains: list[str]) -> dict:
+    """Cut the zh_full crawl rows that are v2 zh docs and were never ingested (zh_full_ingest batch_urls), without touching zh_full.
+
+    Reads state/zh_full/crawl.db (mode=ro) and the zh_full ingest manifest (mode=ro), writes a small filtered copy of the urls
+    table under the zh-v2 ingest state and cuts from it against data/raw_zh_full: only rows with >= 1 v2 zh id are taken, so no
+    out-of-v2 doc is chunked or embedded. Segments, docs and chunks land in the zh-v2 roots.
+    """
+    import dataclasses
+    from r2ai.zh_full_ingest.common import Roots as ZfRoots
+    zf = ZfRoots()
+    v2 = set(zindex.scope.v2_zh()['id'].to_list())
+    taken = set()
+    m = base_ingest._ro(zf.manifest)
+    try:
+        taken = {r[0] for r in m.execute('SELECT url_norm FROM batch_urls')}
+    finally:
+        m.close()
+    src = base_ingest._ro(zf.crawl_db)
+    keep = []
+    try:
+        q = ','.join('?' * len(domains))
+        for u, d, st, sh, ids in src.execute("SELECT url_norm, domain, status, shard, doc_ids FROM urls WHERE domain IN (%s) "
+                                             "AND status IN ('ok','thin') AND shard IS NOT NULL" % q, domains):
+            if u not in taken and any(i in v2 for i in json.loads(ids)):
+                keep.append((u, d, st, sh, ids))
+    finally:
+        src.close()
+    path = roots.guard(roots.state / f'cut_src_{batch}.db')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.unlink(missing_ok=True)
+    c = sqlite3.connect(path)
+    with c:
+        c.execute('CREATE TABLE urls (url_norm TEXT PRIMARY KEY, domain TEXT, status TEXT, shard TEXT, doc_ids TEXT)')
+        c.executemany('INSERT INTO urls VALUES (?,?,?,?,?)', keep)
+    c.close()
+    out = base_ingest.cut_batch(dataclasses.replace(roots, raw=zf.raw, crawl_db=path), batch, domains)
+    out['rows_selected'] = len(keep)
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('action', choices=['cut', 'run', 'launch', 'status', 'adopt'])
+    ap.add_argument('action', choices=['cut', 'cut-zf', 'run', 'launch', 'status', 'adopt'])
     ap.add_argument('--batch')
     ap.add_argument('--domains')
     ap.add_argument('--first', default=None)
@@ -152,6 +206,10 @@ def main(argv=None):
         run(a.batch, a.first)
     elif a.action == 'adopt':
         print(json.dumps(adopt(roots)))
+    elif a.action == 'cut-zf':
+        roots.preflight()
+        init_manifest(roots)
+        print(json.dumps(cut_zh_full(roots, a.batch, a.domains.split(',')), default=str, indent=1))
     else:
         roots.preflight()
         init_manifest(roots)

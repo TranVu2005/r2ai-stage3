@@ -25,6 +25,7 @@ import sys
 import time
 from pathlib import Path
 
+from r2ai import corpus_v2
 from r2ai.paths import CORPUS_FILE, OLD_ROOT, QUERY_FILE, ROOT, RUNS_DIR, assert_writable, resolve_path
 from r2ai.submit.best import build_argv, load_config, sha256
 from r2ai.submit.zipio import METHODS, verify_submission_zip, write_submission_zip
@@ -34,7 +35,7 @@ from .common import Roots
 S6_RUN = RUNS_DIR / 's6'
 CC_A_CUT115 = RUNS_DIR / 'cc-longchau' / 'VS-cc-A-cut115' / 'VS_cc_A_cut115.json'
 CC_A_CUT115_SHA256 = '99a9e11d76d2a3f0ac429d761e25eb4007a2324bab1eff6c65a5a05b954a2bfd'
-CEILING = 101_800_000                  # ZIP bytes the server is known to accept
+CEILING = 101_870_962                  # largest ZIP the leaderboard has accepted (VS40); 413 starts somewhere below 121.6 MB
 CONFIG = 'configs/submission-best.yaml'
 GATE_EXPAND = 'out/runs/best-vsappend/gate-best/sub_expand.json'          # VS-append H1-expand JSON (config expand_json_sha256)
 S7_K80_JSON_SHA256 = '91fd6049245313dde4a7d42c8f86bae851acb43cf1aa7f6ccc8fd8e73b373a44'
@@ -165,6 +166,25 @@ def render(path, qids, docs_by_q, chunks_by_q, *, protect: bool, cc_ids=frozense
             'cc_docs_in_relevant_docs_per_query': round(mean(n_cc_docs), 4)}
 
 
+def membership(json_path) -> dict:
+    """corpus v2 dry run: relevant_docs ids and chunk doc_ids that are not in corpus v2 (expected 0 for vi-only content)."""
+    st = {'docs': 0, 'docs_outside': 0, 'chunks': 0, 'chunks_outside': 0, 'rows_changed': 0}
+    with open(json_path, encoding='utf-8', newline='') as f:
+        for line in f:
+            line = line.rstrip('\r\n').rstrip(',')
+            if not line.startswith('{'):
+                continue
+            row = json.loads(line)
+            dm = corpus_v2.member_mask(row['relevant_docs'])
+            cm = corpus_v2.member_mask([c['doc_id'] for c in row['relevant_chunks']])
+            st['docs'] += len(dm)
+            st['chunks'] += len(cm)
+            st['docs_outside'] += int((~dm).sum())
+            st['chunks_outside'] += int((~cm).sum())
+            st['rows_changed'] += int(not (dm.all() and cm.all()))
+    return st
+
+
 def validate(zip_path, docs_dir, log, *, allow_outside: bool) -> dict:
     """validate_submission in a subprocess (frees this process' memory first); raises unless 0 errors and 1,200 rows."""
     cmd = [sys.executable, '-m', 'r2ai.submit.validate_submission', str(zip_path), '--queries', str(QUERY_FILE),
@@ -182,20 +202,26 @@ def validate(zip_path, docs_dir, log, *, allow_outside: bool) -> dict:
     return res
 
 
-def finish(name, json_path, *, method, docs_dir, allow_outside, counts, extra=None, probe_only=False, date_time=None, reuse_zip=False) -> dict:
+def finish(name, json_path, *, method, docs_dir, allow_outside, counts, extra=None, probe_only=False, date_time=None, reuse_zip=False,
+           lzma_dict_mib=None, ceiling=None) -> dict:
     """zip -> size check -> Python zipfile read-back SHA -> validator (skipped when probe_only or over the ceiling)."""
     json_path = Path(json_path)
     stem = json_path.stem
     out = json_path.parent
     t0 = time.time()
     jsha = sha256(json_path)
+    ceiling = ceiling or CEILING
+    mem = membership(json_path)                          # D7: stop (and report) when anything is outside corpus v2
+    if mem['docs_outside'] or mem['chunks_outside']:
+        raise ValueError(f'{name}: elements outside corpus v2, stopping: {mem}')
     zp = guard(out / f'{stem}.zip')
     if not (reuse_zip and zp.exists()):                 # reuse: the read-back SHA below still proves it matches this JSON
-        write_submission_zip(json_path, zp, arcname=json_path.name, method=method, date_time=date_time)
+        write_submission_zip(json_path, zp, arcname=json_path.name, method=method, date_time=date_time, lzma_dict_mib=lzma_dict_mib)
     zbytes = zp.stat().st_size
     st = {'variant': name, 'json': str(json_path), 'json_bytes': json_path.stat().st_size, 'json_sha256': jsha,
           'zip': str(zp), 'zip_method': method, 'zip_bytes': zbytes, 'zip_mib': round(zbytes / 2 ** 20, 3), 'zip_sha256': sha256(zp),
-          'ceiling_bytes': CEILING, 'within_ceiling': zbytes <= CEILING, 'zip_seconds': round(time.time() - t0, 1)} | counts | (extra or {})
+          'lzma_dict_mib': lzma_dict_mib if method == 'lzma' else None, 'corpus_v2': mem,
+          'ceiling_bytes': ceiling, 'within_ceiling': zbytes <= ceiling, 'zip_seconds': round(time.time() - t0, 1)} | counts | (extra or {})
     st['zip_readback'] = verify_submission_zip(zp, jsha, expected_member=json_path.name)
     if not st['zip_readback']['json_sha256_match']:
         raise ValueError(f'{zp}: read-back SHA differs from the JSON')
@@ -214,9 +240,9 @@ def cmd_build(a) -> int:
     d = out_dir(a.name)
     cfg, docs_dir, _ = pool_setup(a.pool, roots)
     docs = pinned_docs()
-    qids, new, texts = chunk_pool(a.pool, roots, use_cache=not a.no_cache)
-    if a.k > K_CAP:
-        raise ValueError(f'--k {a.k} > cache cap {K_CAP}')
+    qids, new, texts = chunk_pool(a.pool, roots, k_cap=a.k_cap, use_cache=not a.no_cache)
+    if a.k > a.k_cap:
+        raise ValueError(f'--k {a.k} > --k-cap {a.k_cap}')
     from .build_b import cc_doc_ids
     cc = cc_doc_ids(roots)
     chunks = chunk_lists(qids, new, texts, a.k)
@@ -228,8 +254,80 @@ def cmd_build(a) -> int:
     del chunks
     counts['render_seconds'] = round(time.time() - t0, 1)
     st = finish(a.name, jp, method=a.zip_method, docs_dir=docs_dir, allow_outside=not a.protect, counts=counts, probe_only=a.probe, reuse_zip=a.reuse_zip,
+                lzma_dict_mib=a.lzma_dict_mib, ceiling=a.ceiling,
                 extra={'k': a.k, 'pool': a.pool, 'protect': a.protect, 'docs_source': f'cc-A-cut115 {CC_A_CUT115_SHA256[:8]}'})
     print(json.dumps(st, ensure_ascii=False, indent=1))
+    return 0
+
+
+READ_SCRIPT = "\n".join([
+    "import hashlib, sys, zipfile",
+    "h = hashlib.sha256()",
+    "with zipfile.ZipFile(sys.argv[1]) as z:",
+    "    with z.open(z.infolist()[0]) as f:",
+    "        for b in iter(lambda: f.read(1 << 20), b''):",
+    "            h.update(b)",
+    "print(h.hexdigest())",
+])
+BSDTAR = r'C:\Windows\System32\tar.exe'
+
+
+def _peak_rss(proc, box):
+    """Poll the process tree's resident set (MiB) until it exits; box['peak'] keeps the maximum."""
+    import psutil
+    try:
+        p = psutil.Process(proc.pid)
+    except psutil.Error:
+        return
+    while proc.poll() is None:
+        try:
+            box['peak'] = max(box['peak'], sum(c.memory_info().rss for c in [p] + p.children(recursive=True)) / 2 ** 20)
+        except psutil.Error:
+            pass
+        time.sleep(0.05)
+
+
+def unpack_bench(zip_path, json_sha256) -> dict:
+    """Extract with Python zipfile and with bsdtar (tar.exe); SHA256 of the member + peak RSS (MiB) of each reader."""
+    import threading
+    out = {}
+    for label, cmd in (('python_zipfile', [sys.executable, '-c', READ_SCRIPT, str(zip_path)]), ('bsdtar', [BSDTAR, '-xOf', str(zip_path)])):
+        box = {'peak': 0.0}
+        t0 = time.time()
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        th = threading.Thread(target=_peak_rss, args=(proc, box), daemon=True)
+        th.start()
+        if label == 'bsdtar':
+            h = hashlib.sha256()
+            for b in iter(lambda: proc.stdout.read(1 << 20), b''):
+                h.update(b)
+            sha = h.hexdigest()
+            proc.wait()
+        else:
+            so, _ = proc.communicate()
+            sha = so.decode().strip()
+        th.join()
+        out[label] = {'sha256': sha, 'match': sha == json_sha256, 'returncode': proc.returncode, 'peak_rss_mib': round(box['peak'], 1),
+                      'seconds': round(time.time() - t0, 1)}
+    return out
+
+
+def cmd_dict(a) -> int:
+    """ZIP size at several LZMA dictionaries + unpack check (Python zipfile and bsdtar) with the peak RAM of each reader."""
+    d = out_dir(a.name)
+    jp = next(d.glob('*.json'))
+    jsha = sha256(jp)
+    rows = []
+    for mib in a.dicts:
+        zp = guard(d / f'{jp.stem}_d{mib}.zip')
+        t0 = time.time()
+        if not zp.exists():
+            write_submission_zip(jp, zp, arcname=jp.name, method='lzma', lzma_dict_mib=mib if mib != 8 else None)
+        row = {'dict_mib': mib, 'zip': str(zp), 'zip_bytes': zp.stat().st_size, 'zip_sha256': sha256(zp),
+               'compress_seconds': round(time.time() - t0, 1), 'unpack': unpack_bench(zp, jsha)}
+        rows.append(row)
+        (d / 'dict_study.json').write_text(json.dumps({'json': str(jp), 'json_sha256': jsha, 'rows': rows}, indent=1), encoding='utf-8')
+        print(json.dumps(row, indent=1), flush=True)
     return 0
 
 
@@ -372,7 +470,13 @@ def main(argv=None):
     b.add_argument('--zip-method', choices=METHODS, default='deflate')
     b.add_argument('--probe', action='store_true', help='size probe: zip but no validator')
     b.add_argument('--reuse-zip', action='store_true', help='keep an existing zip of this name (read-back SHA still checked)')
+    b.add_argument('--lzma-dict-mib', type=int, default=None, help='LZMA dictionary (default: stdlib 8 MiB)')
+    b.add_argument('--ceiling', type=int, default=None, help=f'ZIP byte limit (default {CEILING})')
+    b.add_argument('--k-cap', type=int, default=K_CAP, help='chunk docs per query held in the pool cache')
     b.add_argument('--no-cache', action='store_true')
+    dd = sub.add_parser('dict')
+    dd.add_argument('--name', required=True, help='an existing s6 variant directory holding the JSON')
+    dd.add_argument('--dicts', type=int, nargs='+', default=[64, 128, 256])
     g1 = sub.add_parser('gate1')
     g1.add_argument('--no-cache', action='store_true')
     g2 = sub.add_parser('gate2')
@@ -382,7 +486,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
     os.environ['HF_HUB_OFFLINE'] = os.environ['TRANSFORMERS_OFFLINE'] = '1'
     assert_writable(S6_RUN)
-    return {'build': cmd_build, 'gate1': cmd_gate1, 'gate2': cmd_gate2}[a.cmd](a)
+    return {'build': cmd_build, 'gate1': cmd_gate1, 'gate2': cmd_gate2, 'dict': cmd_dict}[a.cmd](a)
 
 
 if __name__ == '__main__':

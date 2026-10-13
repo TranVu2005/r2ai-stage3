@@ -113,3 +113,23 @@ def test_guard_stays_inside_s6_run(tmp_path):
     assert s6.guard(s6.S6_RUN / 'x' / 'y.json').is_relative_to(s6.resolve_path(s6.S6_RUN))
     with pytest.raises(ValueError):
         s6.guard(tmp_path / 'y.json')
+
+
+def test_lzma_dict_zip_roundtrip_and_header(tmp_path):
+    js, sha = _write(tmp_path, b'[\n' + b',\n'.join(b'{"id": %d, "relevant_docs": [%d], "relevant_chunks": []}' % (i, i) for i in range(500)) + b'\n]\n')
+    zp = zipio.write_submission_zip(js, tmp_path / 'd.zip', method='lzma', lzma_dict_mib=64)
+    r = zipio.verify_submission_zip(zp, sha)
+    assert r['json_sha256_match'] and r['method'] == 'lzma'
+    with pytest.raises(ValueError):
+        zipio.write_submission_zip(js, tmp_path / 'e.zip', method='deflate', lzma_dict_mib=64)
+
+
+def test_membership_counts_outside_ids(tmp_path, monkeypatch):
+    import numpy as np
+    monkeypatch.setattr(s6.corpus_v2, 'member_mask', lambda ids, path=None: np.array([i < 100 for i in ids], dtype=bool))
+    rows = [{'id': 1, 'relevant_docs': [1, 2, 300], 'relevant_chunks': [{'doc_id': 1, 'chunk_text': 'a'}, {'doc_id': 400, 'chunk_text': 'b'}]},
+            {'id': 2, 'relevant_docs': [5], 'relevant_chunks': []}]
+    p = tmp_path / 'm.json'
+    p.write_text(format_submission(rows), encoding='utf-8')
+    m = s6.membership(p)
+    assert m == {'docs': 4, 'docs_outside': 1, 'chunks': 2, 'chunks_outside': 1, 'rows_changed': 1}

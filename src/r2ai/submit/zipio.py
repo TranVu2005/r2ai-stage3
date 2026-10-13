@@ -24,8 +24,18 @@ def _compression(method: str):
     raise ValueError(f'unknown zip method {method!r}; choose from {METHODS}')
 
 
-def write_submission_zip(json_path, zip_path, *, arcname: str | None = None, method: str = 'deflate', date_time=None) -> Path:
-    """json_path -> zip_path with one member `arcname` (default: the JSON file name); returns zip_path."""
+def write_submission_zip(json_path, zip_path, *, arcname: str | None = None, method: str = 'deflate', date_time=None,
+                         lzma_dict_mib: int | None = None) -> Path:
+    """json_path -> zip_path with one member `arcname` (default: the JSON file name); returns zip_path.
+
+    lzma_dict_mib (lzma only): raise the LZMA dictionary above the stdlib 8 MiB default (preset 9 extreme, as r2ai.submit.corpus_filter);
+    the decoder takes the size from the stream, but needs about that much RAM."""
+    if lzma_dict_mib is not None:
+        if method != 'lzma':
+            raise ValueError('lzma_dict_mib needs method lzma')
+        from r2ai.submit.corpus_filter import _lzma_dict
+        with _lzma_dict(lzma_dict_mib):
+            return write_submission_zip(json_path, zip_path, arcname=arcname, method=method, date_time=date_time)
     json_path, zip_path = Path(json_path), Path(zip_path)
     compression, kw = _compression(method)
     name = arcname or json_path.name

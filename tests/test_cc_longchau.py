@@ -209,3 +209,11 @@ def test_cached_reranker_refuses_unknown_pairs_in_gate_mode():
     assert rr.score(1, 'q', [5]) == {5: 0.25} and rr.hit == 1
     with pytest.raises(KeyError):
         rr.score(1, 'q', [5, 6])
+
+
+def test_member_ids_filter_drops_urls_outside_v2(tmp_path):
+    cc = Cc([record(u) for u in U])
+    roots = roots_for(tmp_path, U, cc.spans)
+    pd.DataFrame({'id': [10, 12]}).to_parquet(tmp_path / 'v2.parquet')
+    assert sorted(F.load_targets(roots, tmp_path / 'v2.parquet').url_id) == [10, 12]
+    assert len(F.load_targets(roots)) == 4

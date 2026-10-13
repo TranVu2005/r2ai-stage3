@@ -48,7 +48,7 @@ class Unavailable(Exception):
     pass
 
 
-def load_targets(roots: Roots) -> pd.DataFrame:
+def load_targets(roots: Roots, member_ids=None) -> pd.DataFrame:
     """One row per corpus longchau URL that has a selected capture: url_id, url, crawl, warc_filename, offset, length, time."""
     corpus = pd.read_parquet(roots.corpus)
     corpus = corpus[corpus.url.map(domain_of) == DOMAIN][['id', 'url']].rename(columns={'id': 'url_id'})
@@ -57,6 +57,9 @@ def load_targets(roots: Roots) -> pd.DataFrame:
     t = cov.merge(corpus, on='url_id', how='inner', validate='one_to_one')
     if len(t) != len(cov):
         raise ValueError(f'{len(cov) - len(t)} coverage ids are not corpus {DOMAIN} URLs')
+    if member_ids is not None:                              # corpus v2 membership: a URL outside v2 can never be a positive
+        keep = set(pd.read_parquet(member_ids, columns=['id']).id)
+        t = t[t.url_id.isin(keep)]
     t['warc_record_offset'] = t.warc_record_offset.astype('int64')
     t['warc_record_length'] = t.warc_record_length.astype('int64')
     t['fetch_epoch'] = t.fetch_time.map(lambda x: x.timestamp())
@@ -211,9 +214,9 @@ def slug_priority_ids(path) -> set:
     return {int(d) for v in json.loads(Path(path).read_text('utf-8')).values() for d in v['appended']}
 
 
-def run(roots: Roots, *, limit=None, workers=4, rps=4.0, shard_size=500, client=None, targets=None, priority_ids=None) -> dict:
+def run(roots: Roots, *, limit=None, workers=4, rps=4.0, shard_size=500, client=None, targets=None, priority_ids=None, member_ids=None) -> dict:
     roots.preflight()
-    targets = load_targets(roots) if targets is None else targets
+    targets = load_targets(roots, member_ids) if targets is None else targets
     db = connect(roots)
     todo = pending_targets(roots, db, targets)
     if priority_ids:                                         # stable: priority URLs first, each group in url_id order
@@ -258,15 +261,16 @@ def main(argv=None):
     ap.add_argument('--rps', type=float, default=4.0)
     ap.add_argument('--shard-size', type=int, default=500)
     ap.add_argument('--dry-run', action='store_true')
+    ap.add_argument('--member-ids', help='corpus_v2_ids.parquet: only URLs whose id is a member are requested')
     ap.add_argument('--priority-slug', help='query_append.json of VS-append: fetch its ids first')
     a = ap.parse_args(argv)
     roots = Roots()
     if a.dry_run:
-        t = load_targets(roots)
+        t = load_targets(roots, a.member_ids)
         print(json.dumps({'targets': len(t), 'warc_bytes': int(t.warc_record_length.sum()), 'by_crawl': t.crawl.value_counts().to_dict()}, indent=1))
         return 0
     print(json.dumps(run(roots, limit=a.limit, workers=a.workers, rps=a.rps, shard_size=a.shard_size,
-                         priority_ids=slug_priority_ids(a.priority_slug) if a.priority_slug else None), indent=1))
+                         priority_ids=slug_priority_ids(a.priority_slug) if a.priority_slug else None, member_ids=a.member_ids), indent=1))
     return 0
 
 

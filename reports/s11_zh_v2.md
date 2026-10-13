@@ -1,6 +1,6 @@
 # S11 — zh v2 (240.000 URL zh của corpus v2, D11 + D13)
 
-Nhánh `feat/zh-v2`, worktree `D:/GitHub/r2ai-stage3-zhv2`. Cập nhật 2026-10-14 01:50 (UTC+7). Số liệu đo từ `state/zh_full/crawl.db`, `state/zh_v2/crawl.db` (mode=ro), `data/corpus_v2_ids.parquet`, `out/runs/zh-v2/`. Chưa push.
+Nhánh `feat/zh-v2`, worktree `D:/GitHub/r2ai-stage3-zhv2`. Cập nhật 2026-10-14 02:20 (UTC+7). Số liệu đo từ `state/zh_full/crawl.db`, `state/zh_v2/crawl.db` (mode=ro), `data/corpus_v2_ids.parquet`, `out/runs/zh-v2/`. Chưa push.
 
 ## 1. Bảng theo host zh của v2 (lúc bàn giao D11)
 
@@ -63,15 +63,15 @@ Tình trạng 19:27: familydoctor.com.cn xong (`ok` 26.814, blocked_4xx 5), ask.
 
 ## 4. Watchdog zh_v2
 
-`python -m r2ai.zh_v2.watchdog` (giống zh_full): đọc heartbeat `runtime_state.json` (60 s), ghi `out/runs/zh-v2-crawl/status.json` (ALIVE / DEAD / DONE / PAUSED / HOLD) và `watchdog.jsonl`; chết hoặc treo (> 600 s) → (kill rồi) chạy lại; giới hạn 6 lần/giờ, không restart khi mất mạng. `--status` in status.json, exit 1 khi DEAD; `--dry-run`. 5 test. Đã chạy thật: lần spawn đầu (PID 26264) chết im lặng, log rỗng, chưa rõ nguyên nhân (chạy tay 40 s thì ổn); lần chạy lại watchdog giữ sống, heartbeat 43 s. Cần theo dõi. **Task Windows chưa đăng ký** (cần quyền admin và mật khẩu Windows của Vu): `powershell -ExecutionPolicy Bypass -File scripts\register_zh_v2_watchdog.ps1` (khởi động máy + mỗi 5 phút, WakeToRun). Tôi không nhập mật khẩu.
+`python -m r2ai.zh_v2.watchdog` (giống zh_full): đọc heartbeat `runtime_state.json` (60 s), ghi `out/runs/zh-v2-crawl/status.json` (ALIVE / DEAD / DONE / PAUSED / HOLD) và `watchdog.jsonl`; chết hoặc treo (> 600 s) → (kill rồi) chạy lại; giới hạn 6 lần/giờ, không restart khi mất mạng. `--status` in status.json, exit 1 khi DEAD; `--dry-run`. 5 test. Đã chạy thật: lần spawn đầu (PID 26264) chết im lặng, log rỗng, chưa rõ nguyên nhân (chạy tay 40 s thì ổn); lần chạy lại watchdog giữ sống, heartbeat 43 s. Cần theo dõi. **Task Windows đã đăng ký 14/10 02:00** theo kiểu task S10 (không admin, không lưu mật khẩu): `R2AI-zh-v2-watchdog`, user Admin, LogonType Interactive, RunLevel Limited, trigger AtLogOn + lặp mỗi 5 phút, WakeToRun, StartWhenAvailable, MultipleInstances=IgnoreNew, giới hạn 10 phút/lần; chạy khi Admin đang đăng nhập (sau tắt máy cần đăng nhập lại). Script `scripts/register_zh_v2_watchdog.ps1`.
 
 ## 5. Common Crawl cho host bị robots chặn (không tải WARC)
 
 `python -m r2ai.zh_v2.cc_queue scan|queue`: quét **chỉ index cột** (parquet, range request, 13 crawl cửa sổ corpus) ≤ 2 req/s qua ledger (5.000 request / 2 GB), không bao giờ gọi WARC, không chạm site đích. Đầu ra `out/runs/zh-v2/cc_queue.parquet` (URL, crawl, WARC file, offset, length) cho fetcher của S3.
 
-Kết quả: **13/13 crawl xong** (2025-38 … 2026-39): zysjonline.com **0** dòng, baidu.com **0** dòng (CC không chứa URL robots chặn). 4.673 request / 1,48 GB (trần 5.000 / 2 GB). `out/runs/zh-v2/cc_queue.parquet` (bản sao `cc/cc_queue.parquet`, SHA256 `b467b0c9640b679cfe840d76e7bb8ec9fd321b3e8c823b6764f93456cb397dcf`) có **0 dòng**, đủ schema; phủ CC cho 6.602 id = 0%. Fetcher của S3 không có gì để xếp hàng cho 2 host này; zysjonline.com (6.591 id) chỉ lấy được nếu Vu cho phép nguồn khác.
+Kết quả: **13/13 crawl xong** (2025-38 … 2026-39): zysjonline.com **0** dòng, baidu.com **0** dòng (CC không chứa URL robots chặn). 4.673 request / 1,48 GB (trần 5.000 / 2 GB). `out/runs/zh-v2/cc_queue.parquet` (bản sao `cc/cc_queue.parquet`, SHA256 `b467b0c9640b679cfe840d76e7bb8ec9fd321b3e8c823b6764f93456cb397dcf`) có **0 dòng**, đủ schema; phủ CC cho 6.602 id = 0%. Fetcher của S3 không có gì để xếp hàng cho 2 host này; **Quyết định của Vu (14/10): bỏ zysjonline.com** (robots chặn, CC rỗng); 6.591 id không vào index, trần phủ giảm tương ứng.
 
-**120ask (74.898 pending + 102 network_error): chưa quét CC.** Robots vẫn 521. Theo D13 chỉ làm nếu 16/10 robots còn 521, và hỏi Vu trước.
+**120ask (74.898 pending + 102 network_error): chưa quét CC.** Robots vẫn 521. Vu đã duyệt (14/10): ngày 16/10, nếu robots còn 521 thì quét CC index (chỉ metadata, ≤ 2 req/s) cho ≈ 75.000 URL v2 chưa crawl; độ phủ ≥ 20% → `cc_queue_120ask.parquet` cho S3, dưới 20% → báo Vu và dừng. Code: `cc_queue scan --hosts 120ask.com --tag 120ask --only-missing` (ledger/budget riêng, không đụng queue của zysjonline; độ phủ ghi ở `cc_queue_report_120ask.json`). Đã đặt nhắc 16/10 08:07 trong phiên.
 
 ## 6. Index zh v2 và ZG-v2
 
@@ -93,14 +93,13 @@ Code: `r2ai.zh_v2.extract` (extractor theo host; hỏi-đáp ask.39.net và baby
 - **`artifacts/cand_zh_v2.parquet` batch 1**: 60.000 dòng (1.200 × top-50), SHA256 `180174d76dadd9b476712f5f97483192d17efbaaebd66be4f3f47eb5475f87bd`, độ phủ 120.028 / 240.000 doc. Bản batch 0 (SHA `b7a03d58…f345ed3`, 77.523 doc) giữ ở `out/runs/zh-v2/cand_zh_v2.batch0.parquet`. Top-50: 25,9% dòng từ segment mới; 71,6% cặp (query, doc) của batch 0 còn trong top-50; domain đứng đầu 120ask 26.318, cnkang 13.614, familydoctor.com.cn 8.446, ask.39.net 4.309.
 - **ZG-v2 batch 1** (τ = 0,96): 3.880 doc / 1.200 query = **3,23 doc/query** (batch 0: 3,00); 508 query = 0 doc (batch 0: 538); 245 query chạm trần 10 (212). Doc ≥ τ không thuộc base 7,37/query (6,09). Không dựng JSON/ZIP.
 - Chưa vào index: 18 sub 39.net (≈ 7,8 nghìn URL đã `ok`) và phần ask.39.net crawl thêm sau khi cắt (ok 9.693 / 32.772 lúc 01:50) → đợt 2.
-- Điều phối GPU: tôi dùng GPU xong lúc 01:36; từ đó GPU rảnh cho S10 (S10 fetch từ 14/10 08:05, cần GPU sau đó). Đợt 2 chỉ chạy khi S10 báo xong, hoặc ngoài khung S10 dùng.
+- Điều phối GPU (Vu, 14/10): S10 được ưu tiên từ sau 08:05 (QA → embed en). Tôi dùng GPU xong lúc 01:36. **Đợt zh 2 chỉ chạy GPU khi S10 báo đã embed xong.**
+- Đợt 2: cắt khi ask.39.net (phần crawl thêm) + 18 subdomain 39.net + phần crawl thêm đạt ≥ 15.000 doc mới (lúc 01:50: ≈ 2,4 nghìn ask.39.net + ≈ 7,8 nghìn sub 39.net ≈ 10 nghìn).
 
 ## 8. Kiểm thử
 
-Full suite sau khi thêm cc_queue/ingest/retrieve/watchdog (trước đợt 1; sau đó chạy lại 3 file test ingest/index/scope: 11 pass): **717 passed, 2 deselected** (387,7 s), so với mốc 682 pass: +35 test; 0 lỗi. Log `out/runs/zh-v2/pytest_full.log`.
+Full suite: **720 passed, 2 deselected** (375,6 s), so với mốc 717 (lần 1) là +3 test mới cho `ingest cut-zf` (chỉ lấy dòng có id v2, bỏ URL đã ingest/out-of-v2/pending) và `adopt` (trùng hoàn toàn → bỏ, trùng một phần → lỗi); so với mốc 682 ban đầu: +38. 0 lỗi. Log `out/runs/zh-v2/pytest_full2.log` (lần 1: `pytest_full.log`).
 
 ## Việc cần Vu
 
-1. Chạy `scripts\register_zh_v2_watchdog.ps1` (admin, mật khẩu của Vu) để có task tự khởi động lại sau khi tắt máy.
-2. 120ask: nếu 16/10 robots còn 521, cho phép quét CC (75.000 URL)?
-3. zysjonline.com (6.591 id): CC không có; có nguồn nào khác Vu cho phép không?
+Không có việc chờ quyết định. Theo dõi: 16/10 (120ask), đợt 2 (≥ 15k doc mới, GPU sau S10).

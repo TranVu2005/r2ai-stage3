@@ -1,5 +1,6 @@
 """cc_longchau fetch/WARC parsing: no network, a mock transport serves synthetic gzip WARC records by Range."""
 import gzip
+import json
 import re
 
 import httpx
@@ -217,3 +218,140 @@ def test_member_ids_filter_drops_urls_outside_v2(tmp_path):
     pd.DataFrame({'id': [10, 12]}).to_parquet(tmp_path / 'v2.parquet')
     assert sorted(F.load_targets(roots, tmp_path / 'v2.parquet').url_id) == [10, 12]
     assert len(F.load_targets(roots)) == 4
+
+
+# ---- production fetch: auto rate, Retry-After, jitter, stop, priority groups, heartbeat / status -------------------------------------
+class FakeClock:
+    def __init__(self):
+        self.t = 1_000_000.0
+
+    def __call__(self):
+        return self.t
+
+
+def test_autorate_halves_on_503_and_raises_when_clean(tmp_path):
+    from r2ai.cc_longchau.throttle import AutoRate
+    clk = FakeClock()
+    r = AutoRate(0.6, path=tmp_path / 'rate.json', clock=clk)
+    for _ in range(4):
+        r.record(503); clk.t += 10
+    assert r.rps == 0.6                                    # fewer than MIN_EVENTS attempts: no verdict yet
+    r.record(503); clk.t += 10
+    assert r.rps == 0.3                                    # >30% of 5 attempts throttled in 10 min
+    for _ in range(5):
+        r.record(503); clk.t += 10
+    assert r.rps == 0.15
+    for _ in range(8):
+        for _ in range(5):
+            r.record(503); clk.t += 10
+    assert r.rps == 0.1                                    # floor
+    assert json.loads((tmp_path / 'rate.json').read_text())['rps'] == 0.1
+    assert AutoRate(0.6, path=tmp_path / 'rate.json', clock=clk).rps == 0.1      # survives a restart
+    assert AutoRate(0.05, path=tmp_path / 'rate.json', clock=clk).rps == 0.1     # never below the floor
+    r2 = AutoRate(0.6, path=tmp_path / 'none.json', clock=clk)
+    r2.rps = 0.2
+    r2.changed_at = clk.t
+    for _ in range(40):                                    # 40 clean attempts spread over 40 min
+        r2.record(206); clk.t += 60
+    assert r2.rps > 0.2 and r2.rps <= 0.6
+    top = AutoRate(0.6, path=tmp_path / 'none2.json', clock=clk)
+    for _ in range(400):
+        top.record(206); clk.t += 60
+    assert top.rps == 0.6                                  # ceiling
+
+
+def test_retry_after_forms():
+    assert F.retry_after_seconds('30') == 30
+    assert F.retry_after_seconds(None) is None and F.retry_after_seconds('soon') is None
+    assert F.retry_after_seconds('Wed, 21 Oct 2026 07:28:30 GMT', now=0) > 0
+
+
+def test_backoff_jitter_and_retry_after_floor(tmp_path):
+    import random
+    class Cc503:
+        def __init__(self): self.n = 0
+        def __call__(self, request):
+            self.n += 1
+            if self.n < 3:
+                return httpx.Response(503, headers={'retry-after': '100'} if self.n == 1 else {})
+            return httpx.Response(206, content=b'x' * 10)
+    roots = roots_for(tmp_path, U[:1], [(0, 10)])
+    ledger = Ledger(roots.run / 'ledger.json', max_bytes=10 ** 9, max_requests=1000)
+    c = F.RangeClient(ledger=ledger, log_path=roots.run / 'req.jsonl', rps=1000, transport=httpx.MockTransport(Cc503()), sleep=lambda s: None,
+                      jitter=True, rng=random.Random(1))
+    assert c.get_range('https://x/y', 0, 10) == b'x' * 10
+    delays = [json.loads(l)['delay_s'] for l in (roots.run / 'req.jsonl').read_text().splitlines() if '"backoff"' in l]
+    assert delays[0] >= 100                               # Retry-After is a floor
+    assert 15 * 0.8 <= delays[1] <= 15 * 1.2 and delays[1] != 15      # exponential step with jitter
+    assert c.requests == 3 and c.throttled == 2
+
+
+def test_stop_event_leaves_url_pending(tmp_path):
+    import threading
+    cc = Cc([record(U[0]), record(U[1])])
+    roots = roots_for(tmp_path, U[:2], cc.spans)
+    stop = threading.Event()
+    stop.set()
+    s = F.run(roots, workers=1, client=client_for(roots, cc), stop=stop)
+    assert s['run_urls'] == 0 and s['stopped'] == 'stop requested' and s['not_attempted'] == 2 and cc.calls == 0
+
+
+def test_priority_order_groups_and_done_marker(tmp_path):
+    cc = Cc([record(U[0]), record(U[1]), record(U[2], body=HTML), record(U[3])])
+    roots = roots_for(tmp_path, U, cc.spans)
+    order = pd.DataFrame({'url_id': [10, 11, 12, 13], 'best_rank': pd.array([50, 5, None, 30], 'Int64'), 'group': [2, 0, 3, 1]})
+    prog = {}
+    s = F.run(roots, workers=1, shard_size=2, client=client_for(roots, cc), order=order, progress=prog, limit=3)
+    db = F.connect(roots)
+    got = [r[0] for r in db.execute('SELECT url_id FROM fetch ORDER BY updated_at, url_id')]
+    assert sorted(got) == [10, 11, 13]                    # group 0 (11), group 1 (13), group 2 (10) first; group 3 (12) is cut by --limit
+    marks = json.loads((roots.state / 'groups_done.json').read_text())
+    assert set(marks) >= {'top20', 'top40', 'top100'}
+    assert prog['ok_run'] == 3 and prog['todo_left'] == 0
+
+
+def test_heartbeat_exit_record_and_status(tmp_path):
+    import threading
+    from r2ai.cc_longchau import fetchctl as K
+    roots = roots_for(tmp_path, U[:1], [(0, 10)])
+    stop = threading.Event()
+    assert K.status(roots)['state'] == 'NOT_STARTED'
+    with K.Beat(roots, lambda: {'ok_total': 7}, stop, deadline=None, interval=3600) as beat:
+        st = K.status(roots)
+        assert st['state'] == 'RUNNING' and st['ok_total'] == 7
+        hb = K.read_json(K.paths(roots)['heartbeat'])
+        assert K.status(roots, now=hb['at'] + 301)['state'] == 'DEAD'           # old heartbeat and no exit record
+    st = K.status(roots)
+    assert st['state'] == 'EXITED' and st['code'] == 0
+    ex = K.read_json(K.paths(roots)['exit'])
+    assert ex['reason'] == 'finished'
+    with pytest.raises(RuntimeError):
+        with K.Beat(roots, lambda: {}, stop, interval=3600):
+            raise RuntimeError('boom')
+    ex = K.read_json(K.paths(roots)['exit'])
+    assert ex['code'] == 1 and 'boom' in ex['reason'] and 'boom' in ex['error']
+    assert len((K.paths(roots)['exits']).read_text().splitlines()) == 2
+
+
+def test_beat_stops_on_deadline_and_stop_file(tmp_path):
+    import threading, time as _t
+    from r2ai.cc_longchau import fetchctl as K
+    roots = roots_for(tmp_path, U[:1], [(0, 10)])
+    stop = threading.Event()
+    b = K.Beat(roots, lambda: {}, stop, deadline=_t.time() - 1, interval=3600)
+    with b:
+        pass
+    assert stop.is_set() and b.reason == 'deadline'
+    stop2 = threading.Event()
+    K.paths(roots)['stop'].write_text('x')
+    b2 = K.Beat(roots, lambda: {}, stop2, interval=3600)
+    with b2:
+        assert not stop2.is_set()                          # a stale STOP file is cleared at start
+        K.paths(roots)['stop'].write_text('x')
+        b2._check_stop()
+        assert stop2.is_set() and b2.reason == 'STOP file'
+
+
+def test_priority_group_of():
+    from r2ai.cc_longchau.priority import group_of
+    assert [group_of(r) for r in (1, 20, 21, 40, 41, 100, 101, None)] == [0, 0, 1, 1, 2, 2, 3, 3]

@@ -150,3 +150,15 @@ def test_chunk_lists_inset_and_hybrid():
     assert [d for d, _ in h] == [10, 11, 13]
     h = chunk_lists_hybrid([1], new, texts, 5, {1: [10]}, split=4)[1]
     assert [d for d, _ in h] == [10, 11, 13, 14]          # 15 at rank 5 is not in the set nor added at rank <= 4
+
+
+def test_fill_missing():
+    from r2ai.cc_longchau.s6 import fill_missing
+    ch = {1: [(10, 'a'), (12, 'c')]}
+    docs = {1: [10, 11, 12, 13, 14, 15]}
+    texts = {11: 'b', 13: ' ', 14: 'd', 15: 'e'}
+    out, added = fill_missing(ch, docs, texts, 5)
+    assert out[1] == [(10, 'a'), (12, 'c'), (11, 'b'), (14, 'd')]     # rank 6 is past max_rank, 13 has no text
+    assert added[1] == [2, 5]
+    out, added = fill_missing(ch, docs, texts, 2)
+    assert out[1] == [(10, 'a'), (12, 'c'), (11, 'b')]

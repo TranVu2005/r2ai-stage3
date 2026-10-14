@@ -160,6 +160,35 @@ def chunk_lists_hybrid(qids, new, texts, k: int, docs_by_q, split: int = 80) -> 
     return out
 
 
+def fill_missing(chunks_by_q, docs_by_q, texts_for, max_rank: int):
+    """S6-h: for every doc of the fixed relevant_docs list at rank <= max_rank (1-based position in docs_by_q[q]) that has no chunk yet and has
+    a full text, append exactly one chunk (the whole-chunk text), ordered by doc rank, after all existing chunks. No doc is added.
+    texts_for: {doc id: full text}. Returns (new chunks_by_q, {q: [ranks of the added docs]})."""
+    out, added = {}, {}
+    for q, ch in chunks_by_q.items():
+        have = {d for d, _ in ch}
+        add = [(r, d) for r, d in enumerate(docs_by_q[q], 1) if r <= max_rank and d not in have and texts_for.get(d, '').strip()]
+        out[q] = list(ch) + [(d, texts_for[d]) for _, d in add]
+        added[q] = [r for r, _ in add]
+    return out, added
+
+
+def missing_doc_texts(chunks_by_q, docs_by_q, docs_dir, max_rank: int):
+    """Full texts of the docs that fill_missing may use (cached pickle keyed by the doc set size)."""
+    from r2ai.submit.make_submission import load_full_texts
+    need = {d for q, ch in chunks_by_q.items() for d in docs_by_q[q][:max_rank] if d not in {x for x, _ in ch}}
+    cache = guard(S6_RUN / 'cache' / f'fill_texts_{len(need)}.pkl')
+    if cache.exists():
+        with open(cache, 'rb') as f:
+            return pickle.load(f)
+    texts, _, _ = load_full_texts(need, docs_dir)
+    tmp = guard(cache.with_name(cache.name + '.partial'))
+    with open(tmp, 'wb') as f:
+        pickle.dump(texts, f, protocol=pickle.HIGHEST_PROTOCOL)
+    os.replace(tmp, cache)
+    return texts
+
+
 # ------------------------------------------------------------------ render
 
 def render(path, qids, docs_by_q, chunks_by_q, *, protect: bool, cc_ids=frozenset()) -> dict:
@@ -282,6 +311,16 @@ def cmd_build(a) -> int:
         chunks = chunk_lists_hybrid(qids, new, texts, a.k, docs, a.split)
     else:
         chunks = chunk_lists(qids, new, texts, a.k)
+    fill_info = None
+    if a.fill_rank:
+        ftexts = missing_doc_texts(chunks, docs, docs_dir, a.fill_rank)
+        chunks, added = fill_missing(chunks, docs, ftexts, a.fill_rank)
+        import numpy as np
+        n = np.array([len(added[q]) for q in qids])
+        allr = [r for q in qids for r in added[q]]
+        fill_info = {'fill_rank': a.fill_rank, 'fill_docs_per_query': round(float(n.mean()), 4),
+                     'fill_docs_p10_p50_p90': [int(x) for x in np.percentile(n, [10, 50, 90])],
+                     'fill_max_rank_added': max(allr) if allr else 0, 'fill_docs_total': int(n.sum())}
     del texts, new
     stem = a.name.replace('-', '_')
     jp = guard(d / f'{stem}.json')
@@ -291,7 +330,7 @@ def cmd_build(a) -> int:
     counts['render_seconds'] = round(time.time() - t0, 1)
     st = finish(a.name, jp, method=a.zip_method, docs_dir=docs_dir, allow_outside=not a.protect, counts=counts, probe_only=a.probe, reuse_zip=a.reuse_zip,
                 lzma_dict_mib=a.lzma_dict_mib, ceiling=a.ceiling,
-                extra={'k': a.k, 'pool': a.pool, 'protect': a.protect, 'mode': a.mode, 'split': a.split if a.mode == 'hybrid' else None, 'docs_source': f'cc-A-cut115 {CC_A_CUT115_SHA256[:8]}'})
+                extra={'k': a.k, 'pool': a.pool, 'protect': a.protect, 'mode': a.mode, **(fill_info or {}), 'split': a.split if a.mode == 'hybrid' else None, 'docs_source': f'cc-A-cut115 {CC_A_CUT115_SHA256[:8]}'})
     print(json.dumps(st, ensure_ascii=False, indent=1))
     return 0
 
@@ -512,6 +551,7 @@ def main(argv=None):
     b.add_argument('--mode', choices=('all', 'inset', 'hybrid'), default='all',
                    help='all: first K docs (S6-a..e); inset: only docs already in relevant_docs (S6-f); hybrid: ranks <= --split as all, deeper only in-set (S6-g)')
     b.add_argument('--split', type=int, default=80)
+    b.add_argument('--fill-rank', type=int, default=0, help='S6-h: add one full-body chunk for each fixed relevant_docs doc of rank <= this that has no chunk')
     b.add_argument('--no-cache', action='store_true')
     dd = sub.add_parser('dict')
     dd.add_argument('--name', required=True, help='an existing s6 variant directory holding the JSON')

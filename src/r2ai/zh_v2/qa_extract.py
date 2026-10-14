@@ -128,7 +128,7 @@ def score(c) -> int:
 
 
 def load_host(manifest, host) -> pl.DataFrame:
-    parts = [pl.read_parquet(zindex.CHUNKS_V2 / n / 'docs.parquet', columns=['doc_id', 'url', 'title', 'doc_text'])
+    parts = [zindex.segment_docs(manifest, n, columns=['doc_id', 'url', 'title', 'doc_text'])
              for n in host_segments(manifest, host)]
     return pl.concat(parts) if parts else pl.DataFrame()
 
@@ -181,12 +181,27 @@ def run(n=100, seed=42, top39=3) -> dict:
     return result
 
 
+def redo_list(manifest=None) -> dict:
+    """Docs to re-extract after the D13 extractor fixes: ask.39.net answers lost to nested <p>, familydoctor.com.cn chrome lines."""
+    manifest = manifest or json.loads(zindex.MANIFEST.read_text('utf-8'))
+    out = {}
+    for host, want in (('ask.39.net', lambda f: 'qa_no_answer' in f), ('familydoctor.com.cn', lambda f: bool(f))):
+        out[host] = sorted(r['doc_id'] for r in load_host(manifest, host).to_dicts() if want(check(host, r)['flags']))
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--n', type=int, default=100)
     ap.add_argument('--seed', type=int, default=42)
     ap.add_argument('--top-39', type=int, default=3)
+    ap.add_argument('--redo-list', help='write the doc ids to re-extract (JSON {host: [ids]}) and stop')
     a = ap.parse_args(argv)
+    if a.redo_list:
+        lst = redo_list()
+        guard(a.redo_list).write_text(json.dumps(lst), encoding='utf-8')
+        print(json.dumps({h: len(v) for h, v in lst.items()}))
+        return 0
     r = run(a.n, a.seed, a.top_39)
     for t in r['table']:
         print(json.dumps(t, ensure_ascii=False))

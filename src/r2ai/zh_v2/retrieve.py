@@ -14,9 +14,9 @@ Logits can differ by fp16 padding ULPs between runs (batches are length-sorted p
 from __future__ import annotations
 
 from r2ai.paths import QUERY_FILE, ROOT, RUNS_DIR, WORK_DATA_DIR, assert_writable, resolve_path
-from r2ai.index.segments import (ZH_V2_INDEX_ROOT, load_segment, memory_metrics, require_scan_memory, scan_memory_budget,
-                                 scan_topk, take_segment_texts, _validate_segments)
-from r2ai.retrieve.exact import QuerySparse, doc_aligned_bounds, sparse_scores
+from r2ai.index.segments import (ZH_V2_INDEX_ROOT, ArrayRows, Segment, load_segment, memory_metrics, require_scan_memory,
+                                 scan_memory_budget, scan_topk, _validate_segments)
+from r2ai.retrieve.exact import QuerySparse, doc_aligned_bounds, sparse_scores, take_texts
 
 import argparse
 import hashlib
@@ -70,15 +70,64 @@ def minmax(x):
     return (x - x.min()) / (x.max() - x.min()) if len(x) and x.max() > x.min() else np.zeros(len(x), np.float32)
 
 
+def row_piece(s: Segment, lo: int, hi: int) -> Segment:
+    """Rows lo..hi of a loaded segment as a read-only view: same global chunk ids (global_start + lo), nothing copied."""
+    data, indices, indptr = (a.array for a in s.sparse)
+    begin, end = int(indptr[lo]), int(indptr[hi])
+    return Segment(ArrayRows(s.dense.array, lo, hi),
+                   (ArrayRows(data, begin, end), ArrayRows(indices, begin, end), ArrayRows(indptr, lo, hi + 1, subtract=begin)),
+                   np.asarray(s.doc_id[lo:hi]), s.global_start + lo, row_start=lo, path=s.path, text_path=s.text_path)
+
+
+def without_superseded(name: str, s: Segment, drop) -> list[Segment]:
+    """The rows of a segment that remain readable once the docs in `drop` (explicitly superseded in the manifest) are left out.
+
+    Docs are contiguous rows, so what remains is a few row ranges; each is a view with unchanged global chunk ids, so nothing
+    downstream (candidate ids, rerank cache keys, row maps) changes for the other docs of the segment.
+    """
+    if not drop:
+        return [s]
+    doc = np.asarray(s.doc_id)
+    keep = ~np.isin(doc, np.fromiter(drop, np.int64))
+    edges = np.flatnonzero(np.diff(np.r_[0, keep.astype(np.int8), 0]))
+    return [row_piece(s, int(lo), int(hi)) for lo, hi in zip(edges[::2], edges[1::2])]
+
+
 def load_v2_segments():
-    """(names, segments sorted by global_start, source_gid(new_gid) mapping parts)."""
+    """(manifest, names, segments sorted by global_start); superseded docs are not part of the returned views.
+
+    A segment with superseded docs comes back as several row-range views that share its name, so `names` can repeat."""
     manifest = json.loads(zi.MANIFEST.read_text('utf-8'))
     rows = [r for r in manifest['segments'] if r['rows_v2']]
     segs = sorted(((r['name'], load_segment(ZH_V2_INDEX_ROOT / r['name']), r) for r in rows), key=lambda t: t[1].global_start)
     for name, s, r in segs:
         if len(s) != r['rows_v2']:
             raise ValueError(f'{name}: rows {len(s)} != manifest {r["rows_v2"]}')
-    return manifest, [t[0] for t in segs], [t[1] for t in segs]
+    sup = zi.superseded_by_segment(manifest)
+    names, out = [], []
+    for name, s, _ in segs:
+        for piece in without_superseded(name, s, sup.get(name)):
+            names.append(name)
+            out.append(piece)
+    return manifest, names, out
+
+
+def take_texts_v2(segments, ids):
+    """Chunk texts by global id, preserving order; works on views whose rows start inside the segment's text file."""
+    import pyarrow as pa
+    ids = np.asarray(ids, dtype=np.int64)
+    out = [None] * len(ids)
+    for s in segments:
+        pos = np.flatnonzero((ids >= s.global_start) & (ids < s.global_start + len(s)))
+        if len(pos):
+            with pa.memory_map(str(s.text_path), 'r') as source:
+                col = pa.ipc.open_file(source).read_all().column('text')
+                for p, text in zip(pos, take_texts(col, ids[pos] - s.global_start + s.row_start)):
+                    out[p] = text
+                del col
+    if any(t is None for t in out):
+        raise IndexError('global chunk ID not covered by segments')
+    return out
 
 
 def source_gids(names, segments, gids: np.ndarray) -> np.ndarray:
@@ -91,17 +140,19 @@ def source_gids(names, segments, gids: np.ndarray) -> np.ndarray:
         rm_file = zi.CHUNKS_V2 / names[si] / 'row_map.parquet'
         if rm_file.exists():
             rm = pl.read_parquet(rm_file).sort('new_local')['old_local'].to_numpy()
-            out[m] = starts[si] + rm[gids[m] - starts[si]]
+            base = starts[si] - segments[si].row_start                      # global start of the whole segment (views start inside it)
+            out[m] = base + rm[gids[m] - base]
         else:                                           # segment ingested straight into the v2 index: ids are already source ids
             out[m] = gids[m]
     return out
 
 
-def doc_groups(names) -> dict:
-    """primary doc id -> {'group': [...], 'v2': [...], 'domain', 'segment'} for every doc in the v2 index."""
+def doc_groups(names, manifest=None) -> dict:
+    """primary doc id -> {'group': [...], 'v2': [...], 'domain', 'segment'} for every doc in the v2 index (superseded docs excluded)."""
+    manifest = manifest or json.loads(zi.MANIFEST.read_text('utf-8'))
     out = {}
-    for n in names:
-        t = pl.read_parquet(zi.CHUNKS_V2 / n / 'docs.parquet')
+    for n in dict.fromkeys(names):
+        t = zi.segment_docs(manifest, n)
         v2col = t['doc_ids_v2'].to_list() if 'doc_ids_v2' in t.columns else t['doc_ids_group'].to_list()
         for d, g, v, dom in zip(t['doc_id'].to_list(), t['doc_ids_group'].to_list(), v2col, t['domain'].to_list()):
             if d in out or g[0] != d:
@@ -230,7 +281,7 @@ def rerank(reuse: Path | None = None, limit=None):
             need = np.array([j for j, g in enumerate(src) if int(g) not in have], dtype=np.int64)
             pair_src = {int(src[j]): have[int(src[j])] for j in range(len(cand)) if int(src[j]) in have}
             if len(need):
-                texts = take_segment_texts(segments, cand[need])
+                texts = take_texts_v2(segments, cand[need])
                 for j, sc in zip(need, rr.score(ws(query['query']), texts)):
                     pair_src[int(src[j])] = float(sc)
             pair = {int(c): pair_src[int(g)] for c, g in zip(cand, src)}
@@ -283,8 +334,8 @@ def export(top=50, out=None):
     cache = load_cache(qids)
     if len(cache) != 1200:
         raise SystemExit(f'rerank incomplete: {len(cache)}/1200 queries')
-    _, names, segments = load_v2_segments()
-    groups = doc_groups(names)
+    manifest, names, segments = load_v2_segments()
+    groups = doc_groups(names, manifest)
     rows = []
     for q in qids:
         for rank, (d, logit) in enumerate(cache[q]['dense'][:top], 1):
@@ -315,8 +366,8 @@ def zg(base_json=None, tau=TAU, cap=CAP):
     if hashlib.sha256(raw).hexdigest() != VS_APPEND_SHA256:
         raise ValueError('VS-append SHA256 mismatch; refusing mutable baseline')
     base = raw.decode('utf-8')
-    _, names, _ = load_v2_segments()
-    groups = doc_groups(names)
+    manifest, names, _ = load_v2_segments()
+    groups = doc_groups(names, manifest)
     cache = load_cache()
     pairs = {q: [(int(d), s) for d, s in v['dense']] for q, v in cache.items()}
     if len(pairs) != 1200:

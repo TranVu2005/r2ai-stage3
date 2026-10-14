@@ -37,7 +37,9 @@ from . import extract as zextract
 from . import index as zindex
 
 FIRST_SEGMENT_ID = 100
+REDO_FIRST_SEGMENT_ID = 200       # re-extraction batches keep their own manifest (the raw shards are already recorded in the main one)
 RUN = RUNS_DIR / 'zh-v2-ingest'
+REDO_RUN = RUNS_DIR / 'zh-v2-ingest-redo'
 
 
 @dataclass(frozen=True)
@@ -58,68 +60,132 @@ class V2Roots(Roots):
         STATE_DIR / 'extract.db'))
 
 
+def redo_roots() -> V2Roots:
+    """Roots of the re-extraction ingest: own manifest / docs / run directories, same chunks and index roots as the main ingest."""
+    return V2Roots(docs=WORK_DATA_DIR / 'docs_zh_v2_redo', run=REDO_RUN, state=STATE_DIR / 'zh_v2_ingest_redo')
+
+
 def use_v2_extractor():
     """Route the shared ingest functions to the zh-v2 extractor (it delegates every other host to zh_full)."""
     base_ingest.zf = zextract
 
 
-def init_manifest(roots: V2Roots):
-    """Create the manifest and move its segment-id sequence to FIRST_SEGMENT_ID - 1 (only while it has no segments)."""
+def init_manifest(roots: V2Roots, first: int | None = None):
+    """Create the manifest and move its segment-id sequence to first - 1 (only while it has no segments)."""
+    first = first or (REDO_FIRST_SEGMENT_ID if roots.state.name.endswith('_redo') else FIRST_SEGMENT_ID)
     c = base_ingest.connect(roots)
     try:
         if not c.execute('SELECT 1 FROM segments').fetchone():
             with c:
-                c.execute("UPDATE sqlite_sequence SET seq=? WHERE name='segments'", (FIRST_SEGMENT_ID - 1,))
+                c.execute("UPDATE sqlite_sequence SET seq=? WHERE name='segments'", (first - 1,))
         seq = c.execute("SELECT seq FROM sqlite_sequence WHERE name='segments'").fetchone()[0]
     finally:
         c.close()
     return seq
 
 
+def declared_supersede(roots: V2Roots, batch: str) -> set:
+    """Doc ids a re-extraction batch declared it replaces (written by `cut-redo`; empty for every other batch)."""
+    f = roots.state / f'supersede_{batch}.json'
+    return set(json.loads(f.read_text('utf-8'))['doc_ids']) if f.exists() else set()
+
+
 def adopt(roots: V2Roots | None = None) -> dict:
-    """Add every ACTIVE v2-ingest segment missing from the v2 index manifest. Returns the manifest rows added."""
+    """Add every ACTIVE v2-ingest segment missing from the v2 index manifest. Returns the manifest rows added.
+
+    A doc already indexed must not be indexed twice: a segment whose docs are all already there is skipped, one that overlaps only
+    in part is refused. The single exception is an explicit declaration (`supersede_<batch>.json` of a `cut-redo` batch): the
+    overlapping docs must be listed in it, they are then recorded in the manifest (`superseded`: doc, old segment, new segment)
+    and no longer read from the old segment. An overlap that the declaration does not cover is still refused.
+    """
     roots = roots or V2Roots()
     manifest = json.loads(zindex.MANIFEST.read_text('utf-8'))
     have = {r['name'] for r in manifest['segments']}
-    added = []
-    skipped = []
-    seen = set()    # a doc already in the index (2% sample segment, earlier batch) must not be indexed twice
+    gone = zindex.superseded_by_segment(manifest)
+    owner = {}    # doc id -> segment that serves it now
     for r in manifest['segments']:
-        f = (zindex.CHUNKS_V2 / r['name'] / 'docs.parquet')
+        f = zindex.CHUNKS_V2 / r['name'] / 'docs.parquet'
         if f.exists():
-            seen.update(pl.read_parquet(f, columns=['doc_id'])['doc_id'].to_list())
+            for d in pl.read_parquet(f, columns=['doc_id'])['doc_id'].to_list():
+                if d not in gone.get(r['name'], ()):
+                    owner[d] = r['name']
+    added, skipped, replaced = [], [], []
     for seg in base_ingest.segment_rows(roots):
         if seg['name'] in have:
             continue
         docs = pl.read_parquet(roots.chunks / seg['name'] / 'docs.parquet', columns=['doc_id'])
         ids = set(docs['doc_id'].to_list())
-        if ids & seen:
-            if not ids <= seen:
-                raise ValueError(f"{seg['name']}: {len(ids & seen)} of {len(ids)} docs already indexed; filter the batch")
+        dup = {d for d in ids if d in owner}
+        declared = declared_supersede(roots, seg['batch'])
+        if dup and declared:
+            if not dup <= declared:
+                raise ValueError(f"{seg['name']}: {len(dup - declared)} already-indexed docs are not in the supersede declaration")
+            replaced += [{'doc_id': int(d), 'segment': owner[d], 'by': seg['name'], 'batch': seg['batch']} for d in sorted(dup)]
+        elif dup:
+            if not ids <= set(owner):
+                raise ValueError(f"{seg['name']}: {len(dup)} of {len(ids)} docs already indexed; filter the batch")
             skipped.append(seg['name'])
             continue
-        seen |= ids
+        for d in ids:
+            owner[d] = seg['name']
         added.append({'name': seg['name'], 'segment_id': seg['segment_id'], 'batch': seg['batch'], 'domain': seg['domain'],
                       'rows_source': seg['rows'], 'rows_v2': seg['rows'], 'docs_v2': docs.height, 'source': 'zh_v2_ingest',
                       'global_start': base_ingest.global_start(seg['segment_id'])})
     if added:
         import numpy as np
-        zindex.write_manifest(manifest['segments'] + added, np.array(zindex.scope.v2_zh()['id'].to_numpy()))
-    return {'added': [a['name'] for a in added], 'skipped_duplicate': skipped, 'rows': sum(a['rows_v2'] for a in added), 'docs': sum(a['docs_v2'] for a in added)}
+        zindex.write_manifest(manifest['segments'] + added, np.array(zindex.scope.v2_zh()['id'].to_numpy()),
+                              manifest.get('superseded', []) + replaced)
+    return {'added': [a['name'] for a in added], 'skipped_duplicate': skipped, 'superseded': len(replaced),
+            'rows': sum(a['rows_v2'] for a in added), 'docs': sum(a['docs_v2'] for a in added)}
 
 
-def launch(batch: str, first: str | None = None) -> dict:
+def cut_redo(roots: V2Roots, batch: str, doc_ids, domains: list[str], reason: str = '', crawl_db=None) -> dict:
+    """Re-extract docs that are already indexed, from the raw shards (no fetch), as a new batch that supersedes them.
+
+    Selects the zh-v2 crawl rows whose primary doc id is in `doc_ids`, cuts them (own manifest, so the shard / url rows of the main
+    ingest stay untouched) and writes the supersede declaration read by `adopt`.
+    """
+    import dataclasses
+    want = {int(d) for d in doc_ids}
+    src = base_ingest._ro(crawl_db or zcrawl.DB)
+    keep, found = [], set()
+    try:
+        q = ','.join('?' * len(domains))
+        for u, d, st, sh, ids in src.execute("SELECT url_norm, domain, status, shard, doc_ids FROM urls WHERE domain IN (%s) "
+                                             "AND status IN ('ok','thin') AND shard IS NOT NULL" % q, domains):
+            first = json.loads(ids)[0]
+            if first in want:
+                keep.append((u, d, st, sh, ids))
+                found.add(first)
+    finally:
+        src.close()
+    path = roots.guard(roots.state / f'cut_src_{batch}.db')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.unlink(missing_ok=True)
+    c = sqlite3.connect(path)
+    with c:
+        c.execute('CREATE TABLE urls (url_norm TEXT PRIMARY KEY, domain TEXT, status TEXT, shard TEXT, doc_ids TEXT)')
+        c.executemany('INSERT INTO urls VALUES (?,?,?,?,?)', keep)
+    c.close()
+    out = base_ingest.cut_batch(dataclasses.replace(roots, crawl_db=path), batch, domains)
+    decl = roots.guard(roots.state / f'supersede_{batch}.json')
+    decl.write_text(json.dumps({'batch': batch, 'reason': reason, 'doc_ids': sorted(found), 'at': time.time()}), encoding='utf-8')
+    out.update({'rows_selected': len(keep), 'docs_declared': len(found), 'docs_not_found': len(want - found)})
+    return out
+
+
+def launch(batch: str, first: str | None = None, redo: bool = False) -> dict:
     repo = str(Path(__file__).resolve().parents[3])
     cwd = str(Path(RUNS_DIR).resolve().parents[1])
-    run = str(RUN.resolve())
-    tail = f' --first {first}' if first else ''
+    run = str((REDO_RUN if redo else RUN).resolve())
+    tail = (f' --first {first}' if first else '') + (' --redo' if redo else '')
     cmd = (f'cmd.exe /c "cd /d {cwd} && set PYTHONPATH={repo}\\src&& set PYTHONIOENCODING=utf-8&& '
            rf'.venv\Scripts\python.exe -B -m r2ai.zh_v2.ingest run --batch {batch}{tail} '
            rf'>> {run}\driver-{batch}.stdout.log 2>> {run}\driver-{batch}.stderr.log"')
     ps = ("$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create "
           "-Arguments @{CommandLine=$env:DRIVER_CMD; CurrentDirectory=$env:DRIVER_CWD}; "
           "Write-Output ($r.ReturnValue.ToString() + ' ' + $r.ProcessId.ToString())")
-    RUN.mkdir(parents=True, exist_ok=True)
+    Path(run).mkdir(parents=True, exist_ok=True)
     out = subprocess.run(['powershell', '-NoProfile', '-Command', ps], capture_output=True, text=True, check=True,
                          env={**os.environ, 'DRIVER_CMD': cmd, 'DRIVER_CWD': cwd}).stdout.split()
     if out[0] != '0':
@@ -127,8 +193,8 @@ def launch(batch: str, first: str | None = None) -> dict:
     return {'pid': int(out[1]), 'command': cmd}
 
 
-def run(batch: str, first: str | None, interval: float = 30.0):
-    roots = V2Roots()
+def run(batch: str, first: str | None, interval: float = 30.0, redo: bool = False):
+    roots = redo_roots() if redo else V2Roots()
     use_v2_extractor()
     p = drv.paths(roots, batch)
     from r2ai.zh_full_ingest.__main__ import _stop_on_alert
@@ -192,20 +258,29 @@ def cut_zh_full(roots: V2Roots, batch: str, domains: list[str], zf=None, v2_ids=
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('action', choices=['cut', 'cut-zf', 'run', 'launch', 'status', 'adopt'])
+    ap.add_argument('action', choices=['cut', 'cut-zf', 'cut-redo', 'run', 'launch', 'status', 'adopt'])
     ap.add_argument('--batch')
+    ap.add_argument('--redo', action='store_true', help='use the re-extraction roots (own manifest, segment ids from 200)')
+    ap.add_argument('--doc-ids-file', help='cut-redo: JSON list of primary doc ids to re-extract and supersede')
+    ap.add_argument('--reason', default='')
     ap.add_argument('--domains')
     ap.add_argument('--first', default=None)
     a = ap.parse_args(argv)
-    roots = V2Roots()
+    roots = redo_roots() if a.redo or a.action == 'cut-redo' else V2Roots()
     if a.action == 'status':
         print(json.dumps(drv.driver_status(roots, a.batch), indent=1, default=str))
     elif a.action == 'launch':
-        print(json.dumps(launch(a.batch, a.first), indent=1))
+        print(json.dumps(launch(a.batch, a.first, a.redo), indent=1))
     elif a.action == 'run':
-        run(a.batch, a.first)
+        run(a.batch, a.first, redo=a.redo)
     elif a.action == 'adopt':
         print(json.dumps(adopt(roots)))
+    elif a.action == 'cut-redo':
+        roots.preflight()
+        init_manifest(roots)
+        ids = json.loads(Path(a.doc_ids_file).read_text('utf-8'))
+        domains = a.domains.split(',') if a.domains else sorted(zcrawl.DOMAINS)
+        print(json.dumps(cut_redo(roots, a.batch, ids, domains, a.reason), default=str, indent=1))
     elif a.action == 'cut-zf':
         roots.preflight()
         init_manifest(roots)

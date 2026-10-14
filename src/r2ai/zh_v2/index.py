@@ -42,6 +42,28 @@ def guard(path) -> Path:
     return p
 
 
+def superseded_by_segment(manifest: dict) -> dict:
+    """segment name -> doc ids that a later segment replaced. Declared explicitly in the manifest (`superseded`), never inferred."""
+    out = {}
+    for e in manifest.get('superseded', []):
+        out.setdefault(e['segment'], set()).add(int(e['doc_id']))
+    return out
+
+
+def live_docs_total(manifest: dict) -> int:
+    """Docs readable from the index: every segment's docs minus the superseded ones (their replacement is counted in its own segment)."""
+    return sum(r['docs_v2'] for r in manifest['segments']) - len(manifest.get('superseded', []))
+
+
+def segment_docs(manifest: dict, name: str, columns=None) -> pl.DataFrame:
+    """docs.parquet of a v2 segment without the docs superseded in it."""
+    t = pl.read_parquet(CHUNKS_V2 / name / 'docs.parquet', columns=columns)
+    drop = superseded_by_segment(manifest).get(name)
+    if drop and 'doc_id' in t.columns:
+        t = t.filter(~pl.col('doc_id').is_in(sorted(drop)))
+    return t
+
+
 def sha256_file(path) -> str:
     with open(path, 'rb') as f:
         return hashlib.file_digest(f, 'sha256').hexdigest()
@@ -207,7 +229,9 @@ def build(*, verify=False, only=None) -> dict:
     ids = scope.v2_zh()['id'].to_numpy()
     ids = np.sort(ids)
     ZH_V2_INDEX_ROOT.mkdir(parents=True, exist_ok=True)
-    done = {r['name']: r for r in json.loads(MANIFEST.read_text('utf-8'))['segments']} if MANIFEST.exists() else {}
+    prev = json.loads(MANIFEST.read_text('utf-8')) if MANIFEST.exists() else {}
+    done = {r['name']: r for r in prev.get('segments', [])}
+    superseded = prev.get('superseded', [])
     rows, t0 = [], time.perf_counter()
     for src in source_segments():
         if only and src['name'] not in only:
@@ -222,16 +246,16 @@ def build(*, verify=False, only=None) -> dict:
         row['seconds'] = round(time.perf_counter() - ts, 1)
         rows.append(row)
         print(json.dumps(row, ensure_ascii=False), flush=True)
-        write_manifest(rows, ids)
+        write_manifest(rows, ids, superseded)
     rows += [r for r in done.values() if r.get('source') == 'zh_v2_ingest']    # adopted by r2ai.zh_v2.ingest: keep
-    write_manifest(rows, ids)
-    return {'segments': len(rows), 'rows_v2': sum(r['rows_v2'] for r in rows), 'docs_v2': sum(r['docs_v2'] for r in rows),
+    write_manifest(rows, ids, superseded)
+    return {'segments': len(rows), 'rows_v2': sum(r['rows_v2'] for r in rows), 'docs_v2': sum(r['docs_v2'] for r in rows) - len(superseded),
             'seconds': round(time.perf_counter() - t0, 1)}
 
 
-def write_manifest(rows, ids):
+def write_manifest(rows, ids, superseded=None):
     body = {'built_at': time.time(), 'v2_zh_ids': int(len(ids)), 'v2_ids_sha256': sha256_file(scope.IDS_PATH),
-            'excluded_domains': list(EXCLUDED_DOMAINS), 'segments': rows}
+            'excluded_domains': list(EXCLUDED_DOMAINS), 'segments': rows, 'superseded': list(superseded or [])}
     tmp = guard(MANIFEST.with_name('manifest.json.tmp'))
     tmp.write_text(json.dumps(body, ensure_ascii=False, indent=1), encoding='utf-8')
     os.replace(tmp, guard(MANIFEST))

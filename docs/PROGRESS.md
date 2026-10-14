@@ -1,6 +1,6 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-13 15:10 (UTC+7)
+- Cập nhật: 2026-10-14 19:00 (UTC+7)
 - Model thực hiện: Claude Sonnet 5.5
 - Commit HEAD đã kiểm trước cập nhật này: `684738a87abccad169024683e092426ccee0ed08`, nhánh `feat/corpus-v2-vinmec` (từ `main`)
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
@@ -321,6 +321,7 @@ Hai dòng ❓ từ CONTEXT:
 - D4: xóa `out/runs/zh-full-ingest/ZF/ZF-5p` và `ZF-10p`.
 - D5: bỏ `qihuangzhishu` khỏi kế hoạch ingest/crawl.
 - D6: `b002` chỉ gồm `120ask` và `cnkang`.
+- D11 (S11): phạm vi zh = 240.000 URL zh của corpus v2; D6 bỏ. D13: mọi host có trong v2 (D5 không còn áp dụng cho v2); 19 subdomain `*.39.net` được crawl (robots.txt redirect sang 404 = không hạn chế theo RFC 9309, tốc độ nhóm default); host bị robots chặn đi qua index Common Crawl (chỉ metadata, không tải WARC).
 
 ### upload-probe (S7, 13/10/2026)
 
@@ -470,3 +471,8 @@ K80 artifact out/upload-probe/K80/sub_K80_LZMA.zip: JSON 638.098.632 byte, SHA25
 | 2026-10-14 17:00 | Claude Sonnet 5.5 | Ghi điểm S6-f (0,2599, base vi); dựng S6-h1 (R80) và S6-h2 (R120) trên base S6-f, thêm `--fill-rank` và test; validator 0 lỗi, v2 loại 0; chưa nộp, chưa push |
 | 2026-10-14 18:00 | Claude Sonnet 5.5 | Ghi điểm S6-h1 (0,2599) và S6-h2 (0,2601), base vi chốt S6-h2; nguyên tắc chunk vi chỉ từ doc trong tập, không bảo vệ; đóng S6, tái tạo best chuyển S14; chưa push |
 | 2026-10-13 14:56 | Claude Sonnet 5.5 | S3: nhánh `cc-longchau`: đính chính báo cáo trước (fetch đã chết im lặng từ 10:24, tôi đếm nhầm tiến trình); lọc queue theo corpus v2 (0 URL bị loại; cờ `--member-ids`, `6157be1`); xếp hạng ưu tiên top-20/40/100/rest, rate tự điều theo 503, heartbeat/exit record/status/stop/report, launcher Win32_Process, hạn cứng 28/10 23:59 (§6 dòng 18). Fetch chạy lại 14:56. Không push/merge/nộp. |
+| 2026-10-13 19:40 | Claude Sonnet 5.5 | S11 zh v2 (`feat/zh-v2`, HEAD `28265c0`+commit docs): crawler zh_full giới hạn v2 (backup+SHA, `defer_urls`), mở lại 883 URL (D13), crawler zh_v2 cho host mới (71.564 URL) kèm watchdog (task Windows chưa đăng ký, cần Vu), ngoại lệ robots-redirect cho `*.39.net`, index zh v2 (448.858 chunk / 77.523 doc), ZG-v2 τ=0,96 = 3,00 doc/query, `artifacts/cand_zh_v2.parquet` SHA `b7a03d58…f345ed3`, quét CC index (zysjonline/baidu: 0 dòng sau 4/13 crawl), full suite 717 pass / 2 deselected (mốc 682). Chi tiết `reports/s11_zh_v2.md`; ask.39.net đang chờ robots timeout, ingest đợt 1 chưa chạy |
+| 2026-10-14 01:55 | Claude Sonnet 5.5 | S11 đợt ingest 1 (Vu: ≥15k doc, ưu tiên ask.39.net+cnkang): `v2n-002` 6.178 doc + `v2n-001` 36.329 doc (embed GPU, xong 00:59); thêm `ingest cut-zf` (dòng zh_full chưa ingest có id v2), `adopt` bỏ segment trùng, sửa `index build` làm mất segment đã adopt. Index v2: 652.406 chunk / 120.028 doc = 50,0% của 240.000 (trước 32,3%). Rerank `--reuse` 1.888 s; `artifacts/cand_zh_v2.parquet` SHA `180174d7…475f87bd` (60.000 dòng); ZG-v2 τ=0,96 3,23 doc/query (trước 3,00). Quét CC xong 13/13 crawl: zysjonline/baidu 0 dòng, `cc_queue.parquet` rỗng. GPU rảnh từ 01:36 cho S10 |
+| 2026-10-14 02:20 | Claude Sonnet 5.5 | S11: đăng ký task `R2AI-zh-v2-watchdog` (Interactive, không admin/mật khẩu, AtLogOn + 5 phút, WakeToRun/StartWhenAvailable/IgnoreNew); bỏ zysjonline.com (Vu); `cc_queue --tag/--only-missing` cho quét CC 120ask ngày 16/10 nếu robots còn 521 (độ phủ ≥ 20% → cc_queue_120ask cho S3, thấp hơn → báo Vu); test cho `ingest cut-zf` và `adopt` (trùng hoàn toàn → bỏ, một phần → lỗi); full suite 720 pass / 2 deselected (mốc 717). GPU: S10 ưu tiên sau 08:05, đợt zh 2 (≥15k doc mới) chạy sau khi S10 embed xong |
+| 2026-10-14 17:50 | Claude Sonnet 5.5 | S11 đợt ingest 2 (Vu cho chạy ngay, S10 đổi sang Europe PMC): `v2n-003` 25.266 URL (ask.39.net 17.456 + 18 sub 39.net 7.806), embed xong 17:23, rerank `--reuse` 1.059 s, GPU trả 17:46; không có tiến trình lạ trên GPU. Index v2: 747.429 chunk / 144.097 doc = 60,0% của 240.000. `artifacts/cand_zh_v2.parquet` SHA `86d32617…d25c` (đợt 1 giữ ở `out/runs/zh-v2/cand_zh_v2.batch1.parquet`); ZG-v2 τ=0,96 3,42 doc/query |
+| 2026-10-14 19:00 | Claude Sonnet 5.5 | S11: quét CC index 120ask (Vu: quét ngay) cho 75.418 URL v2 chưa crawl, 13 crawl, 90 request / 611 MB, ≤2 req/s, không tải WARC: chỉ 25 URL có bản chụp 200 (0,033% < ngưỡng 20%) → không giao S3, đã dừng; file `cc_queue_120ask.below_threshold.parquet`. `index.commoncrawl.org` ngắt kết nối nên cc_queue dùng danh sách crawl đã quét (fallback); sửa kiểu `fetch_time`. ask.39.net còn 6.460 pending, đợt 3 chờ ≥8k doc mới + hỏi Vu về GPU |

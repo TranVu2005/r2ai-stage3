@@ -2,7 +2,7 @@
 
 - Cập nhật: 2026-10-13 (UTC+7)
 - Model thực hiện: Claude Sonnet 5.5
-- Commit HEAD đã kiểm trước cập nhật này: `e4d5bb2befab4f877065506a7c7cdaed3ab0dd24`, nhánh `s6`
+- Commit HEAD đã kiểm trước cập nhật này: `8bb465712e1d1c87a92c5ff61cb936c82b81d2be`, nhánh `s6`
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - **S3 (13/10, nhánh `cc-longchau`, chưa push/merge): cc-A-cut115 Final 0,2279 là bản tốt nhất đã đo** (người dùng cung cấp; Doc F2 0,2593 · Doc P 0,1603 · Doc R 0,3630; Chunk F2 giữ 0,1964; cc-A + cắt doc A1 τ −1,66 của S5, TB 136,48 id/query, ZIP 96,861 MiB; +0,0056 so với cc-A). Trước đó cc-A 0,2223 (Doc F2 0,2481 · Doc P 0,1412 · Doc R 0,3894): RD150 giữ nguyên byte + id slug của URL không có bản CC + doc longchau lấy từ text Common Crawl, xếp theo reranker. cc-A-union 0,2200 (Doc R 0,3919, Doc P 0,1337) thua cc-A, bỏ hướng union. Config best trong code vẫn là VS-append 0,2168 (chưa đổi `submission-best.yaml`). Chi tiết `submissions/LOG.md`, `out/runs/cc-longchau/`.
 - **Bản tốt nhất đã đo và là config best: VS-append Final 0,2168** (07/10, người dùng cung cấp; (0,2373 + 0,1964)/2 = 0,21685 làm tròn): Doc F2 0,2373 · Doc P 0,1353 · Doc R 0,3716 · Chunk F2 0,1964 · Chunk P 0,2340 · Chunk R 0,2199 (chunk giống RD150); RD150 giữ nguyên byte + 20 id/query theo BM25 slug từ URL vi không crawl được. File `out/runs/selective-check/VS-append/VS_append.zip`, ZIP SHA256 `48da9d87…53fe`, JSON `9c91c952…43e2e0`. **Config best = VS-append từ `a6cd723`**: `configs/submission-best.yaml` = RD150 (`configs/submission-rd150.yaml`, nội dung best cũ giữ nguyên) + `postprocess.slug_append`; `k` là tham số config, mặc định 20 (`0644009`); gate tol 0 JSON `9c91c952…43e2e0` khớp file đã nộp; pin slug `out/runs/best-vsappend/slug_pool_pin.parquet` SHA256 `196f2e50…371f` (30.920.581 byte, trong `out/` ignored), bản sao ngoài repo `D:/r2ai-pins/`. Bản nền RD150 Final 0,2139 (06/10), Doc F2 0,2313 · Doc P 0,1431 · Doc R 0,3412 · Chunk F2 0,1964 · Chunk P 0,2340 · Chunk R 0,2199. File `out/runs/rrf-docs-2026-10-06/RD150/sub_RD150.zip`; ZIP SHA256 `9eaf78b4…ccfd`, JSON `136c2591…e950`. Trần ZIP 104.857.600 byte. Tổng **34 lượt nộp** (người dùng cung cấp).
@@ -207,6 +207,8 @@ Giải nén zipfile và bsdtar đúng SHA JSON (`d0da38b1…`, `d720f38d…`). D
 | S6-h2 | 120 | 17,17 (9/16/27) | 120 | 120,87 | 93.532.108 | `67678ae8…b134d` | 0 lỗi | 0 | 290 / 262 MiB |
 
 Cả hai: doc/query 136,48, 0 doc thêm do bảo vệ, chunk CC/query 9,34 (h1) và 10,82 (h2), JSON SHA `a498a6c8…7d74` và `f1564c6b…3361`, giải nén zipfile và bsdtar đúng SHA. Chưa nộp, chưa có điểm.
+
+**S6 đóng (14/10; điểm do người dùng cung cấp):** S6-h1 (R80, 110,70 chunk/query) Final 0,2599 · Chunk F2 0,2604 (P 0,1791, R 0,3452); S6-h2 (R120, 120,87 chunk/query) Final **0,2601** · Chunk F2 0,2608 (P 0,1704, R 0,3547); S6-f 0,2599 (Chunk F2 0,2605). Ba bản tương đương (chênh ≤ 0,0002): phía chunk vi đã bão hoà, dừng khám phá. **Base vi chốt = S6-h2** (S6-f tương đương; ZIP `out/runs/s6/S6-h2/S6_h2.zip`, SHA256 `67678ae8…b134d`). **Nguyên tắc: chunk vi chỉ lấy từ doc đã nằm trong `relevant_docs`, không bảo vệ (0 doc thêm).** Chuỗi điểm: S6-a 0,2483 → S6-d 0,2522 → K117 0,2526 → S6-g 0,2595 → S6-f 0,2599 → S6-h2 0,2601. Việc tái tạo best chuyển sang S14.
 
 ## 6. Lệch so với `R2AI_STAGE3_CONTEXT.md`
 
@@ -452,3 +454,4 @@ K80 artifact out/upload-probe/K80/sub_K80_LZMA.zip: JSON 638.098.632 byte, SHA25
 | 2026-10-14 06:30 | Claude Sonnet 5.5 | Sửa dự báo S6-g theo Vu (≈ 0,00018/bậc, Final ≈ 0,254); điểm S6-g chưa có nên chưa ghi; S6 đóng sau khi ghi điểm, việc base vi chuyển S14 |
 | 2026-10-14 08:00 | Claude Sonnet 5.5 | Ghi điểm LB dãy S6 (S6-a, S6-d, K117, S6-g 0,2595 tốt nhất; người dùng cung cấp); S6-f sẽ được Vu nộp; S6-h (chunk cho doc chưa có chunk) đang chờ Vu duyệt thiết kế và GPU |
 | 2026-10-14 17:00 | Claude Sonnet 5.5 | Ghi điểm S6-f (0,2599, base vi); dựng S6-h1 (R80) và S6-h2 (R120) trên base S6-f, thêm `--fill-rank` và test; validator 0 lỗi, v2 loại 0; chưa nộp, chưa push |
+| 2026-10-14 18:00 | Claude Sonnet 5.5 | Ghi điểm S6-h1 (0,2599) và S6-h2 (0,2601), base vi chốt S6-h2; nguyên tắc chunk vi chỉ từ doc trong tập, không bảo vệ; đóng S6, tái tạo best chuyển S14; chưa push |

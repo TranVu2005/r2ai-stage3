@@ -157,7 +157,8 @@ def build_queue(hosts, out: Path = OUT, ids_path=None, tag: str = '', only_missi
         pick = CH.choose(recs, CR.CORPUS_DATE)
         chosen[id_] = pick
         rows.append({'id': id_, 'url': url, 'host': host, 'surt': key, 'n_snapshots': sum(1 for r in recs if CH.usable(r)),
-                     **{c: (pick[c] if pick else None) for c in ('crawl', 'fetch_time', 'warc_filename', 'warc_record_offset',
+                     **{c: ((str(pick[c]) if c == 'fetch_time' and pick[c] is not None else pick[c]) if pick else None)
+                        for c in ('crawl', 'fetch_time', 'warc_filename', 'warc_record_offset',
                                                                  'warc_record_length', 'after_corpus')}})
     q = pl.DataFrame(rows, schema={'id': pl.Int64, 'url': pl.String, 'host': pl.String, 'surt': pl.String, 'n_snapshots': pl.Int64,
                                    'crawl': pl.String, 'fetch_time': pl.String, 'warc_filename': pl.String,
@@ -205,9 +206,15 @@ def main(argv=None):
     client = Client(ua=UA, ledger=ledger, log_path=out / f'requests{suffix}.jsonl', rps=a.rps)
     report = {'started': time.strftime('%Y-%m-%d %H:%M:%S'), 'ua': UA, 'rps': a.rps, 'prefixes': prefixes, 'crawls': {}}
     try:
-        info = json.loads(client.get(COLLINFO).content)
-        window = CR.select_crawls(info)
-        for crawl in [c['id'] for c in sorted(window, key=lambda c: CR.crawl_key(c['id']), reverse=True)]:
+        try:
+            info = json.loads(client.get(COLLINFO).content)
+            crawls = [c['id'] for c in sorted(CR.select_crawls(info), key=lambda c: CR.crawl_key(c['id']), reverse=True)]
+        except Unavailable:    # index.commoncrawl.org down: reuse the window already scanned (footers cache names it)
+            crawls = sorted((f.name[8:-5] for f in out.glob('footers_CC-MAIN-*.json')), key=lambda c: CR.crawl_key(c), reverse=True)
+            if not crawls:
+                raise
+            report['collinfo'] = 'unavailable; crawl window taken from cached footers'
+        for crawl in crawls:
             res = scan_crawl(client, crawl, prefixes, out, a.workers)
             report['crawls'][crawl] = res
             print(json.dumps(res, ensure_ascii=False), flush=True)

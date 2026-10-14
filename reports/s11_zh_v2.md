@@ -1,6 +1,6 @@
 # S11 — zh v2 (240.000 URL zh của corpus v2, D11 + D13)
 
-Nhánh `feat/zh-v2`, worktree `D:/GitHub/r2ai-stage3-zhv2`. Cập nhật 2026-10-14 17:50 (UTC+7). Số liệu đo từ `state/zh_full/crawl.db`, `state/zh_v2/crawl.db` (mode=ro), `data/corpus_v2_ids.parquet`, `out/runs/zh-v2/`. Chưa push.
+Nhánh `feat/zh-v2`, worktree `D:/GitHub/r2ai-stage3-zhv2`. Cập nhật 2026-10-14 19:00 (UTC+7). Số liệu đo từ `state/zh_full/crawl.db`, `state/zh_v2/crawl.db` (mode=ro), `data/corpus_v2_ids.parquet`, `out/runs/zh-v2/`. Chưa push.
 
 ## 1. Bảng theo host zh của v2 (lúc bàn giao D11)
 
@@ -71,7 +71,7 @@ Tình trạng 19:27: familydoctor.com.cn xong (`ok` 26.814, blocked_4xx 5), ask.
 
 Kết quả: **13/13 crawl xong** (2025-38 … 2026-39): zysjonline.com **0** dòng, baidu.com **0** dòng (CC không chứa URL robots chặn). 4.673 request / 1,48 GB (trần 5.000 / 2 GB). `out/runs/zh-v2/cc_queue.parquet` (bản sao `cc/cc_queue.parquet`, SHA256 `b467b0c9640b679cfe840d76e7bb8ec9fd321b3e8c823b6764f93456cb397dcf`) có **0 dòng**, đủ schema; phủ CC cho 6.602 id = 0%. Fetcher của S3 không có gì để xếp hàng cho 2 host này; **Quyết định của Vu (14/10): bỏ zysjonline.com** (robots chặn, CC rỗng); 6.591 id không vào index, trần phủ giảm tương ứng.
 
-**120ask (74.898 pending + 102 network_error): chưa quét CC.** Robots vẫn 521. Vu đã duyệt (14/10): ngày 16/10, nếu robots còn 521 thì quét CC index (chỉ metadata, ≤ 2 req/s) cho ≈ 75.000 URL v2 chưa crawl; độ phủ ≥ 20% → `cc_queue_120ask.parquet` cho S3, dưới 20% → báo Vu và dừng. Code: `cc_queue scan --hosts 120ask.com --tag 120ask --only-missing` (ledger/budget riêng, không đụng queue của zysjonline; độ phủ ghi ở `cc_queue_report_120ask.json`). Đã đặt nhắc 16/10 08:07 trong phiên.
+**120ask (74.898 pending + 102 network_error): quét CC xong 14/10 (Vu cho quét ngay, không đợi 16/10), kết quả dưới ngưỡng, dừng.** Robots 120ask vẫn 521. Quét index CC (chỉ metadata, ≤ 2 req/s, 13 crawl, ledger riêng 90 request / 611 MB) cho **75.418 URL v2 chưa vào index**: chỉ **25 URL có bản chụp HTTP 200 dùng được = 0,033%** (CC-2026-25: 19, 2026-21: 3, 2026-34: 2, 2025-51: 1), 443.302 byte WARC. Ngưỡng của Vu là 20% → **không giao cho S3**; file giữ ở `out/runs/zh-v2/cc/cc_queue_120ask.below_threshold.parquet` (SHA256 bắt đầu `2f90dacf40eabd78`), báo cáo `cc_queue_report_120ask.json`. Ghi chú: `index.commoncrawl.org/collinfo.json` ngắt kết nối (cả curl) nên scan dùng danh sách 13 crawl đã quét trước đó (`data.commoncrawl.org` bình thường). Lỗi kiểu `fetch_time` khi dựng queue đã sửa.
 
 ## 6. Index zh v2 và ZG-v2
 
@@ -103,7 +103,7 @@ Code: `r2ai.zh_v2.extract` (extractor theo host; hỏi-đáp ask.39.net và baby
 - Index sau đợt 2: 57 segment có dữ liệu, **747.429 chunk, 144.097 doc = 60,0% của 240.000** (đợt 1: 50,0%).
 - **`artifacts/cand_zh_v2.parquet` đợt 2**: 60.000 dòng, SHA256 `86d326173ce2e0ec5d6268a28416c7e6f9b2cb9f6fe11fd1371521d8d8ebd25c`; bản đợt 1 (SHA `180174d7…`) ở `out/runs/zh-v2/cand_zh_v2.batch1.parquet`. 16,6% dòng top-50 từ segment mới; 81,8% cặp (query, doc) của đợt 1 còn trong top-50; domain đứng đầu 120ask 22.189, cnkang 11.428, ask.39.net 11.305, familydoctor.com.cn 6.962.
 - **ZG-v2 đợt 2** (τ = 0,96): 4.103 doc / 1.200 query = **3,42 doc/query** (đợt 1: 3,23; đợt 0: 3,00); 488 query = 0 doc (508; 538); 261 query chạm trần 10 (245; 212). Doc ≥ τ không thuộc base 8,22/query.
-- Còn chờ: ask.39.net ≈ 10 nghìn URL, 120ask (robots 521, quét CC 16/10), iiyi (robots 521).
+- Còn chờ: ask.39.net (lúc 18:50: `ok` 25.557, đã ingest 24.772 → ≈ 785 doc mới, còn 6.460 pending + 742 network_error), 120ask (robots 521; CC 0,033% nên vẫn chỉ chờ robots), iiyi (robots 521). Đợt 3 cắt khi ≥ 8.000 doc mới; GPU chỉ chạy khi S10 báo xong hoặc chưa cần, hỏi Vu trước khi launch.
 
 ## 8. Kiểm thử
 

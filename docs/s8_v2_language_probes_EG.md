@@ -1,10 +1,10 @@
 # S8 — probes zh đợt 1 trên S6-g/K117
 
-2026-10-14 15:13 UTC+7 · GPT-6 (Codex) · HEAD đã kiểm trước commit `1c559ed824aaf47050c81705514c1b836309d531` · nhánh `diag-lang`.
+2026-10-14 16:15 UTC+7 · GPT-6 (Codex) · HEAD đã kiểm trước commit `27eaf789100e870e2e38ee173a7907bd34db0f23` · nhánh `diag-lang`.
 
 ## Base chính và file gửi Vu
 
-**S6-g là best mới, điểm LB do Vu cung cấp:** Final **0,2595**; Doc F2/P/R **0,2594 / 0,1563 / 0,3726**; Chunk F2/P/R **0,2596 / 0,1786 / 0,3461**. ZL-G/ZX-G chưa có điểm LB; ưu tiên nộp ZL-G trước, ZX-G sau.
+**Base cố định S6-g:** Final 0,2595; Doc F2/P/R 0,2594 / 0,1563 / 0,3726; Chunk F2/P/R 0,2596 / 0,1786 / 0,3461. **LB mới do Vu cung cấp: ZL-G Final 0,2630; ZX-G best 0,2637.** Doc F2 ZL/ZX 0,2649/0,2663; Chunk F2 0,2610/0,2611. Inverse và ZXX xem [báo cáo mới](C:/Users/Admin/.codex/worktrees/diag-lang/r2ai-stage3/docs/s8_v2_language_probes_ZXX.md).
 
 Candidate đợt 1 SHA `180174d76dadd9b476712f5f97483192d17efbaaebd66be4f3f47eb5475f87bd`, **60.000 dòng / 1.200 query**, coverage **120.028 / 240.000 doc zh = 50,011667%**. Inputs được đóng băng trong out; không dùng candidate live lúc dựng/validator.
 
@@ -32,7 +32,9 @@ Bốn ZIP dùng **ZIP-LZMA, dict 268.435.456 B (256 MiB), lc/lp/pb = 3/0/2**, he
 
 ZL tăng 543 doc vật lý, 542 ID và 95 chunk so với ZL-D. ZX thêm **4.258 ID và 368 body** so với ZL. ZL giữ 5.650 ID cũ, thêm 2.093 và bỏ 1.551; không phải tập bao hàm ZL-D. Số query không có doc zh giảm 426 → 397. Do đó chuyển precision từ ZL-D sang đợt 1 là giả định cho tập được chọn mới. Không nhân điểm/recall trực tiếp theo tỷ lệ coverage.
 
-## Dự báo trên điểm base thật
+## Dự báo trước nộp trên điểm base thật
+
+Bảng dưới được lập **trước khi có LB ZL-G/ZX-G**. Final dự báo 0,263056/0,264646 so với LB thực 0,2630/0,2637. Kịch bản chuyển precision ZL-D đã dự báo quá cao phần ZX; inverse mới dùng điểm thực nằm ở báo cáo ZXX.
 
 Kịch bản chính chuyển precision tổng ZL-D **11,822765%/doc ID**, và precision chunk zh **15,582649%** sang đợt 1. Cả hai là inverse có điều kiện; chunk còn phụ thuộc precision vi bị bỏ ở ZL-D. Với ZX, kịch bản chính giả định phần mở rộng có precision tương đương phần ZL.
 

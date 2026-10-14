@@ -1,6 +1,6 @@
 # S8 — inverse G/ZL/ZX, ZXX-G và builder bản ghép
 
-2026-10-14 16:28 UTC+7 · GPT-6 (Codex) · HEAD đã kiểm trước commit `27eaf789100e870e2e38ee173a7907bd34db0f23` · nhánh `diag-lang`.
+2026-10-14 17:15 UTC+7 · GPT-6 (Codex) · HEAD đã kiểm trước commit `e1267ec12738390e68ea384b39c368f017f78a84` · nhánh `diag-lang`.
 
 ## Điểm LB do Vu cung cấp
 
@@ -9,8 +9,9 @@
 | G | 0.2595 | 0.2594 | 0.1563 | 0.3726 | 0.2596 | 0.1786 | 0.3461 |
 | ZL-G | 0.2630 | 0.2649 | 0.1559 | 0.3849 | 0.2610 | 0.1784 | 0.3490 |
 | ZX-G | 0.2637 | 0.2663 | 0.1548 | 0.3900 | 0.2611 | 0.1781 | 0.3494 |
+| ZXX-G | 0.2639 | 0.2667 | 0.1523 | 0.3949 | 0.2610 | chưa cung cấp riêng | chưa cung cấp riêng |
 
-**Best đã đo: ZX-G = 0,2637. ZXX-G chưa có điểm LB.**
+**Best đã đo do Vu cung cấp: ZXX-G = 0,2639**, so ZX-G +0,0002 (thành phần F2 cho delta +0,00015, khác do rounding).
 
 ## ZXX-G đã kiểm
 
@@ -28,9 +29,9 @@ ZIP SHA `680a8cfd52dc7958c40fe00636b1ef1d96549f6d190722f4bb7cf6b37eb130d8`
 
 JSON SHA `46e9333970be95efe68f0a0a196f54c56b1c7be349bd8d4b642992fffdfd7078`
 
-## Dự báo so với ZX-G
+## Dự báo trước nộp so với ZX-G
 
-Chunk ZXX trùng ZL-G nên Chunk F2 lấy số đã đo **0,2610**, so ZX **0,2611**: DeltaChunk **−0,0001**, khoảng rounding [−0,0002; 0]. Dải doc mới chưa đo; chuyển precision biên ZX **8,480113%/ID** chỉ là kịch bản tham chiếu.
+Chunk ZXX trùng ZL-G nên Chunk F2 lấy số đã đo **0,2610**, so ZX **0,2611**: DeltaChunk **−0,0001**, khoảng rounding [−0,0002; 0]. Bảng dưới là dự báo trước LB, từng dùng precision biên ZX **8,480113%/ID** làm tham chiếu. LB thực ZXX-G hiện 0,2639.
 
 | Precision phần doc mới | Delta Doc F2 | Delta Final so ZX-G | Final dự báo |
 |---:|---:|---:|---:|
@@ -46,7 +47,17 @@ Ngưỡng hòa vốn có điều kiện **5,488172%/ID**, đã gồm phần gi�
 
 [Forecast JSON](C:/Users/Admin/.codex/worktrees/diag-lang/r2ai-stage3/out/diag-lang/v2/probes-E-b1/forecast-ZXX-G.json) · [Native proof](C:/Users/Admin/.codex/worktrees/diag-lang/r2ai-stage3/out/diag-lang/v2/probes-E-b1/ZXX-G.validator.json).
 
-## Builder bản ghép
+## Chốt bản ghép đợt 2 (2026-10-14 17:15)
+
+Doc biên ZX→ZXX: **5,988226%/ID**, rounding **5,809125–6,179002%**; G có điều kiện61,104348. Doc P residual −0,00036163 vẫn vượt rounding, nên không coi là precision gold chính xác. Phần thêm gồm 6.000 ID, có cả tăng cap và hạ tau; mức ngân sách trung bình10→15 không là dải hạng cố định ở mọi query.
+
+**Khóa τ_doc = −0,87255859375 tuyệt đối, cap30; không hiệu chỉnh theo mean.** Chunk theo ZL (tau0,96/top3, whole doc_text/everyv2ID, chỉ doc đã chọn). Base thắng giữa S6-f/S6-h1/S6-h2 chờ Vu báo; candidate đợt2 chờ S11 handoff path/SHA và snapshot nguồn. Không dựng/fallback đợt1 trong lúc chờ.
+
+[Entry point khóa](C:/Users/Admin/.codex/worktrees/diag-lang/r2ai-stage3/out/diag-lang/v2/compose/locked_compose.py) · [Policy](C:/Users/Admin/.codex/worktrees/diag-lang/r2ai-stage3/out/diag-lang/v2/compose/locked-policy-b2.json) · [Job pending](C:/Users/Admin/.codex/worktrees/diag-lang/r2ai-stage3/out/diag-lang/v2/compose/pending-b2.json) · [Điểm/inverse mới](C:/Users/Admin/.codex/worktrees/diag-lang/r2ai-stage3/out/diag-lang/v2/probes-E-b1/measured-ZXX-G.json).
+
+Wrapper tự báo số doc vật lý/query, ID/query, chunk/query và delta so ZXX-G: **15 / 15,000833 / 1,421667**. 11 kiểm thử guard/so sánh số đếm đạt (0,38s); job pending đã xác nhận dừng vì thiếu pin trước build. Giữ generic builder cũ nguyên vẹn. Toàn bộ gate SHA/source/native/v2/readback và trần/dict giữ nguyên.
+
+## Builder bản ghép (API đã chuẩn bị trước quyết định khóa)
 
 [compose_builder.py](C:/Users/Admin/.codex/worktrees/diag-lang/r2ai-stage3/out/diag-lang/v2/compose/compose_builder.py) · [native worker](C:/Users/Admin/.codex/worktrees/diag-lang/r2ai-stage3/out/diag-lang/v2/compose/validate_compose.py) · [config mẫu](C:/Users/Admin/.codex/worktrees/diag-lang/r2ai-stage3/out/diag-lang/v2/compose/example-G-b1.json) · [hướng dẫn](C:/Users/Admin/.codex/worktrees/diag-lang/r2ai-stage3/out/diag-lang/v2/compose/README.md).
 

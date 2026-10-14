@@ -2,7 +2,7 @@
 
 ## D1. Common Crawl
 
-Được dùng Common Crawl để lấy text chỉ cho URL có trong `links_corpus.parquet`. Lưu provenance nối từng text với `id`, URL corpus và snapshot Common Crawl; crawl ID hiện để `[S3 điền]`.
+Được dùng Common Crawl để lấy text chỉ cho URL có trong `links_corpus.parquet`. Lưu provenance nối từng text với `id`, URL corpus và snapshot Common Crawl; crawl ID đã điền ở `docs/COMPLIANCE.md` (13 crawl, `CC-MAIN-2025-38` … `CC-MAIN-2026-39`).
 
 ## D2. Hợp nhất nhánh
 

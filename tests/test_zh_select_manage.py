@@ -194,3 +194,71 @@ def test_redirect_target_deferred_is_also_off_limits(db):
     m.apply_rows(db.conn,plan(),'v1')
     assert q.is_deferred(db.conn,'https://www.x/6')
     assert not q.is_deferred(db.conn,'https://x/7')
+
+
+def test_defer_urls_marks_urls_and_select_meta_so_nothing_deferred_is_queued_or_flagged(db):
+    from r2ai.zh_full.watchdog import _deferred_in_audit
+    m.apply_rows(db.conn, plan(), 'v1')
+    m.reopen(db.conn, 'x', 5)                       # everything selected again
+    rank_before = dict(db.conn.execute('SELECT url_norm,rank FROM urls'))
+    prev = m.defer_urls(db.conn, ['x/2', 'x/6', 'x/4'])
+    assert sorted(prev) == [('x/2', 'network_error'), ('x/4', 'pending'), ('x/6', 'pending')]
+    assert dict(db.conn.execute("SELECT url_norm,status FROM urls WHERE url_norm IN ('x/2','x/6','x/4')")) == {
+        'x/2': 'deferred_select', 'x/6': 'deferred_select', 'x/4': 'deferred_select'}
+    assert dict(db.conn.execute("SELECT url_norm,new_status FROM select_meta WHERE url_norm IN ('x/2','x/6','x/4','x/7')")) == {
+        'x/2': 'deferred_select', 'x/6': 'deferred_select', 'x/4': 'deferred_select', 'x/7': 'pending'}
+    assert dict(db.conn.execute('SELECT url_norm,rank FROM urls')) == rank_before
+    queued = {r['url_norm'] for r in q.next_batch(db, 'x', 20, 1e30, dry_run=True)}
+    assert queued.isdisjoint({'x/2', 'x/6', 'x/4'}) and 'x/7' in queued
+    # a fetch of a deferred row would be a violation; a fetch of a still-selected row is not
+    audit = [{'kind': 'page', 'url': f'https://x/{i}'} for i in (6, 7)]
+    assert _deferred_in_audit(db.conn, audit) == ['x/6']
+
+
+def test_defer_urls_is_reversible_by_reopen_urls_and_rollback(db):
+    m.apply_rows(db.conn, plan(), 'v1')
+    m.reopen(db.conn, 'x', 5)
+    before = m.urls_digest(db.conn)
+    meta = list(db.conn.execute('SELECT * FROM select_meta ORDER BY url_norm'))
+    m.defer_urls(db.conn, ['x/2', 'x/6'])
+    assert m.rollback(db.conn, 'v1') == 7           # status stays in (old_status, new_status): still allowed
+    m.apply_rows(db.conn, plan(), 'v1')
+    m.reopen(db.conn, 'x', 5)
+    m.defer_urls(db.conn, ['x/2', 'x/6'])
+    assert m.reopen_urls(db.conn, 'x', ['x/2', 'x/6']) == 2
+    assert m.urls_digest(db.conn) == before
+    assert list(db.conn.execute('SELECT * FROM select_meta ORDER BY url_norm')) == meta
+
+
+def test_defer_urls_is_atomic_and_refuses_terminal_missing_or_duplicate_rows(db):
+    m.apply_rows(db.conn, plan(), 'v1')
+    before = m.urls_digest(db.conn)
+    meta = list(db.conn.execute('SELECT * FROM select_meta ORDER BY url_norm'))
+    for bad in (['x/7', 'x/0'],                     # x/0 is ok (terminal, not in select_meta)
+                ['x/7', 'y/1'],                     # unknown url
+                ['x/7', 'x/7']):                    # duplicate
+        with pytest.raises(ValueError):
+            m.defer_urls(db.conn, bad)
+        assert m.urls_digest(db.conn) == before
+        assert list(db.conn.execute('SELECT * FROM select_meta ORDER BY url_norm')) == meta
+    with pytest.raises(ValueError):
+        m.defer_urls(db.conn, [])
+    assert m.defer_urls(db.conn, ['x/7']) == [('x/7', 'pending')]
+    with pytest.raises(ValueError):                 # already deferred rows are not eligible
+        m.defer_urls(db.conn, ['x/7'])
+
+
+def test_verify_defer_accepts_only_listed_status_changes(db, tmp_path):
+    m.apply_rows(db.conn, plan(), 'v1')
+    m.reopen(db.conn, 'x', 5)
+    copy = tmp_path / 'orig.db'
+    with sqlite3.connect(copy) as dst:
+        db.conn.backup(dst)
+    original = sqlite3.connect(copy)
+    m.defer_urls(db.conn, ['x/2', 'x/6'])
+    assert m.verify_defer(original, db.conn, ['x/2', 'x/6']) == 2
+    with pytest.raises(ValueError):
+        m.verify_defer(original, db.conn, ['x/2', 'x/6', 'x/5'])      # x/5 was not changed
+    db.conn.execute("UPDATE urls SET attempts=9 WHERE url_norm='x/2'")
+    with pytest.raises(ValueError, match='unexpected'):
+        m.verify_defer(original, db.conn, ['x/2', 'x/6'])

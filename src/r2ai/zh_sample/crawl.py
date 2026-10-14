@@ -157,6 +157,13 @@ class PoliteClient:
             print(self.domain, event, flush=True)
         return code, headers, body, error, dt
 
+    # Host suffixes whose robots.txt may redirect to another host of the same family (empty = fail closed, the default).
+    ROBOTS_REDIRECT_SUFFIX = ()
+
+    def _robots_redirect_ok(self, host, target):
+        sfx = self.ROBOTS_REDIRECT_SUFFIX
+        return bool(sfx) and host.endswith(sfx) and (target or '').lower().endswith(sfx)
+
     async def allowed(self, url):
         u = urlsplit(url)
         if u.scheme not in ('http', 'https') or u.username or u.password or u.hostname is None:
@@ -175,7 +182,7 @@ class PoliteClient:
                         target = urljoin(robot_url, headers['location'])
                         v = urlsplit(target)
                         # A robots redirect may move scheme/www only; fail closed across other hosts.
-                        if v.scheme not in ('http', 'https') or v.username or v.password or (v.hostname or '').removeprefix('www.') != host:
+                        if v.scheme not in ('http', 'https') or v.username or v.password or (v.hostname or '').removeprefix('www.') != host and not self._robots_redirect_ok(host, v.hostname):
                             error = 'robots_cross_host_redirect'
                             break
                         robot_url = target

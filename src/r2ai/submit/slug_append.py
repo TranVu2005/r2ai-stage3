@@ -100,8 +100,11 @@ def query_matrix(texts, vocab):
     return Q.tocsr()
 
 
-def append_slug_ids(base_json, out_json, *, pin, pin_sha256: str, queries, k: int, k1: float, b: float, scan_depth: int) -> dict:
-    """Write out_json = base_json with up to k slug-ranked doc ids appended to every relevant_docs; returns stats."""
+def append_slug_ids(base_json, out_json, *, pin, pin_sha256: str, queries, k: int, k1: float, b: float, scan_depth: int,
+                    exclude_ids=None) -> dict:
+    """Write out_json = base_json with up to k slug-ranked doc ids appended to every relevant_docs; returns stats.
+
+    exclude_ids (default None = off, VS-append unchanged): doc ids never appended, e.g. longchau docs that now have CC text."""
     pin = resolve_path(pin)
     if sha256(pin) != pin_sha256:
         raise ValueError(f'slug pin SHA256 mismatch: {pin} is {sha256(pin)}, config says {pin_sha256}')
@@ -127,7 +130,7 @@ def append_slug_ids(base_json, out_json, *, pin, pin_sha256: str, queries, k: in
                 if S[i][j] <= 0 or len(pick) >= k:
                     break
                 d = doc_id[pool[j]]
-                if d >= 0 and d not in have and d not in pick:
+                if d >= 0 and d not in have and d not in pick and (exclude_ids is None or d not in exclude_ids):
                     pick.append(d)
             picks.append(pick)
     pieces, cursor = [], 0

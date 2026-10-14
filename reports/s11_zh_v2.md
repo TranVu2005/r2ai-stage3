@@ -1,6 +1,6 @@
 # S11 — zh v2 (240.000 URL zh của corpus v2, D11 + D13)
 
-Nhánh `feat/zh-v2`, worktree `D:/GitHub/r2ai-stage3-zhv2`. Cập nhật 2026-10-14 02:20 (UTC+7). Số liệu đo từ `state/zh_full/crawl.db`, `state/zh_v2/crawl.db` (mode=ro), `data/corpus_v2_ids.parquet`, `out/runs/zh-v2/`. Chưa push.
+Nhánh `feat/zh-v2`, worktree `D:/GitHub/r2ai-stage3-zhv2`. Cập nhật 2026-10-14 17:50 (UTC+7). Số liệu đo từ `state/zh_full/crawl.db`, `state/zh_v2/crawl.db` (mode=ro), `data/corpus_v2_ids.parquet`, `out/runs/zh-v2/`. Chưa push.
 
 ## 1. Bảng theo host zh của v2 (lúc bàn giao D11)
 
@@ -95,6 +95,15 @@ Code: `r2ai.zh_v2.extract` (extractor theo host; hỏi-đáp ask.39.net và baby
 - Chưa vào index: 18 sub 39.net (≈ 7,8 nghìn URL đã `ok`) và phần ask.39.net crawl thêm sau khi cắt (ok 9.693 / 32.772 lúc 01:50) → đợt 2.
 - Điều phối GPU (Vu, 14/10): S10 được ưu tiên từ sau 08:05 (QA → embed en). Tôi dùng GPU xong lúc 01:36. **Đợt zh 2 chỉ chạy GPU khi S10 báo đã embed xong.**
 - Đợt 2: cắt khi ask.39.net (phần crawl thêm) + 18 subdomain 39.net + phần crawl thêm đạt ≥ 15.000 doc mới (lúc 01:50: ≈ 2,4 nghìn ask.39.net + ≈ 7,8 nghìn sub 39.net ≈ 10 nghìn).
+
+**Đợt 2 (Vu: chạy ngay, không chờ S10; 14/10 15:20 → 17:46):**
+- Trước launch: `nvidia-smi --query-compute-apps` chỉ có tiến trình giao diện (dwm, explorer, Chrome, Claude…), không có python/compute lạ; không kill gì. GPU 704 MiB là bộ nhớ hiển thị.
+- `v2n-003` cắt ngay trước launch: 25.266 URL = ask.39.net 17.456, baby.39.net 4, 18 sub 39.net 7.806 (heart 1.055, fk 928, nk 762, cancer 736, tnb 717, woman 687, food 594, ek 448, man 382, shen 325, gan 294, wei 225, sj 197, fitness 185, gk 90, pf 85, gc 59, byby 37). Không có dòng zh_full mới để ingest (`v2n-004` rỗng).
+- Embed xong 17:23 (≈ 80 chunk/s); 20 segment mới (id 109–128), rerank `--reuse` 1.059 s (0,88 s/query), trả GPU 17:46.
+- Index sau đợt 2: 57 segment có dữ liệu, **747.429 chunk, 144.097 doc = 60,0% của 240.000** (đợt 1: 50,0%).
+- **`artifacts/cand_zh_v2.parquet` đợt 2**: 60.000 dòng, SHA256 `86d326173ce2e0ec5d6268a28416c7e6f9b2cb9f6fe11fd1371521d8d8ebd25c`; bản đợt 1 (SHA `180174d7…`) ở `out/runs/zh-v2/cand_zh_v2.batch1.parquet`. 16,6% dòng top-50 từ segment mới; 81,8% cặp (query, doc) của đợt 1 còn trong top-50; domain đứng đầu 120ask 22.189, cnkang 11.428, ask.39.net 11.305, familydoctor.com.cn 6.962.
+- **ZG-v2 đợt 2** (τ = 0,96): 4.103 doc / 1.200 query = **3,42 doc/query** (đợt 1: 3,23; đợt 0: 3,00); 488 query = 0 doc (508; 538); 261 query chạm trần 10 (245; 212). Doc ≥ τ không thuộc base 8,22/query.
+- Còn chờ: ask.39.net ≈ 10 nghìn URL, 120ask (robots 521, quét CC 16/10), iiyi (robots 521).
 
 ## 8. Kiểm thử
 

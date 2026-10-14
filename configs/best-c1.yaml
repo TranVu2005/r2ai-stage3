@@ -1,0 +1,192 @@
+# C1 pin manifest. Every input has path + SHA256; a missing or mismatching pin stops the build before any output is written.
+# Paths: {OUT_DIR}, {DATA_DIR}, {WORK_DATA_DIR} come from r2ai.paths (.env).
+name: C1
+description: 'C1 (LB 0.2655, 14/10/2026): base S6-f-K150 + zh v2 batch-2 docs (absolute tau_doc, cap 30) + ZL chunks, ZIP_LZMA dict 256 MiB. One command rebuilds
+  it: python -m r2ai.compose replay --manifest configs/best-c1.yaml'
+output_dir: '{OUT_DIR}/runs/c1/replay'
+zh_chunk_root: '{WORK_DATA_DIR}/chunks_zh_v2'
+policy:
+  tau_doc: -0.87255859375
+  doc_cap: 30
+  candidate_batch: 2
+  chunk_tau: 0.96
+  chunk_doc_cap: 3
+  dict_mib: 256
+  ceiling_bytes: 102600000
+  selection_policy_sha256: d25f9bf8a00e5d96a2c5a54e3b4314b48537c8a76d20291eec6cbfe345c10b69
+expected:
+  json_sha256: 83375428b79957b1580299f97b05299bb292957826bd4cb8bdc602a83b8dd5f3
+  zip_sha256: e7c84e2c37c996fe3d046bf22a4d25b2fd9e8e1c2568d928fa45797108720c13
+  zip_bytes: 82047434
+  coverage_docs: 144097
+  new_doc_physical: 18526
+  new_doc_ids: 18527
+  new_chunks: 1770
+  rows: 1200
+  chunks_total: 126208
+  base_variant: S6-f-K150
+  lb_final: 0.2655
+base_measured_scores:
+  final: 0.2599
+  doc_f2: 0.2593
+  doc_p: 0.1603
+  doc_r: 0.363
+  chunk_f2: 0.2605
+  chunk_p: 0.1858
+  chunk_r: 0.3366
+inputs:
+  base_stats:
+    path: '{OUT_DIR}/runs/s6/S6-f-K150/stats.json'
+    sha256: 8baa512740ff1b555ebed5e10fcb81dec78a874b3a78dac3c3ff92e73b19a0aa
+  base_json:
+    path: '{OUT_DIR}/runs/s6/S6-f-K150/S6_f_K150.json'
+    sha256: d0da38b1ee8943b6cb3a5dbc6a7606b4ef7abd79b6cab39fe29567e3e763dca1
+  base_zip:
+    path: '{OUT_DIR}/runs/s6/S6-f-K150/S6_f_K150.zip'
+    sha256: 0f0bf619a326b812a2de4f5a971490c7147ca800ec2e7f691d12704cbc7e8b67
+  candidate:
+    path: '{OUT_DIR}/runs/c1/inputs/cand_zh_v2.batch2.parquet'
+    sha256: 86d326173ce2e0ec5d6268a28416c7e6f9b2cb9f6fe11fd1371521d8d8ebd25c
+  zh_manifest:
+    path: '{OUT_DIR}/runs/c1/inputs/manifest-batch2-docs-verified.json'
+    sha256: 0310c2cb16a845da86822ad1dbabecabe266dd6f9ab5ca8060558448b736582f
+  corpus_v2_ids:
+    path: '{WORK_DATA_DIR}/corpus_v2_ids.parquet'
+    sha256: dad50fb81c812a5c68386a2313f880db488b457e85707b92d7c478c29523374a
+  query:
+    path: '{DATA_DIR}/raw/query.parquet'
+    sha256: ce13508b893bbd6b9169679d540630bc37eb5950cad08b4d5e0e5d7063670c08
+  reference_c1_zip:
+    path: '{OUT_DIR}/runs/c1/inputs/reference_C1.zip'
+    sha256: e7c84e2c37c996fe3d046bf22a4d25b2fd9e8e1c2568d928fa45797108720c13
+  vi_docs_dir:
+    path: '{OUT_DIR}/runs/cc-longchau/B/docs'
+    tree_sha256: dd86af8b492d903d254e372ac7f7b9c7bf822cae77a533e821aa7ca4402ee852
+    files: 18069
+  zh_sources:
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00002-sample-v2-120ask.com/docs.parquet'
+    sha256: 71397135d89a15a826e4fba44fd219ded058fa513f25c7097361579dab156730
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00003-sample-v2-a-hospital.com/docs.parquet'
+    sha256: c2af7861da9f427ab97baee0778684d6dfd5da30ce7e6754f2b8d5daa712bc47
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00004-sample-v2-care.39.net/docs.parquet'
+    sha256: 16b62ed0237801eb9f17aded3652527de85047166365dd3c6f04b5d837a01ee8
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00005-sample-v2-cnkang.com/docs.parquet'
+    sha256: 94d03ed05084eb19ce294b286f34df54f9b826431e7db6c8f0a5a6104f6fcbf4
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00006-sample-v2-familydoctor.cn/docs.parquet'
+    sha256: 16c830865015365a936d8d4ffc2c7766715530ce315f4e3498ecf82b475cc057
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00007-sample-v2-health.people.com.cn/docs.parquet'
+    sha256: 91b907a23a33b0083bc83fdc79a85e09001a61fc222d8e6186ee81f35c2f30f7
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00008-sample-v2-jb39.com/docs.parquet'
+    sha256: afb32fc572a1f736fc4cec6e2ec2476beac74b4956b622d32be2a4c5560b17bf
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00009-sample-v2-jbk.39.net/docs.parquet'
+    sha256: 13327aa603c5ba665b70175f36e4b71e89a9e8a9f864adf5f45e196115dc39a1
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00010-sample-v2-msdmanuals.cn/docs.parquet'
+    sha256: 078380d21cde654464da722047f56b1b4eb4739c19642b320b807cf494f6c490
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00012-sample-v2-test.pmphai.com/docs.parquet'
+    sha256: 545b102b32ee8b52f4064b0d56c52a7225926344c3ddd2bf9c8572b153e9863d
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00013-sample-v2-wujue.com/docs.parquet'
+    sha256: 97f5135bd2238dbea9943970c17dacc129c6e47dd80a036168a295e7ab0ebe20
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00014-sample-v2-youlai.cn/docs.parquet'
+    sha256: 619fdeef9864d891e60453ff5b23a158c03471333c9b8772ecab584aadf759f5
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00015-sample-v2-zhongyibaodian.net/docs.parquet'
+    sha256: 6f4844cd4fbab284d609b358949acfa8735792ec09e85f465a4547fab173faf5
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00016-sample-v2-zydcd.com/docs.parquet'
+    sha256: 8f69d25b52bc4ac2a449d01550ea66a2dcdfa4a5aa2618d928c02c5ce89ea2cd
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00017-b001-health.people.com.cn/docs.parquet'
+    sha256: adea212dc74d265b75b4094cc8826e61e4aecad37b0b34459413289bec6a9b8d
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00018-b001-zydcd.com/docs.parquet'
+    sha256: fa51639fd7dbdc8ebacf6eaff324432041eebb5c5be246e4bc10cd5bf0103014
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00019-b001-wujue.com/docs.parquet'
+    sha256: 8bd65817d7e67b6bd7daea2524752badad407f421e737cc72fc75ff3604c8a52
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00020-b001-msdmanuals.cn/docs.parquet'
+    sha256: 2dce383d48ff857701feb21d9183bf9f3aa8a6fb5294658f028ae3acf8aeeeb6
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00021-b001-jb39.com/docs.parquet'
+    sha256: b3d1dbdd9f1eee65ec0fceac1de1da35956ea3e7fe39b05f84bf4b2a64ee8a50
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00022-b001-test.pmphai.com/docs.parquet'
+    sha256: 27eed811b5e6153c57a67671e346855f084ffd532333476b8cb12781232c1b8a
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00023-b001-care.39.net/docs.parquet'
+    sha256: 5cad2f842c10e564b0038622f7c82581e4f5e52d0af8d2e3ccb58ac3ba0a97e0
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00024-b001-jbk.39.net/docs.parquet'
+    sha256: eccdde64a8e0b695848fb9baef4ddcf0da29bd0876722ecb8d8cb6b275630095
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00025-b001-youlai.cn/docs.parquet'
+    sha256: 6579f34fbf023f2cff61ed3116f27d877823d2577e995347004a98a9740167a6
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00026-b001-120ask.com/docs.parquet'
+    sha256: c0d14acc0cf933321e43c300e6defc22d79ea9d9e7b691ca9b9ef309a8e4d052
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00027-b001-zhongyibaodian.net/docs.parquet'
+    sha256: ebaa80475d12f23fd2e9a34830c07e590c49f381eecfecfe814a2553edd0f730
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00028-b001-a-hospital.com/docs.parquet'
+    sha256: abaa8fd603b9d2853c5f6e494aa384544b8eb7278c81379f699abb6aa1ff81bf
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00029-b001-cnkang.com/docs.parquet'
+    sha256: 4da806a575ce33be81a242b5813a711c3b3f26b75390f624099c910d9776d7a7
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00030-b002-120ask.com/docs.parquet'
+    sha256: 5c9f77dc628d745b3f7d3371890244cb50419211955c214c2900e781397d58b1
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00031-b002-cnkang.com/docs.parquet'
+    sha256: a102ae40fddd9363ee969538a9c5f124917009c0277ab865212729462c8c6371
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00100-v2n-002-cnkang.com/docs.parquet'
+    sha256: 850adcf665722508d59aacd3b249620b52cc2d786f739034ab2ab71294e1486e
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00101-v2n-002-qihuangzhishu.com/docs.parquet'
+    sha256: e835573505fe304e8d844077523bacc4f3ee5774ca89a4a369b565400147b431
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00102-v2n-002-zydcd.com/docs.parquet'
+    sha256: 8d0ca905c425851a58e3f3c46842d9f9a5a67412dda095080149926fc3945e55
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00103-v2n-002-zhongyibaodian.net/docs.parquet'
+    sha256: 52c1d425c506694edb564a2fd9649e9260e95ff880ec8ce2635887f8a1be5ae6
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00104-v2n-002-wujue.com/docs.parquet'
+    sha256: a21b92e7dab60d1948ee15f9248c394b1b7ad08cb7e2a5b881cc8e99b72e56ee
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00105-v2n-001-ask.39.net/docs.parquet'
+    sha256: 45cca475a7e0092dcc7a8db9ac26674f78abedf8aac130144d58e8655ddb997f
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00107-v2n-001-baby.39.net/docs.parquet'
+    sha256: 724bd80e069bd68e51e64032396db82e808ab7d758b5ea17b1a79dc804f413f7
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00108-v2n-001-familydoctor.com.cn/docs.parquet'
+    sha256: 9cd6edcf7478e68e0039c2fd046d9ffce4e2a7d8d22510daa37f53ff5e62b938
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00109-v2n-003-ask.39.net/docs.parquet'
+    sha256: f5d1528c65835dd04c4be6dd87a7437e6f45c1f9582e66e11097ac3ae86cb121
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00110-v2n-003-baby.39.net/docs.parquet'
+    sha256: 8b51185bcc068d252a26808944ee7469c26f1d1d122b2b3fe40c31b6e05235a5
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00111-v2n-003-byby.39.net/docs.parquet'
+    sha256: 5214e9f3508817e7620db983a64fc06b45bc7e92b3b729edafb5cb55b884fb30
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00112-v2n-003-gc.39.net/docs.parquet'
+    sha256: c1f972c661123283d0ee6fd1078b33d7996508d0857c3daef9742d800a6b1240
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00113-v2n-003-pf.39.net/docs.parquet'
+    sha256: 696956c95607bd2e7cd1cab654edfd6ff933462afd600998a99fa7cfd2fb5918
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00114-v2n-003-gk.39.net/docs.parquet'
+    sha256: 82f3b0c842468ffe62806213eb06bc48b68b4d8856738facd5bcefb33250c334
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00115-v2n-003-fitness.39.net/docs.parquet'
+    sha256: 9ae7f91a80b58fc63b9231f03def5078106927d0d12c90ca7a0316eba10b5eee
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00116-v2n-003-sj.39.net/docs.parquet'
+    sha256: b3e2ad6d92d2036379b453cdaf8457f4f30cdefac670de70ea4a6683bb5f47ee
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00117-v2n-003-wei.39.net/docs.parquet'
+    sha256: 6a7d2c90138c8cc4bedc32e0c95e4886aca8e8f6207966e10c011c52ded84356
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00118-v2n-003-gan.39.net/docs.parquet'
+    sha256: 229af91d75b7b6fbd7ea5f6afadda877acfa577b900b7ceceedd65564337d155
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00119-v2n-003-shen.39.net/docs.parquet'
+    sha256: 57a8048379a109315baaf9fe624a62531fe9f9688c01633eafd9e1a1ba47a58d
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00120-v2n-003-man.39.net/docs.parquet'
+    sha256: 6c3b2acf260366143be6da531025545ba235e2d80c533fd47b15a22528fb5809
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00121-v2n-003-ek.39.net/docs.parquet'
+    sha256: e34be2ae8ce3f0229c65756f11b568684abea648b6af3ff48b7e5c60da90bc4a
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00122-v2n-003-food.39.net/docs.parquet'
+    sha256: 7d7607f3833a791d801aab770952273cbdf062e1447ce651c05467aa28922473
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00123-v2n-003-woman.39.net/docs.parquet'
+    sha256: 6416389a33ad649f8e9e135a31830bd3b3dfd3bbb863f7bfe1ccbbb382c99e27
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00124-v2n-003-tnb.39.net/docs.parquet'
+    sha256: 2cfe8ddf0ba114a323b54006a294a991e0b5499e36015fdbd3f489e24c54c574
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00125-v2n-003-cancer.39.net/docs.parquet'
+    sha256: aadce87d299a7baf7dcbe13693214e4ec227446f265287e3784d256ee90c7a4a
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00126-v2n-003-nk.39.net/docs.parquet'
+    sha256: f797d25bfceb79dc36558c2bec9969e5b5fdfd9c5fc9c2e554763b1f3b51b366
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00127-v2n-003-fk.39.net/docs.parquet'
+    sha256: c6c83d360dc6b9b23aeead19d8d5194587d9d0df87cf89c5b00ff2e71c2c25f1
+  - path: '{WORK_DATA_DIR}/chunks_zh_v2/seg00128-v2n-003-heart.39.net/docs.parquet'
+    sha256: 0743f7a23e54bded08e5634b80bba559564b46f99e6636ed0df8f77ddbea9ded
+  cc_a_cut115_json:
+    path: '{OUT_DIR}/runs/cc-longchau/VS-cc-A-cut115/VS_cc_A_cut115.json'
+    sha256: 99a9e11d76d2a3f0ac429d761e25eb4007a2324bab1eff6c65a5a05b954a2bfd
+  pool_b_cache:
+    path: '{OUT_DIR}/runs/s6/cache/B_k200.pkl'
+    sha256: 00b01b47382291ac1a4d221de57438a480722ac5aa975683619c433a4a1ab3a0
+provenance:
+  zh_candidate_batch2_origin: worktree zhv2 (feat/zh-v2) cand_zh_v2 batch 2, SHA 86d32617...d25c; copied with the S8 docs snapshot from worktree diag-lang out/diag-lang/v2/compose/C1
+  builder_origin: worktree diag-lang out/diag-lang/v2/compose (compose_builder, locked_compose, validate_compose) + probes-E-b1 (build_E, prepare_sources) + generate_probe
+    + zg_pair; now src/r2ai/compose
+  reference_files: out/runs/c1/inputs/reference_C1.{zip,plan.json,approval.json,vs-ZXX.json} = the S8-validated C1 (82,047,434 B, native 0 errors / 1,200 queries
+    / 126,208 chunks)

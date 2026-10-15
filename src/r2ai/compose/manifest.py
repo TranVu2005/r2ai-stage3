@@ -99,7 +99,13 @@ def verify(manifest, keys, *, progress=None) -> dict[str, list[Path]]:
 
 def check_policy(manifest) -> None:
     """The approved selection policy is fixed in code; the manifest may only restate it."""
+    from . import batch3
+    if manifest.get('name') == 'C3' and not batch3.enabled(manifest):
+        raise PinError('C3 requires explicit batch3 opt-in')
+    expected = {**POLICY, 'candidate_batch': 3} if batch3.enabled(manifest) else POLICY
+    if batch3.enabled(manifest):
+        batch3.check_config(manifest)
     got = manifest.get('policy', {})
-    for key, value in POLICY.items():
+    for key, value in expected.items():
         if got.get(key) != value:
             raise PinError(f'policy {key} must be {value!r}, manifest has {got.get(key)!r}')

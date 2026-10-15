@@ -10,6 +10,7 @@ import pyarrow.parquet as pq
 from r2ai.paths import resolve_path
 
 from .base_io import id_list, sha
+from .batch3 import VARIANT, check_candidate_live
 
 
 def select_docs(rows, present, tau, cap):
@@ -54,6 +55,9 @@ def project_candidate_v2(rows, membership):
 def load_source_texts(selections, manifest, chunks_root, corpus_path):
     """Whole doc_text of the selected zh docs from the pinned segment parquet files -> ({(segment, doc_id): row}, {segment: file pin})."""
     segments = {s['name']: s for s in manifest['segments']}
+    if manifest.get('s8_variant') == VARIANT:
+        selections = list(selections)
+        check_candidate_live(selections, manifest)
     wanted = collections.defaultdict(dict)
     for r in selections:
         name = r['segment']

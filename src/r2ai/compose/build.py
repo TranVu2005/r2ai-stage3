@@ -22,6 +22,7 @@ import pyarrow.parquet as pq
 
 from r2ai.paths import ROOT, assert_writable, resolve_path
 
+from . import batch3 as C3
 from . import manifest as M
 from .archive import (OverBudget, check_pins, compression_profile, json_sha256, render_rows, shape, verify_ready_file,
                       write_archive)
@@ -65,6 +66,8 @@ def source_manifest_pins(manifest, root, coverage):
         if not p.is_relative_to(root) or not (s.get('verified') is True or s.get('s8_doc_source_verified') is True) or not valid_sha(s.get('s8_docs_file_sha256')):
             raise ValueError('source requires verified snapshot SHA and safe path')
         pins[str(p)] = s['s8_docs_file_sha256']
+    if manifest.get('s8_variant') == C3.VARIANT:
+        total = C3.live_count(manifest)
     if total != coverage or not pins:
         raise ValueError('manifest coverage mismatch')
     return pins
@@ -75,6 +78,8 @@ def load_job(manifest_path, *, scope=M.COMPOSE_PINS):
     manifest_path = resolve_path(manifest_path)
     m = M.load(manifest_path)
     M.check_policy(m)
+    if C3.enabled(m):
+        scope = (*scope, 'source_snapshot_report')
     M.check_declared(m, (*scope, 'zh_sources'))
     for key in ('name', 'output_dir', 'zh_chunk_root', 'expected', 'base_measured_scores'):
         if key not in m:
@@ -87,8 +92,10 @@ def load_job(manifest_path, *, scope=M.COMPOSE_PINS):
             raise M.PinError(f'expected.{key} missing')
     resolved = M.verify(m, (*scope, 'zh_sources'))
     one = {k: v[0] for k, v in resolved.items() if k != 'zh_sources'}
-    return {'manifest': m, 'manifest_path': manifest_path, 'manifest_sha256': sha(manifest_path), 'paths': one,
-            'zh_sources': {str(p): e['sha256'] for p, e in zip(resolved['zh_sources'], M._entries(m, 'zh_sources'))}}
+    sources = {str(p): e['sha256'] for p, e in zip(resolved['zh_sources'], M._entries(m, 'zh_sources'))}
+    if C3.enabled(m):
+        C3.check_source_report(m, one, sources)
+    return {'manifest': m, 'manifest_path': manifest_path, 'manifest_sha256': sha(manifest_path), 'paths': one, 'zh_sources': sources}
 
 
 def check_base_scores(scores):
@@ -130,6 +137,8 @@ def prepare(job):
     if declared != job['zh_sources']:
         raise ValueError('zh_sources pins differ from the docs snapshot manifest')
     pins.update(declared)
+    if C3.enabled(m):
+        pins[str(p['source_snapshot_report'])] = M._entries(m, 'source_snapshot_report')[0]['sha256']
     check_pins(pins)
     member = {r['id']: r['lang'] for r in pq.read_table(p['corpus_v2_ids'], columns=['id', 'lang']).to_pylist()}
     qids = pq.read_table(p['query'], columns=['id'])['id'].to_pylist()
@@ -138,6 +147,8 @@ def prepare(job):
     table = pq.read_table(p['candidate'])
     check_schema(table)
     rows, _ = project_candidate_v2(table.to_pylist(), member)
+    if C3.enabled(m):
+        C3.check_candidate_live(rows, zh_manifest)
     by = collections.defaultdict(list)
     for r in rows:
         if type(r['query_id']) != int or type(r['rank']) != int or r['rank'] < 1 or not math.isfinite(r['logit']) or r['doc_id'] not in r['doc_ids_group']:
@@ -161,8 +172,10 @@ def prepare(job):
         raise ValueError('base query coverage differs')
     tau, cap = M.POLICY['tau_doc'], M.POLICY['doc_cap']
     sels, body = selections_for(by, present, tau=tau, cap=cap)
+    if C3.enabled(m):
+        C3.check_mean(sels)
     source, hashes = load_source_texts([r for rs in body.values() for r in rs], zh_manifest, chunk_root, p['corpus_v2_ids'])
-    plan = {'name': m['name'], 'base_stats': s, 'candidate_batch': M.POLICY['candidate_batch'], 'tau_doc': tau, 'doc_cap': cap,
+    plan = {'name': m['name'], 'base_stats': s, 'candidate_batch': m['policy']['candidate_batch'], 'tau_doc': tau, 'doc_cap': cap,
             'chunk_tau': M.POLICY['chunk_tau'], 'chunk_cap': M.POLICY['chunk_doc_cap'], 'header': header, 'coverage_docs': coverage,
             'pins': pins, 'source_doc_files': hashes, 'physical_docs': sum(len(r['docs']) for r in sels.values()),
             'new_doc_ids': sum(len(r['ids']) for r in sels.values()),
@@ -266,8 +279,9 @@ def build(manifest_path, *, prepare_only=False, json_only=False):
         print(json.dumps({k: v for k, v in plan.items() if k not in ('pins', 'source_doc_files', 'base_stats')}, indent=2))
         return plan
     reference = None
-    if 'reference_c1_zip' in m['inputs']:
-        reference = M.verify(m, ('reference_c1_zip',))['reference_c1_zip'][0]
+    for ref_key in ('reference_zip', 'reference_c1_zip'):
+        if ref_key in m['inputs']:
+            reference = M.verify(m, (ref_key,))[ref_key][0]
     report = replay_json(job, prepared, reference_zip=reference)
     report_path = assert_writable(out / (m['name'] + '.replay-json.json'))
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
@@ -283,7 +297,7 @@ def build(manifest_path, *, prepare_only=False, json_only=False):
     identity = {'stage': m['name'], 'base_json_path': str(job['paths']['base_json']), 'base_json_sha256': M._entries(m, 'base_json')[0]['sha256'],
                 'base_zip_path': str(job['paths']['base_zip']), 'base_zip_sha256': M._entries(m, 'base_zip')[0]['sha256'],
                 'candidate_path': str(job['paths']['candidate']), 'candidate_sha256': M._entries(m, 'candidate')[0]['sha256'],
-                'candidate_batch': M.POLICY['candidate_batch'], 'manifest_path': str(job['paths']['zh_manifest']),
+                'candidate_batch': m['policy']['candidate_batch'], 'manifest_path': str(job['paths']['zh_manifest']),
                 'manifest_sha256': M._entries(m, 'zh_manifest')[0]['sha256'], 'tau_raw_logit': plan['tau_doc'],
                 'cap_physical_docs': M.POLICY['doc_cap'], 'chunk_tau_raw_logit': M.POLICY['chunk_tau'],
                 'chunk_doc_cap': M.POLICY['chunk_doc_cap'], 'ceiling_bytes': M.POLICY['ceiling_bytes'], 'K': s['k'],

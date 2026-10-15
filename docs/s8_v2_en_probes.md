@@ -1,5 +1,7 @@
 # S8 — probe en E1/E2 trên C1
 
+**Quyết định 2026-10-15 08:08 UTC+7:** E1 LB Final **0,2648**, thua C1 **0,0007**; sanity mapping **20/20 + 10/10 đạt**. **en không có lời; KHÔNG NỘP E2; dừng thêm probe en.** Xem docs/s8_v2_en_sanity.md.
+
 Cập nhật: 2026-10-15 07:51 (UTC+7) · GPT-6 (Codex) · HEAD trước commit `462f250b491ffa311aa05df6d024959b69c5ce91`.
 
 Base C1: Final **0,2655**; Doc F2/P/R **0,2687/0,1567/0,3886**; Chunk F2/P/R **0,2623/0,1857/0,3402** (LB do Vu cung cấp, 15/10/2026). C1 K150, dict256; giữ toàn bộ doc/chunk và thứ tự. Không có doc/chunk en sẵn trong C1.
@@ -69,6 +71,6 @@ Deferred minor: chưa assert module origin trong wrapper. Invocation dùng expli
 
 Ruling: giữ snapshot code main và adapter en riêng vì compose gốc chỉ hỗ trợ zh; serializer/rank/schema/metric cũ giữ nguyên. Plan pre-review `E1.plan.json` được giữ làm bằng chứng; bản final `*.build-plan.json` pin code sau fix, cùng expected JSON, không fallback dữ liệu. Giữ workspace/output theo yêu cầu Vu.
 
-Không GPU/crawl/push/nộp. Vu duyệt và nộp E1 trước/E2 sau, từ07:00; chạy lại release_check ngay trước upload nếu thời điểm kiểm HF đã cũ.
+E1 đã có điểm LB0,2648 do Vu báo. Quyết định mới: KHÔNG NỘP E2; dừng thêm probe en. Phần build/gate/forecast trên là lịch sử trước LB. Không GPU/crawl/push hay tự nộp.
 
 Builder/adapter và test được giữ ở `out/diag-lang/v2/probes-en/` (ignored); snapshot `code-main/src` dùng qua PYTHONPATH tường minh. Pin đầy đủ và audit từng query trong `E1/E1.build-plan.json`, `E2/E2.build-plan.json`; dữ liệu tổng hợp `summary.json`. Tracked chỉ docs.

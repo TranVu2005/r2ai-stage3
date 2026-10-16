@@ -1,8 +1,8 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-13 17:00 (UTC+7)
-- Model thực hiện: Claude Sonnet 5.5
-- Commit HEAD đã kiểm trước cập nhật này: `b9246c3` (`main`, gồm S9); nhánh làm việc `tmp/s12-merge` = `main` + merge `--no-ff` `feat/vi-quality` (`e5f1721`)
+- Cập nhật: 2026-10-16 11:52 (UTC+7)
+- Model thực hiện: GPT-6 (Codex)
+- Commit HEAD đã kiểm trước commit S16: `684738a87abccad169024683e092426ccee0ed08` (`docs/s16-inventory`)
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - **Bản tốt nhất đã đo và config best: A1-115 Final 0,2218** (12/10, điểm do người dùng cung cấp): Doc F2 0,2471 · Doc P 0,1529 · Doc R 0,3452 · Chunk F2 0,1964 (chunk giữ nguyên). ZIP 101.565.905 byte / 96,861 MiB, SHA256 `666f74f5a7be0f7e2a3550501d0347b0fcbd07b42ad4375690717d24c1971c80`, JSON `4ffbba8bceebb1a94565a819ab2385d1cdaa199c13d714c59fcb09631ed82c82`. A1-130 đứng sau với Final 0,2205 (Doc F2 0,2446 · P 0,1442 · R 0,3577); chênh 0,0013 nên dừng tune số doc. A1-100 0,2198; VS-append 0,2168 (fallback replay `--variant VS-append`, ZIP SHA `48da9d87…53fe`). Config mặc định A1-115 (`doc_cut_target_mean: 115`); VS-append vẫn được giữ. Tổng 34 lượt đã ghi đến 11/10; chưa cộng thêm lượt vì chưa có số tổng xác nhận.
 - **S5 doc-cut (12/10, đã merge vào nhánh làm việc):** A1 cắt 150 doc RRF theo logit cache `rerank200` trước expand/slug; `--doc-cut-target-mean` tự bisect τ, `--doc-cut-tau` giữ ngưỡng tuyệt đối; chunk giữ nguyên. Validator bảo vệ doc sở hữu chunk. Config mặc định A1-115, τ đo lại `-1,66`, mean 115,003 primary docs/query. Replay JSON/ZIP khớp SHA đã chốt; VS-append có thể replay bằng `--variant VS-append`.
@@ -264,6 +264,10 @@ Hai dòng ❓ từ CONTEXT:
 - D5: bỏ `qihuangzhishu` khỏi kế hoạch ingest/crawl.
 - D6: `b002` chỉ gồm `120ask` và `cnkang`.
 
+### S16 — Kiểm kê corpus v2 (2026-10-16 11:52, chỉ đọc)
+
+Nguồn pin HF revision `71be0e1239a19dfd7a717e2bc13e3bec21bd0334`: 1.220.598 URL; index phủ 1.036.128 ID (84,89%). Theo ngôn ngữ: vi 86,9997% (54.697 chờ fetch, 11.767 robots, 17 challenge), zh 63,3496% (75.403 chờ, 307 robots), en 99,9046% (229 PMID không record). Longchau CC: 20.630 fetch OK, 47.521 chờ, 18.816 ID index. Chi tiết, per-host, V1 và SHA nguồn: `reports/s16_corpus_inventory.md`; CSV ở `out/runs/s16/`. Không crawl/ingest/test.
+
 ## 7. Blockers
 
 1. **Recall còn thấp** (bản tốt nhất đã đo VS-append): Doc R 0,3716, Chunk R 0,2199 (chunk giống RD150). Độ phủ index NEW 623.805 doc / 4.394.718 URL corpus ≈ 14,2%; phần gold thiếu phần lớn nằm ngoài index (ước tính, không phải số đo).
@@ -345,3 +349,4 @@ Hai dòng ❓ từ CONTEXT:
 | 2026-10-13 14:10 | Claude Sonnet 5.5 | S12 `feat/vi-quality`: rebase lên `483f4df`; thêm `r2ai.vi_quality` (rules, scan, chunker theo cấu trúc, compare_chunkers), 14 test mới, `reports/s12_vi_*`; đo K80: 86.132 B giải phóng; chưa merge, không nộp LB |
 | 2026-10-13 14:20 | Claude Sonnet 5.5 | S9: nhánh `feat/corpus-v2` từ `main` (`c0d5c87`): tải corpus v2 (rev `71be0e12…`), diff v1/v2, `data/corpus_v2_ids.parquet` + `r2ai.corpus_v2.is_member`, `r2ai.submit.corpus_filter`, đo tài sản còn hiệu lực, lọc K80/B-cut115/cc-A-cut115 sang `*_v2.zip` (0 doc/chunk bị loại; nén LZMA), top host en/zh; full suite 658 passed/2 deselected (348,61 s). Báo cáo `reports/s9_corpus_v2.md`. Không fetch, không đổi retrieval, không nộp LB, chưa push |
 | 2026-10-13 16:00 | Claude Sonnet 5.5 | S12 đóng: rule `non_medical_template` (3.555 doc, chưa áp), `k80_impact` (86.132 B trên K80), README `r2ai.vi_quality`, bỏ probe mục 7; full suite 658 pass / 2 deselected; merge `--no-ff` vào `main` local trên `b9246c3`, chưa push |
+| 2026-10-16 11:52 | Codex (GPT-6) | S16 kiểm kê chỉ đọc: 1.220.598 URL v2, index 1.036.128 (84,89%); phủ vi 87,00%, zh 63,35%, en 99,90%; ghi per-host, V1 SHA `32b80629…2c32`, lý do thiếu, pending ceiling và SHA nguồn tại `reports/s16_corpus_inventory.md`; CSV `out/runs/s16/`. SQLite mode=ro, CPU; không crawl, ingest, test hay đổi index/state. |

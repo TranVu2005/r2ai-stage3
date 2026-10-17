@@ -269,7 +269,7 @@ def main(argv=None):
     tok = load_tokenizer()
     targets = [int(x) for x in a.targets.split(',')]
     out_dir = Path(a.out_dir)
-    tmp_dir = out_dir / '.chunk_tmp'
+    tmp_dir = assert_writable(out_dir / '.chunk_tmp')
     t0 = time.time()
     if tmp_dir.exists():
         shutil.rmtree(tmp_dir)                                  # leftover of an interrupted run

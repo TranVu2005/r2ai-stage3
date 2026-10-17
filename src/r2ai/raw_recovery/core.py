@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS embed_blocks(segment TEXT NOT NULL, block INTEGER NOT
 """
 CC_TARGET = 256
 CC_MIN_BODY_TOKENS = 50
+CC_MIN_ZH_BODY_TOKENS = 1
 CC_MODEL = {
     'model': 'BAAI/bge-m3', 'max_len': 512, 'fp16': True, 'batch_size': 16, 'block': 1000,
     'dense': 'CLS, L2-normalised, fp16', 'sparse': 'relu(sparse_linear) max per token id',
@@ -49,6 +50,24 @@ def cleaned_length(text: str | None) -> int:
 
 def good_text(text: str | None) -> bool:
     return cleaned_length(text) >= 200
+
+
+def cjk_char_count(text: str | None) -> int:
+    """Count Han CJK unified and compatibility ideographs, including extensions."""
+    return sum(
+        'CJK UNIFIED IDEOGRAPH' in unicodedata.name(char, '')
+        or 'CJK COMPATIBILITY IDEOGRAPH' in unicodedata.name(char, '')
+        for char in (text or '')
+    )
+
+
+def good_text_for_lang(text: str | None, lang: str) -> bool:
+    """Keep S20's 200-codepoint rule and also admit short, information-dense zh text."""
+    return good_text(text) or (lang == 'zh' and cjk_char_count(text) >= 50)
+
+
+def cc_min_body_tokens_for_lang(lang: str) -> int:
+    return CC_MIN_ZH_BODY_TOKENS if lang == 'zh' else CC_MIN_BODY_TOKENS
 
 
 def primary_doc_id(row: dict) -> int | None:

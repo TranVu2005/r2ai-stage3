@@ -1,0 +1,61 @@
+﻿host,doc_id,cjk_chars,bge_tokens,question_present,answer_present,raw_exists,verdict,raw_shard
+ask.39.net,2291952,151,156,true,true,true,Q&A thật; question và answer có nội dung,data/raw_zh_v2/ask.39.net/20261013T235649-23948-9445a9dcc1034762ae19e84a8a6ddd6f.jsonl.zst
+ask.39.net,2204886,139,118,true,true,true,Q&A thật; question và answer có nội dung,data/raw_zh_v2/ask.39.net/20261013T094319-23188-8e09fe9d14554609b1b017336f7abc89.jsonl.zst
+ask.39.net,2202054,59,65,true,true,true,Q&A thật; question và answer có nội dung,data/raw_zh_v2/ask.39.net/20261013T093022-23188-fed4245af37b40a3aafef3f45c57db59.jsonl.zst
+ask.39.net,2251445,52,44,true,true,true,Q&A thật; question và answer có nội dung,data/raw_zh_v2/ask.39.net/20261013T202057-23948-3662a9bf32ae4ab6849abd3bbb0322c4.jsonl.zst
+ask.39.net,2250606,74,54,true,true,true,Q&A thật; question và answer có nội dung,data/raw_zh_v2/ask.39.net/20261013T201541-23948-3549db85019e4dc59cfe85959c636699.jsonl.zst
+ask.39.net,2262851,82,65,true,true,true,Q&A thật; question và answer có nội dung,data/raw_zh_v2/ask.39.net/20261013T214457-23948-507060dd23fa4b9ba0a8d6097d991e4a.jsonl.zst
+ask.39.net,2203721,127,129,true,true,true,Q&A thật; question và answer có nội dung,data/raw_zh_v2/ask.39.net/20261013T093656-23188-d73d09889edf494683c8885ef754b289.jsonl.zst
+ask.39.net,2296287,139,128,true,true,true,Q&A thật; question và answer có nội dung,data/raw_zh_v2/ask.39.net/20261014T001112-23948-5357451ca6a140fbbc15a48d63cde11e.jsonl.zst
+ask.39.net,2209698,95,97,true,true,true,Q&A thật; question và answer có nội dung,data/raw_zh_v2/ask.39.net/20261013T100322-23188-3e8831e1f13847519d71065cfeb1651d.jsonl.zst
+ask.39.net,2242829,54,38,true,true,true,Q&A thật; question và answer có nội dung,data/raw_zh_v2/ask.39.net/20261013T192855-23948-2e77810b68224c14851b7f5496bb917d.jsonl.zst
+cnkang.com,1909222,136,126,false,false,true,Nội dung y khoa thật; không phải menu-only,data/raw_zh_full/cnkang.com/20261012T062646-11568-925e2dcd17bb4fada0216a54085f5a38.jsonl.zst
+cnkang.com,1709421,100,85,false,false,true,Nội dung y khoa thật; không phải menu-only,data/raw_zh_full/cnkang.com/20261011T101114-10848-fa19a7d31a9a41849f3f21bc9b7cb5c3.jsonl.zst
+cnkang.com,1734267,95,90,false,false,true,Nội dung y khoa thật; không phải menu-only,data/raw_zh_full/cnkang.com/20261009T121333-2188-9ab8ad24c6ba4e6b99add6d7be1e9a85.jsonl.zst
+cnkang.com,1779420,75,90,false,false,true,Nội dung y khoa thật; không phải menu-only,data/raw_zh_full/cnkang.com/20261011T045936-17596-48415e04695d435aa759ef669cc18358.jsonl.zst
+cnkang.com,1647914,103,105,false,false,true,Nội dung y khoa thật; không phải menu-only,data/raw_zh_full/cnkang.com/20261009T041958-20312-32565a566a2b427293e21ae360d735d7.jsonl.zst
+cnkang.com,1724139,92,82,false,false,true,Nội dung y khoa thật; không phải menu-only,data/raw_zh_full/cnkang.com/20261012T085304-11568-aa581a7f7621491ab946c68a0433b164.jsonl.zst
+cnkang.com,1771861,169,129,false,false,true,Nội dung y khoa thật; không phải menu-only,data/raw_zh_full/cnkang.com/20261008T194911-7396-ed962118e184402a9bb7bce6b3fcf2fc.jsonl.zst
+cnkang.com,1891623,152,134,false,false,true,Nội dung y khoa thật; không phải menu-only,data/raw_zh_full/cnkang.com/20261012T034108-11568-5409c392a09d4e86b99ec5f4a2ff47fd.jsonl.zst
+cnkang.com,1819977,157,146,false,false,true,Nội dung y khoa thật; không phải menu-only,data/raw_zh_full/cnkang.com/20261011T070425-17596-898fa151e5b4493fa1d39ff294bb8919.jsonl.zst
+cnkang.com,1793456,138,101,false,false,true,Nội dung y khoa thật; không phải menu-only,data/raw_zh_full/cnkang.com/20261009T001524-7396-6db53bb005664948b7bb5d8ae78c4d3f.jsonl.zst
+a-hospital.com,3096966,127,141,false,false,true,Nội dung y khoa/định nghĩa thật; đôi chỗ có footer bình luận,data/raw_zh_full/a-hospital.com/20261007T234214-10604-0a06030201f042379a27c2b8b776d2a8.jsonl.zst
+a-hospital.com,3001026,91,103,false,false,true,Nội dung y khoa/định nghĩa thật; đôi chỗ có footer bình luận,data/raw_zh_full/a-hospital.com/20261007T084324-15932-3f86f63818bd4c109761d765a8b28f67.jsonl.zst
+a-hospital.com,3111525,115,141,false,false,true,Nội dung y khoa/định nghĩa thật; đôi chỗ có footer bình luận,data/raw_zh_full/a-hospital.com/20261008T010410-10604-5396ee6b191a4abe96227965bac5219c.jsonl.zst
+a-hospital.com,3058416,90,109,false,false,true,Nội dung y khoa/định nghĩa thật; đôi chỗ có footer bình luận,data/raw_zh_full/a-hospital.com/20261007T200300-10604-2abb310227c944699e1d699852665b67.jsonl.zst
+a-hospital.com,3073863,141,163,false,false,true,Nội dung y khoa/định nghĩa thật; đôi chỗ có footer bình luận,data/raw_zh_full/a-hospital.com/20261007T212823-10604-2898b97af1b0426fba9348b7b6cac261.jsonl.zst
+a-hospital.com,3113287,90,100,false,false,true,Nội dung y khoa/định nghĩa thật; đôi chỗ có footer bình luận,data/raw_zh_full/a-hospital.com/20261008T011315-10604-b84b2411058047469eee537c8af579d5.jsonl.zst
+a-hospital.com,3079967,109,111,false,false,true,Nội dung y khoa/định nghĩa thật; đôi chỗ có footer bình luận,data/raw_zh_full/a-hospital.com/20261007T220328-10604-ddea263eb82d4025af59b2ae731bda30.jsonl.zst
+a-hospital.com,3008445,139,152,false,false,true,Nội dung y khoa/định nghĩa thật; đôi chỗ có footer bình luận,data/raw_zh_full/a-hospital.com/20261007T100743-15932-b7d9535dc9f3490b86f66f26f15404a4.jsonl.zst
+a-hospital.com,3024552,122,103,false,false,true,Nội dung y khoa/định nghĩa thật; đôi chỗ có footer bình luận,data/raw_zh_full/a-hospital.com/20261007T131216-15932-3d98f9abc4724f70b53ba139c062f380.jsonl.zst
+a-hospital.com,3119514,115,132,false,false,true,Nội dung y khoa/định nghĩa thật; đôi chỗ có footer bình luận,data/raw_zh_full/a-hospital.com/20261008T020906-24716-bde9a01518d1475082d6d3da0a744b47.jsonl.zst
+test.pmphai.com,2546321,98,95,false,false,true,Excerpt lâm sàng thật; kèm dấu paywall/nguồn,data/raw_zh_full/test.pmphai.com/20261006T190506-4892-933d1c2eebab464282c2de4604b2e61e.jsonl.zst
+test.pmphai.com,2548320,139,139,false,false,true,Excerpt lâm sàng thật; kèm dấu paywall/nguồn,data/raw_zh_full/test.pmphai.com/20261006T193049-4892-9804ee4841514c8c9891a93a67341982.jsonl.zst
+test.pmphai.com,2545607,129,147,false,false,true,Excerpt lâm sàng thật; kèm dấu paywall/nguồn,data/raw_zh_full/test.pmphai.com/20261006T185545-4892-99e382d5686d45fab90156990d932ac4.jsonl.zst
+test.pmphai.com,2546534,174,151,false,false,true,Excerpt lâm sàng thật; kèm dấu paywall/nguồn,data/raw_zh_full/test.pmphai.com/20261006T190752-4892-324ff40ab41349019b02427d559c7dff.jsonl.zst
+test.pmphai.com,2548333,118,126,false,false,true,Excerpt lâm sàng thật; kèm dấu paywall/nguồn,data/raw_zh_full/test.pmphai.com/20261006T193057-4892-c6c1c18ff5dd42429a00dfc28be30e5f.jsonl.zst
+test.pmphai.com,2549585,102,104,false,false,true,Excerpt lâm sàng thật; kèm dấu paywall/nguồn,data/raw_zh_full/test.pmphai.com/20261006T194715-4892-7789cd0aa6e848c09e86282dab6630b5.jsonl.zst
+test.pmphai.com,2537144,91,110,false,false,true,Excerpt lâm sàng thật; kèm dấu paywall/nguồn,data/raw_zh_full/test.pmphai.com/20261006T165936-4892-35df0c88be2b4f419c1a4d25e825351d.jsonl.zst
+test.pmphai.com,2541023,141,139,false,false,true,Excerpt lâm sàng thật; kèm dấu paywall/nguồn,data/raw_zh_full/test.pmphai.com/20261006T175708-4892-ab0cff353f3549709db0805dfc63dd8c.jsonl.zst
+test.pmphai.com,2541797,85,95,false,false,true,Excerpt lâm sàng thật; kèm dấu paywall/nguồn,data/raw_zh_full/test.pmphai.com/20261006T180718-4892-354d6c8609444efaabc65ac324598eed.jsonl.zst
+test.pmphai.com,2545372,129,137,false,false,true,Excerpt lâm sàng thật; kèm dấu paywall/nguồn,data/raw_zh_full/test.pmphai.com/20261006T185258-4892-2a9e5f701b174dc5a276580f6d034f0e.jsonl.zst
+zhongyibaodian.net,4050763,127,156,false,false,true,Nội dung từ điển y khoa thật,data/raw_zh_full/zhongyibaodian.net/20261007T231828-10604-e9353b7f7d9142f69b953033319160a0.jsonl.zst
+zhongyibaodian.net,4036587,92,118,false,false,true,Nội dung từ điển y khoa thật,data/raw_zh_full/zhongyibaodian.net/20261007T214157-10604-f45c1dd4cefe4f009f8b9374a88d5606.jsonl.zst
+zhongyibaodian.net,4093884,100,95,false,false,true,Nội dung từ điển y khoa thật,data/raw_zh_full/zhongyibaodian.net/20261008T114857-12184-65dd672d73f745cdb4911ecf48462b87.jsonl.zst
+zhongyibaodian.net,4040694,97,107,false,false,true,Nội dung từ điển y khoa thật,data/raw_zh_full/zhongyibaodian.net/20261007T220929-10604-387f718117e44f57831bf9a56c74b70e.jsonl.zst
+zhongyibaodian.net,4076543,101,115,false,false,true,Nội dung từ điển y khoa thật,data/raw_zh_full/zhongyibaodian.net/20261008T100618-12184-9e7132dda6834d208b5f9291e958d624.jsonl.zst
+zhongyibaodian.net,4083978,135,171,false,false,true,Nội dung từ điển y khoa thật,data/raw_zh_full/zhongyibaodian.net/20261008T133556-4996-be70bfb03001416ab40dd47963baf17f.jsonl.zst
+zhongyibaodian.net,4082671,116,101,false,false,true,Nội dung từ điển y khoa thật,data/raw_zh_full/zhongyibaodian.net/20261008T132832-4996-8e60c03d6a4c470286ffba92619104d3.jsonl.zst
+zhongyibaodian.net,4034558,109,127,false,false,true,Nội dung từ điển y khoa thật,data/raw_zh_full/zhongyibaodian.net/20261007T212838-10604-51197646f40c4ee597f8566a089557d0.jsonl.zst
+zhongyibaodian.net,4083299,139,116,false,false,true,Nội dung từ điển y khoa thật,data/raw_zh_full/zhongyibaodian.net/20261008T133200-4996-98477232033d416e9469fd81c6d2df7d.jsonl.zst
+zhongyibaodian.net,4070512,77,99,false,false,true,Nội dung từ điển y khoa thật,data/raw_zh_full/zhongyibaodian.net/20261008T013017-10604-2b9c63ceb53145e090a6a80e44fd4dd5.jsonl.zst
+jbk.39.net,2530227,143,137,false,false,true,Nội dung triệu chứng thật; kèm link điều hướng,data/raw_zh_full/jbk.39.net/20261007T054453-4892-dcb4f8a8060f4ed68b1c11e07574d065.jsonl.zst
+jbk.39.net,2531167,128,125,false,false,true,Nội dung triệu chứng thật; kèm link điều hướng,data/raw_zh_full/jbk.39.net/20261007T055122-4892-1f7e7c383fbc40e385adfd0104131e8e.jsonl.zst
+jbk.39.net,2535311,115,95,false,false,true,Nội dung triệu chứng thật; kèm link điều hướng,data/raw_zh_full/jbk.39.net/20261007T062016-4892-847f0ac0e59e4ec4978f39384a395c35.jsonl.zst
+jbk.39.net,2531252,95,78,false,false,true,Nội dung triệu chứng thật; kèm link điều hướng,data/raw_zh_full/jbk.39.net/20261007T055159-4892-3e8510bd2c94457eafa8b01377f9233d.jsonl.zst
+jbk.39.net,2529656,148,127,false,false,true,Nội dung triệu chứng thật; kèm link điều hướng,data/raw_zh_full/jbk.39.net/20261007T054050-4892-9ca97434559444d390c8abaa870218ae.jsonl.zst
+jbk.39.net,2534592,140,142,false,false,true,Nội dung triệu chứng thật; kèm link điều hướng,data/raw_zh_full/jbk.39.net/20261007T061507-4892-a280fecd01ce4d64bc4f8bb5d4bfa537.jsonl.zst
+jbk.39.net,2532415,143,157,false,false,true,Nội dung triệu chứng thật; kèm link điều hướng,data/raw_zh_full/jbk.39.net/20261007T060018-4892-faa4e93a1df94ada8261ffe991fd2255.jsonl.zst
+jbk.39.net,2534510,126,103,false,false,true,Nội dung triệu chứng thật; kèm link điều hướng,data/raw_zh_full/jbk.39.net/20261007T061434-4892-9fc6f4b54fcc4bf188949d9f5e0932b6.jsonl.zst
+jbk.39.net,2531353,125,102,false,false,true,Nội dung triệu chứng thật; kèm link điều hướng,data/raw_zh_full/jbk.39.net/20261007T055244-4892-0655095bf73248ff831ff37e8b7c3ccc.jsonl.zst
+jbk.39.net,2530785,127,89,false,false,true,Nội dung triệu chứng thật; kèm link điều hướng,data/raw_zh_full/jbk.39.net/20261007T054847-4892-5106e24c2f5e4019b6c2600b418969df.jsonl.zst

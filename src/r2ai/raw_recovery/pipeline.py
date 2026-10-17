@@ -259,10 +259,10 @@ def _generic_candidate(html: str, host: str, lang: str):
 def _extract_recovery_doc(html: str, host: str, lang: str, extract_one):
     html = core.strip_null_bytes(html)
     primary = extract_one(html)
-    if core.good_text(primary.body) or host == 'ask.39.net' or primary.question or primary.answer:
+    if core.good_text_for_lang(primary.body, lang) or host == 'ask.39.net' or primary.question or primary.answer:
         return primary
     generic = _generic_candidate(html, host, lang)
-    if core.good_text(generic.body):
+    if core.good_text_for_lang(generic.body, lang):
         generic.extractor = 'generic_recovery'
         return generic
     return primary
@@ -299,11 +299,11 @@ def _diagnose(host: str, failed: dict, raw: dict | None, old_row: dict | None,
     base['extractor'] = doc.extractor
     if had_null_bytes:
         base['cause'] = 'encoding'
-    elif core.good_text(body) and not core.good_text((old_row or {}).get('body')):
+    elif core.good_text_for_lang(body, lang) and not core.good_text_for_lang((old_row or {}).get('body'), lang):
         base['cause'] = 'selector sai'
-    elif not core.good_text(generic.body):
+    elif not core.good_text_for_lang(generic.body, lang):
         base['cause'] = 'thật sự rỗng'
-    elif not core.good_text(primary.body):
+    elif not core.good_text_for_lang(primary.body, lang):
         base['cause'] = 'selector sai'
     else:
         base['cause'] = 'selector sai'
@@ -324,7 +324,7 @@ def _doc_row(record: dict, doc, lang: str, v2_ids: set[int], tokenizer) -> dict:
         'question': doc.question or '', 'answer': doc.answer or '', 'body': body, 'paragraphs': doc.paragraphs or [],
         'lang': lang, 'n_tokens_bge_m3': tokens, 'text_sha1': hashlib.sha1(body.encode('utf-8')).hexdigest(),
         'fetched_at': float(record.get('fetched_at') or 0), 'url_norm': record.get('url_norm') or '',
-        'status': 'ok' if core.good_text(body) else 'thin', 'extractor': doc.extractor or '',
+        'status': 'ok' if core.good_text_for_lang(body, lang) else 'thin', 'extractor': doc.extractor or '',
         'headings': doc.headings or [],
     }
 
@@ -376,7 +376,7 @@ def _write_manifest(stage: Path, hosts: list[dict], payloads: dict[str, dict]) -
             chunk_report = payload['chunk_report']
             rows = int(chunk_report.get('configs', {}).get('256', {}).get('chunks_all', 0))
             docs_count = int(chunk_report.get('docs', 0))
-            chunker = {'target': core.CC_TARGET, 'min_body_tokens': core.CC_MIN_BODY_TOKENS,
+            chunker = {'target': core.CC_TARGET, 'min_body_tokens': core.cc_min_body_tokens_for_lang(host_row['lang']),
                        'module': 'r2ai.index.chunk', 'provisional_segment_id': sid}
             stats = {'rows': rows, 'docs': docs_count, 'embed_pending': True, 'source': 'reextract-raw'}
             connection.execute(
@@ -461,7 +461,7 @@ def run() -> dict:
                 })
             chunk_report = json.loads((segment_path / 'chunk_report.json').read_text(encoding='utf-8'))
             raw_count = len(raw_records)
-            recovered = sum(core.good_text(r['body']) for r in recovered_rows)
+            recovered = sum(core.good_text_for_lang(r['body'], lang) for r in recovered_rows)
             still_empty_local = len(failures) - recovered
             payloads[host] = {
                 'entries': entries, 'raw_docs': len(recovered_rows), 'recovered': recovered, 'docs_path': docs_path,
@@ -538,11 +538,12 @@ def run() -> dict:
         _write_parquet(prov_path, prov_rows, core.PROV_SCHEMA)
 
         chunk_report = {'docs': 0, 'configs': {}}
-        if any(r['status'] == 'ok' and r['n_tokens_bge_m3'] >= 50 and r['body'] for r in recovered_rows):
+        min_body_tokens = core.cc_min_body_tokens_for_lang(lang)
+        if any(r['status'] == 'ok' and r['n_tokens_bge_m3'] >= min_body_tokens and r['body'] for r in recovered_rows):
             from r2ai.index.chunk import main as chunk_main
             assert_writable(segment_path)
             segment_path.mkdir(parents=True, exist_ok=False)
-            chunk_main(['--docs-dir', str(docs_path.parent), '--out-dir', str(segment_path), '--targets', '256', '--min-body-tokens', '50'])
+            chunk_main(['--docs-dir', str(docs_path.parent), '--out-dir', str(segment_path), '--targets', '256', '--min-body-tokens', str(min_body_tokens)])
             chunk_report = json.loads((segment_path / 'chunk_report.json').read_text(encoding='utf-8'))
             # The chunker sees only recovered docs in this batch and has an independent 100% verbatim gate.
             chunked_docs = pq.read_table(segment_path / 'docs.parquet', columns=['doc_id', 'doc_ids_group']).to_pylist()
@@ -567,7 +568,7 @@ def run() -> dict:
                 'raw_candidate': ';'.join(_raw_label(p) for p in candidate_paths),
                 'reason': 'raw shard missing' if not any(p.is_file() for p in candidate_paths) else 'doc_id not found in candidate shard',
             })
-        recovered = sum(core.good_text(r['body']) for r in recovered_rows)
+        recovered = sum(core.good_text_for_lang(r['body'], lang) for r in recovered_rows)
         still_empty_local = len(failures) - recovered
         s20_initial = int(audit['empty_or_extract_error'] or 0)
         output_prefix = STAGE_ROOT / core.batch_label(host)

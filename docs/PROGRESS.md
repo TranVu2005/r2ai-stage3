@@ -1,8 +1,8 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-15 23:30 (UTC+7)
-- Model thực hiện: Claude Sonnet 5.5
-- Commit HEAD đã kiểm trước cập nhật này: `67b5e1345e4d8d86afb6d359018f3fcfb8f6d53a`, nhánh `feat/c3` (từ `main` local `7177652`; chưa push)
+- Cập nhật: 2026-10-17 18:50 (UTC+7)
+- Model thực hiện: GPT-6 (Codex)
+- Commit HEAD đã kiểm trước cập nhật này: `c160bbf78e8a438732ad7c369976f80a494d7018`, nhánh `feat/s24-recovery`
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - **Best mới đã đo: R1m 0,2673** (Qwen3-Reranker-0,6B + RRF trên phía zh, D16; người dùng cung cấp 15/10). **R1m chưa tích hợp vào repo này**: chờ phía vi (S15, sáng 16/10) rồi tích hợp một lần, kèm pin model Qwen3 (revision `e61197ed…`) và cache điểm. Trong repo, best tái tạo được vẫn là **C1 0,2655**. **C3 (S6-f + zh đợt 3) đã vào `main` local theo S14b: replay JSON `6cf9284d…3436` và ZIP `1c2472d1…1af9` khớp, chưa có điểm LB.** Chi tiết mục 5 (S14b).
 - **S14 (14/10, nhánh `feat/integrate`, chưa push): tái tạo C1 bằng một lệnh.** Best đã đo: **C1 Final 0,2655** (người dùng cung cấp) = base S6-f-K150 + doc zh đợt 2 (τ_doc tuyệt đối −0,87255859375, trần 30) + chunk zh ZL (τ 0,96, ≤ 3 doc/query, mỗi ID v2 một chunk, chỉ doc đã chọn) + LZMA dict 256 MiB; ZIP 82.047.434 B, ZIP SHA256 `e7c84e2c37c996fe3d046bf22a4d25b2fd9e8e1c2568d928fa45797108720c13`, JSON `83375428b79957b1580299f97b05299bb292957826bd4cb8bdc602a83b8dd5f3`. `python -m r2ai.compose replay --manifest configs/best-c1.yaml` (pin đủ input trong `configs/best-c1.yaml`, thiếu pin thì dừng) dựng lại **JSON SHA và ZIP SHA đều khớp**, validator native 0 lỗi / 1.200 query / 126.208 chunk. Replay S6-f JSON `d0da38b1…dca1` khớp; A1-115 JSON `4ffbba8b…2c82` khớp (ZIP khác 8 byte do mtime, gate là JSON); VS-append JSON và ZIP khớp. `submission-best.yaml` vẫn mặc định A1-115. Chi tiết mục 5 (S14) và `submissions/LOG.md`.
@@ -263,6 +263,8 @@ Cả hai: doc/query 136,48, 0 doc thêm do bảo vệ, chunk CC/query 9,34 (h1) 
 
 ## 6. Lệch so với `R2AI_STAGE3_CONTEXT.md`
 
+Cập nhật 2026-10-17 18:50 (UTC+7), GPT-6 (Codex, S24 recovery): inventory v2 giữ nguyên; S21 queue 120ask 75.410 pending. 120ask local: DNS 3/3 resolve cùng IP range, TCP 6/6 timeout, HEAD 6/6 timeout, mobile GET 6/6 timeout; không xác nhận mapping, chưa đủ bằng chứng geo-block. Wayback exact CDX 3/3 HTTP 429 sau cooldown/backoff; dừng theo ngưỡng. Direct: iiyi robots timeout (2 host), zys robots 403, baolangson robots 200 nhưng URL mẫu disallow, thaythuoc robots 200 + sample 301 về homepage; text tốt 0. webMedQA Apache-2.0: tải 74.896.426 B theo duyệt; 316.110 dòng, 63.222 ID duy nhất, 3.166 ID trùng URL số v2 (3,23%); trộn 120Ask/Baidu, không nhãn host theo dòng nên chỉ báo overlap, không ingest. HF derivative `zirui3/webMedQA-instructions` (CC-BY-4.0, metadata 316.110 rows): schema/ID và overlap chưa xác minh, không tải. S23 Common Crawl: ledger gần nhất 3.348 request, 2.793.769.361 B; log có backoff 600 s lúc 18:49:51; state bền vững còn 2.800/3.195, 2.550 success, 250 lỗi, 395 pending; VOV direct chờ S23 final. Không có doc text tốt hoặc S15 segment; index chung không đổi; AWS $0. Chi tiết `out/runs/s24-recovery/report.md`.
+
 Cập nhật 2026-10-15 23:30 (UTC+7), Claude Sonnet 5.5 (S14b, nhánh `feat/c3`): C3 vào repo bằng opt-in `C3-batch3` của `r2ai.compose`; replay khớp JSON và ZIP. Lệch mới: (1) bản dựng S8 của C3 chạy trên bản sao code riêng (pin SHA) nay thay bằng code trong `src/`; (2) candidate/snapshot batch 3 sao vào `out/runs/c3/inputs/` (pin SHA); (3) R1m 0,2673 là best đo được nhưng chưa nằm trong repo (đợi S15).
 
 S8 C3 (2026-10-15 17:26, GPT-6): batch3 ff20ae1a…225b, snapshot CPU 63 segment/62 file, 153604−1568 superseded=152036/240000 doc sống; C3 opt-in giữ C1 mặc định. S6-f/K150, tau −0,87255859375/cap30, body ZL 0,96/top3 chỉ doc đã chọn. Mean doc vật lý 15,438333→15,645833; chunk 1,475000→1,491667; churn doc 1175 vào/926 ra, chunk 120 vào/100 ra và 14 cùng ID đổi text. ZIP 82032793 B, dict256, SHA 1c2472d1…cbb1af9; native 0 lỗi/1200/126228, v2/CRC/readback/pin trước-sau/fullHF release_check mặc định đạt. C1 JSON parity đạt; 42 CPU tests 2,87 s, RSS peak 5,456 GiB tuần tự. Forecast có điều kiện DeltaFinal +0,00000837≈Final0,2655, chưa LB; docs/s8_v2_C3.md. Không GPU/crawl/nộp/push; E2 en không nộp.
@@ -473,6 +475,7 @@ K80 artifact out/upload-probe/K80/sub_K80_LZMA.zip: JSON 638.098.632 byte, SHA25
 
 | Thời gian (UTC+7) | Ai | Thay đổi |
 |---|---|---|
+| 2026-10-17 18:50 | GPT-6 (Codex) | S24 recovery: chẩn đoán 120ask (DNS có IP, TCP/HEAD/mobile GET timeout), thử direct theo robots cho 5 host khác; chưa có text tốt. Wayback 3×429, dừng. Tải webMedQA theo duyệt, đo exact-ID overlap 3.166/98.151 (3,23%); không ingest do nguồn 120Ask/Baidu không gắn theo dòng. S23 còn 395 pending; không tạo batch/segment, không đổi index; AWS $0. Báo cáo `out/runs/s24-recovery/report.md`. |
 | 2026-10-15 17:26 | GPT-6 (Codex) | C3 batch3 opt-in/source CPU snapshot, S6-f giữ K150; ZIP 82032793B/native0/v2/readback/pins/fullHF release_check PASS; 15,645833 doc/1,491667 chunk mỗi query, forecast có điều kiện≈0,2655 chưa LB. 42 CPU tests 2,87s; docs/s8_v2_C3.md. |
 | 2026-10-15 08:08 | GPT-6 (Codex) | E1 LB0,2648<C1 0,2655; sanity mapping20/20 body+10/10 doc-only seed42/pins/source-read-only đạt;5query-title đã in. En không có lời; KHÔNG NỘP E2/dừngprobeen; docs/s8_v2_en_sanity.md. |
 | 2026-10-15 07:51 | GPT-6 (Codex) | S8 en E1/E2 trên C1: 82283105/82575852B;1837/10241doc và414/923chunk; native0/v2/pins/readback/fullHF release_check, dict256/giữbase.57CPUtests1,55s; sensitivity có điều kiện, chưa LB/nộp/push; docs/s8_v2_en_probes.md. |

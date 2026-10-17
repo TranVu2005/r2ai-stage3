@@ -23,6 +23,7 @@ from r2ai.retrieve.exact import QuerySparse, dense_topk, doc_aligned_bounds, spa
 
 OUTPUT_ROOT = RUNS_DIR / 'zh-full' / 'segments'
 ZH_INDEX_ROOT = WORK_DATA_DIR / 'index' / 'zh_full_segments'
+ZH_V2_INDEX_ROOT = WORK_DATA_DIR / 'index' / 'zh_v2_segments'
 
 
 def guarded_output(path: str | Path) -> Path:
@@ -36,8 +37,8 @@ def guarded_output(path: str | Path) -> Path:
 def guarded_segment_output(path: str | Path) -> Path:
     """Immutable ingest artifacts use their private ZH index or runtime root only."""
     path = assert_writable(path)
-    if not any(path.is_relative_to(resolve_path(root)) for root in (OUTPUT_ROOT, ZH_INDEX_ROOT)):
-        raise ValueError(f'Segment index must stay below {ZH_INDEX_ROOT} or {OUTPUT_ROOT}')
+    if not any(path.is_relative_to(resolve_path(root)) for root in (OUTPUT_ROOT, ZH_INDEX_ROOT, ZH_V2_INDEX_ROOT)):
+        raise ValueError(f'Segment index must stay below {ZH_INDEX_ROOT}, {ZH_V2_INDEX_ROOT}, or {OUTPUT_ROOT}')
     return path
 
 

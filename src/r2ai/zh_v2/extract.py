@@ -37,7 +37,12 @@ QA = {
 JUNK_39 = [r'39健康网\(www\.39\.net\)专稿，未经书面授权请勿转载。', r'（以上内容仅授权39健康网独家使用，未经版权方授权请勿转载。）',
            r'未经作者允许授权，禁止转载',
            r'[（(](?:实习|责任)?编辑[:：][^）)]*[）)]']
+# familydoctor.com.cn: the copyright line closing most articles and the "recommended reading" title lines. Patterns are matched against
+# a whole paragraph (fullmatch), so a content sentence that merely contains these words is kept.
+JUNK_FAMILYDOCTOR = [r'家庭医生在线[（(]www\.familydoctor\.com\.cn[）)]原创内容.*内容合作请联系.*',
+                     r'(?:推荐阅读|相关文章|相关阅读)\s*[:：]?\s*[^。！？!?；;]{0,60}']
 JUNK = {
+    **{d: JUNK_FAMILYDOCTOR for d in ('familydoctor.com.cn', 'baidianfeng.familydoctor.com.cn', 'qy.familydoctor.com.cn')},
     'ask.39.net': [r'其他人还在看.*', r'相关问题', r'我要咨询', r'[^\s]{1,14}\*+[^\s]{0,6} \d{4}-\d{2}-\d{2} \d{2}:\d{2}'],   # masked asker + time
     **{d: JUNK_39 for d in ARTICLE if d.endswith('.39.net')},
 }
@@ -100,8 +105,35 @@ def extract_article(raw: str, domain: str) -> Doc | None:
                extractor='zhv2_' + domain)
 
 
+_P_TOKEN = re.compile(r'<(/?)p(?=[\s>/])[^>]*>', re.I)
+_SELE_TXT = re.compile(r'<p(?=\s)[^>]*class="[^"]*\bsele_txt\b[^"]*"[^>]*>', re.I)
+
+
+def unnest_sele_txt(raw: str) -> str:
+    """ask.39.net writes some answers as <p class="sele_txt"><p>..</p><p>..</p></p>. An HTML parser closes the outer <p> at the first
+    inner <p>, which leaves .sele_txt empty and the answer outside it. Turn the outer tag into a <div> (matching </p> by depth) so the
+    parser keeps the answer inside; the single-<p> variant is unchanged in meaning."""
+    out, pos = [], 0
+    for m in _SELE_TXT.finditer(raw):
+        if m.start() < pos:
+            continue
+        depth, end = 1, None
+        for t in _P_TOKEN.finditer(raw, m.end()):
+            depth += -1 if t.group(1) else 1
+            if depth == 0:
+                end = t
+                break
+        if end is None:
+            continue
+        out += [raw[pos:m.start()], '<div' + m.group(0)[2:], raw[m.end():end.start()], '</div>']
+        pos = end.end()
+    return ''.join(out) + raw[pos:] if out else raw
+
+
 def extract_qa(raw: str, domain: str) -> Doc | None:
     rule = QA[domain]
+    if domain == 'ask.39.net':
+        raw = unnest_sele_txt(raw)
     tree = parse_html(raw)
     title = _title(tree)
     _clean(tree)

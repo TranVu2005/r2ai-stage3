@@ -126,10 +126,12 @@ def scan_crawl(client, crawl, prefixes: dict, out: Path, workers=1) -> dict:
 
 def indexed_v2_ids() -> set:
     """v2 zh ids already covered by a doc in the zh v2 index (their pages were crawled, no CC fetch needed)."""
+    import json
     from . import index as zindex
+    manifest = json.loads(zindex.MANIFEST.read_text('utf-8'))
     out = set()
-    for f in zindex.CHUNKS_V2.glob('*/docs.parquet'):
-        t = pl.read_parquet(f)
+    for r in manifest['segments']:
+        t = zindex.segment_docs(manifest, r['name'])
         out.update(i for g in t['doc_ids_v2' if 'doc_ids_v2' in t.columns else 'doc_ids_group'].to_list() for i in g)
     return out
 

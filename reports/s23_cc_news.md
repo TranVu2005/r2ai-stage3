@@ -16,7 +16,13 @@ Khớp URL chính xác hoặc chuẩn hoá scheme/host www/path slash trên đ�
 | thanhnien.vn | 504 | 46 | 0 | 46 | 46 | 44 | 44 |
 | **Tổng** | **17.591** | **3.192** | **3** | **3.195** | **3.195** | **1.475** | **1.463** |
 
-Ngưỡng text tốt là body ≥200 ký tự Unicode; ngưỡng vector là ≥50 BGE-M3 tokens. Lao Động: cả 348 selected WARC response đều HTTP 200 nhưng body 177 byte, script Cloudrity `document.cookie`/reload, không phải nội dung bài; có 21 biến thể body. Trong CC index, 343 URL chỉ có một capture; 5 có capture cũ hơn. Capture cũ đầu tiên không tải được sau lỗi DNS lặp lại ở `data.commoncrawl.org`, nên chưa xác minh được 5 bản cũ (4 bản còn lại chưa thử).
+Ngưỡng text tốt là body ≥200 ký tự Unicode; ngưỡng vector là status `ok` và ≥50 BGE-M3 tokens. **Lao Động: dead-in-CC.** Bằng chứng S23: 348 WARC response HTTP 200 nhưng body 177 byte là Cloudrity `document.cookie`/reload challenge (21 biến thể), 0 text tốt. Không theo đuổi 5 capture cũ chưa xác minh (4 capture chưa thử), theo chỉ thị Vu.
+
+### Tái extract SKĐS theo selector S22 (offline)
+
+- Đọc lại 1.336/1.336 WARC local (171.103.812 byte nén), không gửi request mạng. Cả 1.336 response là HTTP 200 `text/html`; URL đích sau chuẩn hoá, WARC record-id và WARC date khớp provenance 1.336/1.336.
+- Dùng selector `vicrawl` `suckhoedoisong`; source blob `src/vicrawl/extractors/sites.py` SHA `207fee63f675e049623ad8f7c9d011c3bf1c1259` trùng hoàn toàn với `feat/s22-reextract`. Kết quả: 1.335 trang dùng selector SKĐS, 1 trang fallback generic; 39 body ≥200 ký tự và 27 doc status `ok` + ≥50 BGE-M3 tokens, bằng số trước re-extract.
+- Cả 27 doc đủ điều kiện đều đã có trong segment 20004; **không có ID mới đủ chuẩn**. Vì vậy không cấp segment `cc-s23-sksds-20261017`, không embed; segment 20004 giữ nguyên. Thời gian re-extract đo được 33,87 giây; chi phí mạng $0.
 
 ## Crawl và tải WARC
 
@@ -53,4 +59,4 @@ Ngưỡng text tốt là body ≥200 ký tự Unicode; ngưỡng vector là ≥5
 ## Chi phí và pha B
 
 - AWS/S3: $0, không dùng S3. Common Crawl là nguồn HTTPS công khai; chi phí mạng/ISP cục bộ không đo được.
-- Pha B không chạy vì chưa có xác nhận D21 của Vu; không crawl trực tiếp host nào và không kiểm robots cho Pha B.
+- Pha B không chạy trong phiên S23. Direct crawl VOV (~8.400 URL) do S24 phụ trách; phiên này không crawl trực tiếp host nào.

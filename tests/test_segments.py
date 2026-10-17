@@ -227,7 +227,9 @@ def test_segment_index_root_is_private_zh_and_never_vi_or_sample():
     seg = _segments()
     assert hasattr(seg, 'guarded_segment_output'), 'private ZH index guard missing'
     own = WORK_DATA_DIR/'index'/'zh_full_segments'/'s000'
+    own_v2 = WORK_DATA_DIR/'index'/'zh_v2_segments'/'s000'
     assert seg.guarded_segment_output(own) == own.resolve()
+    assert seg.guarded_segment_output(own_v2) == own_v2.resolve()
     for forbidden in (WORK_DATA_DIR/'index'/'t256'/'s000',
                       WORK_DATA_DIR/'index'/'zh_sample_t256'/'s000',
                       WORK_DATA_DIR/'index'/'zh_full_segments'/'..'/'t256'):

@@ -34,4 +34,6 @@ Fetch missing-live-document 120ask and iiyi pages from the v2 Chinese corpus, ex
 - Never solve CAPTCHA or evade a bot challenge.
 - Stop on an error ratio above 20% in the latest 500 requests.
 - Stop before any fetch if the target queue contains an ID/URL outside v2 or any output path resolves into OLD.
-- Per Vu's follow-up decision, if local S11 logs show a prior HTTP 200 for `120ask.com/robots.txt`, stop Phase B and mark the phase blocked; do not fetch page content or proceed to iiyi.
+- Interpret HTTP 521 as `unreachable (origin down)` per Vu; keep the existing 120ask queue paused with its 76,143 pending URLs.
+- A local health check sends one `HEAD https://www.120ask.com/robots.txt` every six hours through the end of 2026-10-26, with the approved UA, no proxy, and no redirects. On HTTP 200 only, notify Vu and launch the existing 120ask queue; never switch IP. Stop checking at the deadline or after a successful launch.
+- iiyi probe from the local Windows machine timed out on the first v2 sample (`https://article.iiyi.com/detail/10058.html`, ID 2,131,085). Record the timeout and skip iiyi; do not send the remaining four sample requests or crawl its 729 article URLs. The five `bingli.iiyi.com` URLs remain untouched.

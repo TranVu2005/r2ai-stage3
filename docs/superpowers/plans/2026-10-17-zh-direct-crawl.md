@@ -46,7 +46,7 @@
 
 - [x] Add failing tests for redirect non-following, checkpoint/resume, atomic shard pointer ordering, error-stop, and row-level `source=direct` plus timestamp.
 - [x] Run tests red, then implement and run tests green (22 focused tests pass).
-- [ ] Run a one-page live probe from the v2 queue for selector inspection; wait for Vu to enable local outbound.
+- [x] After local outbound was enabled, probe one page from the v2 queue. The first iiyi sample (`https://article.iiyi.com/detail/10058.html`, ID 2,131,085) timed out on Windows; stop the sample set and omit iiyi.
 
 ### Task 3: QA extraction, 10k ingest and handoff contract
 
@@ -54,7 +54,7 @@
 
 **Interfaces:** Existing `zh_v2.extract` output and `zh_v2.ingest` segment layout; `provenance.parquet` maps every v2 ID to segment `doc_id`, `url_norm`, `source`, and `fetched_at`.
 
-- [ ] Finish the full 120ask crawl before any iiyi request; then fetch five iiyi samples and test Q&A fields against observed markup before implementing selectors. If iiyi remains DNS/timeout-blocked, omit it and record the reason.
+- [x] Probe iiyi only after 120ask completes. The first of five requested samples timed out; record the result and skip the remaining four samples plus 729 article URLs. Do not infer selectors without HTML.
 - [x] Add a provenance-sidecar unit test for v2 membership, row mapping, and good-text counting; actual emitted-segment audit remains pending.
 - [ ] Verify existing chunking/embedding outputs and S15 manifest adoption without changing their algorithms or schemas.
 
@@ -67,4 +67,12 @@
 - [ ] Report actual URL/document counts, success/error rates, runtime, AWS cost, good-text count, v2-ID coverage, and empty docs.
 - [ ] Verify git status, stage only source/tests/docs allowlisted for this phase, then commit and push after the direct phase completes.
 
-**Current phase outcome (2026-10-17): BLOCKED.** Local S11 logs show a prior 120ask `robots.txt` HTTP 200; per Vu's decision, stop Phase B and do not fetch page content or iiyi. See `out/runs/zh-v2-direct/REPORT.md` and `docs/PROGRESS.md`.
+### Task 5: 120ask origin recovery check
+
+**Files:** Create `src/r2ai/zh_v2/healthcheck.py`; create `tests/test_zh_v2_healthcheck.py`; update the S21 report and progress log.
+
+- [x] Check one `HEAD` request every six hours, same local IP, truthful UA, no proxy or redirects, ending 2026-10-26.
+- [x] On HTTP 200 only, launch the existing 120ask queue; classify 521 as origin down; keep a durable attempt log and resume-safe state.
+- [x] Register the six-hour heartbeat and run the initial health check (first result: ConnectTimeout; queue unchanged).
+
+**Current phase outcome (2026-10-17): 120ask unreachable; queue paused, monitoring enabled.** S11's latest request returned HTTP 521, classified per Vu as origin down. The first iiyi sample timed out on Windows; iiyi is skipped. The health-check script resumes only the 120ask queue after HTTP 200. See `out/runs/zh-v2-direct/REPORT.md` and `docs/PROGRESS.md`.

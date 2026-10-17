@@ -1,8 +1,8 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-17 12:55 (UTC+7)
+- Cập nhật: 2026-10-17 20:17 (UTC+7)
 - Model thực hiện: GPT-6 (Codex)
-- Commit HEAD đã kiểm trước commit S20: `d3a2c8ba05466aa3ee4dcb363446e33029110247` (`docs/s16-inventory`)
+- Commit HEAD đã xác minh trước commit S23: `2d3f44cdafff5c73e95765adadb117ef8e036ee5` (`codex/s23-cc-news`)
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - **Bản tốt nhất đã đo và config best: A1-115 Final 0,2218** (12/10, điểm do người dùng cung cấp): Doc F2 0,2471 · Doc P 0,1529 · Doc R 0,3452 · Chunk F2 0,1964 (chunk giữ nguyên). ZIP 101.565.905 byte / 96,861 MiB, SHA256 `666f74f5a7be0f7e2a3550501d0347b0fcbd07b42ad4375690717d24c1971c80`, JSON `4ffbba8bceebb1a94565a819ab2385d1cdaa199c13d714c59fcb09631ed82c82`. A1-130 đứng sau với Final 0,2205 (Doc F2 0,2446 · P 0,1442 · R 0,3577); chênh 0,0013 nên dừng tune số doc. A1-100 0,2198; VS-append 0,2168 (fallback replay `--variant VS-append`, ZIP SHA `48da9d87…53fe`). Config mặc định A1-115 (`doc_cut_target_mean: 115`); VS-append vẫn được giữ. Tổng 34 lượt đã ghi đến 11/10; chưa cộng thêm lượt vì chưa có số tổng xác nhận.
 - **S5 doc-cut (12/10, đã merge vào nhánh làm việc):** A1 cắt 150 doc RRF theo logit cache `rerank200` trước expand/slug; `--doc-cut-target-mean` tự bisect τ, `--doc-cut-tau` giữ ngưỡng tuyệt đối; chunk giữ nguyên. Validator bảo vệ doc sở hữu chunk. Config mặc định A1-115, τ đo lại `-1,66`, mean 115,003 primary docs/query. Replay JSON/ZIP khớp SHA đã chốt; VS-append có thể replay bằng `--variant VS-append`.
@@ -162,6 +162,8 @@ ZGp và ZGp-hi (11/10 23:21–23:32, commit `07574d7` và `794bd2c` nhánh `zh-f
 
 ## 6. Lệch so với `R2AI_STAGE3_CONTEXT.md`
 
+Cập nhật 2026-10-17 20:17 (UTC+7), GPT-6 (Codex): S23 Pha A quét đủ 13 CC crawl cho bốn host còn thiếu: 17.591 URL thiếu, 3.192 exact + 3 normalized-only; WARC hợp lệ 3.195/3.195. Text ≥200 ký tự: SKDS 39/1.336, VOV 1.392/1.465, Lao Động 0/348 (348 response Cloudrity cookie/reload 177 B), Thanh Niên 44/46. 5 URL Lao Động có capture cũ chưa xác minh được do lỗi DNS; 343 URL không có capture khác. Provenance 3.195 dòng, hash text khớp toàn bộ; WARC date/capture timestamp lệch tối đa 0 giây. Segment CC active `seg20004-cc-s23-vi-news-20261017-vi-news`: 1.463 docs, 8.327 t256 chunks, BGE-M3 embedded. HTTPS Range, ledger 2.826.402.308 B / 3.738 requests; tổng 12.227,5 s. Không ghi index chung; đã handoff S15; Pha B chờ xác nhận D21. Chi tiết: `reports/s23_cc_news.md`.
+
 Cập nhật 2026-10-17 12:55 (UTC+7), GPT-6 (Codex): S20 audit corpus v2 dùng nguồn chuẩn S16 theo xác nhận Vu: 1.220.598 URL, SHA256 `dad50fb8…3374a`, thay vì số BTC 1.194.469 ghi trước. Tầng 1 dùng ngưỡng đề xuất body ≥200 Unicode code point; S3/S11 dùng `extract_ok` proxy S16. Tầng 2: 1.200 query, top-300 riêng vi/zh; vi 562.401/705.753 doc (79,69%) và zh 55.713/152.036 (36,64%) chưa vào cache. CC lấy 200 mẫu cho 14/15 host thiếu nhiều nhất, nhưng scan exact-URL dừng an toàn tại cap 4 GB sau 11/13 crawl (3.998.414.083 byte / 525 request); 2025-43 và 2025-38 chưa đo, normalized URL chưa đo. Bảng CC/top-10 hiện chỉ provisional/lower-bound; không dùng như tỷ lệ đủ 13 crawl. Không tải WARC, fetch site, ingest, crawl hàng loạt hay nộp; S3/S11 giữ nguyên; Pharmacity chờ D18. Chi tiết `reports/s20-coverage-audit.md` và CSV số liệu thô. |
 
 Cập nhật 2026-10-13 14:20 (S9, corpus v2), Claude Sonnet 5.5: BTC thay corpus 12/10. `links_corpus_vi_en_zh.parquet` (HF `AIGuruTinix/ViBioMIR` rev `71be0e12…`, SHA256 `87e44a79…`) có **1.220.598** URL, không phải 1.194.469 BTC thông báo; vi 740.598 (= v1, 100% trùng id và URL; lệch 26.129 = `vinmec.com`), zh 240.000 (tập con của v1 3.654.119), en 240.000 (id mới 4.421.055–7.466.161, toàn `pubmed.ncbi.nlm.nih.gov`); lang suy từ host (file không có cột lang). Tài sản vi và CC giữ 100%; zh còn 6,5% doc `b001`, 9,7% `b002` (28.165/290.744), 7,3% chunk zh; ZG chỉ còn 34% id nối (1.899/5.547). K80 LZMA, B-cut115, cc-A-cut115 có 0 doc/chunk ngoài v2; bản `*_v2.zip` ở `out/runs/s9/` (K80 cần từ điển LZMA 64 MiB để < 99 MB: 78.734.571 B; nén mặc định 99.035.081 B). `r2ai.corpus_v2.is_member`, `r2ai.submit.corpus_filter`, `reports/s9_corpus_v2.md`; 658 test pass. Chưa push. Số BTC lệch cần Vu xác nhận.
@@ -293,6 +295,7 @@ Nguồn pin HF revision `71be0e1239a19dfd7a717e2bc13e3bec21bd0334`: 1.220.598 UR
 
 | Thời gian (UTC+7) | Ai | Thay đổi |
 |---|---|---|
+| 2026-10-17 20:17 | Codex (GPT-6) | S23 Pha A: 13 CC crawl cho 4 host; 3.195 match, WARC/provenance xác thực, báo cáo `reports/s23_cc_news.md`; tạo segment CC VI active (1.463 docs, 8.327 chunks) và handoff S15. Lao Động 348 selected captures là Cloudrity challenge; 5 capture cũ chưa kiểm chứng do DNS. Pha B chờ D21; không ghi index chung. |
 | 2026-10-03 22:50 | Claude Sonnet 5.5 | Tạo `PROGRESS.md` (template không có trong repo) từ khảo sát chỉ-đọc: `state/*.db` (ro), `data/`, `out/`, `logs/`, `git` ở HEAD `ae6b90d`; chạy 36 test (scorer, make_submission, chunk) pass |
 | 2026-10-03 23:10 | Claude Sonnet 5.5 | Thêm điểm LB từ `SCOREBOARD.md` (M8, M9, mục 5, 7, 8); kiểm số học bảng điểm |
 | 2026-10-04 01:02 | Codex (GPT-6) | PHA B: src layout, paths/env/guards/status, pins và docs; core36/full257/slow2 pass, replay sub06 JSON/hash/diff=0; OLD/state/fixtures bất biến. Copy raw và extract lớn chưa chạy. |

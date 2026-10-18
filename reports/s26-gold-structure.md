@@ -72,7 +72,12 @@ Không tìm thấy một cấu trúc nào giải thích ngay khoảng cách 0,28
 - Trùng với `cand_en` (hybrid + reranker): median 29/50 doc mỗi query.
 - Kỳ vọng: nếu en không có gold, Final ≈ 0. Giá trị của lượt nộp là thông tin (khoá hẳn D17), không phải điểm.
 
-**EN-only-Q (Qwen3-Reranker-0.6B).** Xem mục 9: trạng thái tại thời điểm commit. Lưu ý: metric chấm theo tập, nên cùng 50 doc đổi thứ tự sẽ cho **cùng điểm** với EN-only. Muốn đo được tác dụng của Qwen phải cắt top-k hoặc đổi chunk (cần Vu chọn).
+**EN-only-Q (đã dựng theo lựa chọn của Vu: top-20 theo Qwen, chưa nộp).**
+- `out/runs/s26-gold-structure/en-only/EN-only-Q.zip`: 4.046.109 B, SHA256 `0b77fb309e070ace1780cfc70d8859dab89f39ebaa3486df0f833348ced80dc5`; JSON 19.828.729 B, SHA256 `4bd1650519e6a4c3a3830750b8191ddc2d16610266ea0fe7f31e38a8dc46b0a3`.
+- Cùng 60.000 cặp (query, chunk tốt nhất dense) của EN-only, chấm bằng Qwen/Qwen3-Reranker-0.6B (revision `e61197ed`, BF16, prompt model-card, điểm = softmax(yes) trên [no, yes]; instruction "Given a Vietnamese medical question, judge whether the English passage answers it"). Chạy 10.730 s trên RTX 3050 (bị chia GPU với các phân tích khác). Giữ 20 doc/query điểm cao nhất (hoà thì theo hạng dense), chunk giữ nguyên của từng doc.
+- Qwen đổi doc top-1 ở 1.116/1.200 query; điểm yes trung bình 0,307; 17.871/60.000 cặp có điểm ≥0,5.
+- Kiểm: validator riêng 0 lỗi (20 doc + 20 chunk/query, dict256, verbatim). Validator native: 24.000 lỗi, đúng bằng số chunk, toàn bộ là "doc ngoài docs_vi".
+- Đọc kết quả: nếu EN-only ≈ 0 thì EN-only-Q cũng ≈ 0 và en bị loại hẳn. Nếu EN-only > 0, so precision của EN-only-Q với EN-only để biết Qwen có tách được en liên quan không.
 
 ## 4. H2 — Query sinh từ doc
 
@@ -143,7 +148,7 @@ Không tìm thấy một cấu trúc nào giải thích ngay khoảng cách 0,28
 | # | Probe | Chi phí | Kỳ vọng ΔFinal | Ghi chú |
 |---:|---|---|---|---|
 | 1 | P-A nhận dạng retriever BTC qua pool zh | 0 lượt, 2–4 GPU-giờ | chưa ước lượng; trần cao | Chỉ giả thuyết này đủ lớn để giải thích khoảng cách. Dừng nếu không model nào đạt AUC ≥0,9. |
-| 2 | EN-only (đã dựng) | 1 lượt | ≈0 (thông tin) | Khoá D17. Nếu R en > 0,02 thì mở lại nhánh en. |
+| 2 | EN-only, rồi EN-only-Q top-20 (đều đã dựng) | 1–2 lượt | ≈0 (thông tin) | Khoá D17. Nếu R en > 0,02 thì mở lại nhánh en. |
 | 3 | P-D gần trùng cụm 2–3 | 1 lượt, CPU | +0,002…+0,006 | Giữ tổng doc. |
 | 4 | P-C crawl 120ask/zysjonline còn thiếu | crawl bị chặn | ≈+0,003 (ngoại suy) | Cần Vu duyệt nguồn/IP. |
 | 5 | P-F lead-paragraph cho doc chưa có chunk | 1 lượt | ±0,003 | Cùng trần byte. |
@@ -152,7 +157,7 @@ Không tìm thấy một cấu trúc nào giải thích ngay khoảng cách 0,28
 
 ## 10. Cần Vu quyết
 
-1. EN-only-Q: cùng 50 doc đổi thứ tự sẽ cho cùng điểm với EN-only (metric theo tập). Chọn: (a) giữ đúng yêu cầu, (b) chỉ giữ top-k theo Qwen (ví dụ 20), hay (c) Qwen chấm mọi chunk của 50 doc để đổi chunk tốt nhất.
+1. (Đã chốt) EN-only-Q dùng top-20 theo Qwen, chunk giữ nguyên.
 2. Có hỏi BTC bằng văn bản về cách chọn zh/en v2 và corpus dùng khi gán gold không (vùng xám).
 3. Có duyệt P-A (tải thêm model embedding, ví dụ Qwen3-Embedding-0.6B, gte-multilingual) không.
 

@@ -1,8 +1,8 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-18 20:00 (UTC+7)
+- Cập nhật: 2026-10-18 22:32 (UTC+7)
 - Model thực hiện: Claude Opus 5.5
-- Commit HEAD đã kiểm trước cập nhật này: `ecd8e3faf742155cc97040cf5ae5a1435775765b`, nhánh `feat/s26-gold-structure` (tách từ `feat/s24-recovery`)
+- Commit HEAD đã kiểm trước cập nhật này: `c0546a1e22d7091e670fdf4bd7194c8631f4480d`, nhánh `feat/s26-gold-structure` (tách từ `feat/s24-recovery`)
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - **Best mới đã đo: R1m 0,2673** (Qwen3-Reranker-0,6B + RRF trên phía zh, D16; người dùng cung cấp 15/10). **R1m chưa tích hợp vào repo này**: chờ phía vi (S15, sáng 16/10) rồi tích hợp một lần, kèm pin model Qwen3 (revision `e61197ed…`) và cache điểm. Trong repo, best tái tạo được vẫn là **C1 0,2655**. **C3 (S6-f + zh đợt 3) đã vào `main` local theo S14b: replay JSON `6cf9284d…3436` và ZIP `1c2472d1…1af9` khớp, chưa có điểm LB.** Chi tiết mục 5 (S14b).
 - **S14 (14/10, nhánh `feat/integrate`, chưa push): tái tạo C1 bằng một lệnh.** Best đã đo: **C1 Final 0,2655** (người dùng cung cấp) = base S6-f-K150 + doc zh đợt 2 (τ_doc tuyệt đối −0,87255859375, trần 30) + chunk zh ZL (τ 0,96, ≤ 3 doc/query, mỗi ID v2 một chunk, chỉ doc đã chọn) + LZMA dict 256 MiB; ZIP 82.047.434 B, ZIP SHA256 `e7c84e2c37c996fe3d046bf22a4d25b2fd9e8e1c2568d928fa45797108720c13`, JSON `83375428b79957b1580299f97b05299bb292957826bd4cb8bdc602a83b8dd5f3`. `python -m r2ai.compose replay --manifest configs/best-c1.yaml` (pin đủ input trong `configs/best-c1.yaml`, thiếu pin thì dừng) dựng lại **JSON SHA và ZIP SHA đều khớp**, validator native 0 lỗi / 1.200 query / 126.208 chunk. Replay S6-f JSON `d0da38b1…dca1` khớp; A1-115 JSON `4ffbba8b…2c82` khớp (ZIP khác 8 byte do mtime, gate là JSON); VS-append JSON và ZIP khớp. `submission-best.yaml` vẫn mặc định A1-115. Chi tiết mục 5 (S14) và `submissions/LOG.md`.
@@ -483,6 +483,7 @@ Cập nhật 2026-10-17 20:25 (UTC+7), GPT-6 (Codex, S24 recovery): D21 bỏ qua
 
 | Thời gian (UTC+7) | Ai | Thay đổi |
 |---|---|---|
+| 2026-10-18 22:32 | Claude Opus 5.5 | S26 H7: EN-only-Q = top-20/query của EN-only theo Qwen3-Reranker-0.6B (60.000 cặp, 10.730 s), chunk giữ nguyên; ZIP 4.046.109 B (SHA `0b77fb30…0dc5`), validator riêng 0 lỗi, native chỉ báo doc ngoài docs_vi. Chưa nộp. |
 | 2026-10-18 20:00 | Claude Opus 5.5 | S26: phân tích H1–H7 cấu trúc gold. Pool test zh v2 theo query (AUC 0,80/0,83), H2 yếu (2,7% query có doc nguồn), H3 cụm ≤3 thêm 9,7 doc/query, H4 không query nào dồn ≥90% một host, H5 P1 đã dùng nguyên body, H6 0 query gần trùng. EN-only ZIP 9.154.860 B (SHA `8b72528e…3907`), validator riêng 0 lỗi; native chỉ báo doc ngoài docs_vi. Xếp hạng probe trong `reports/s26-gold-structure.md`. Không ghi index, không nộp. |
 | 2026-10-18 04:16 | GPT-6 (Codex) | S24 recovery: webMedQA provisional ID 20006, S23 seg20004 intact (1.463 doc/8.327 chunk); VOV direct 8.392 attempts, 8.385 HTTP 200/docs, 8.364 text-good, 7 redirect un-followed. Batch S15 extract-only, no chunk/embed/index. Wayback stopped; thaythuoc dead. All outputs under `out/`. |
 | 2026-10-18 01:13 | GPT-6 (Codex) | S15: kiểm ID trước nhập; baolangson seg20005 unique, xếp sau delta VI hiện tại vào P1; webMedQA seg20004 trùng S23 seg20004 nên chờ S24 đổi ID. S22 zh bundle chưa sync tại path chốt; chưa chạy delta zh/P2. Dừng build P1 cũ, chưa có ZIP; queue có pin ở `out/runs/reranker-trial/delta-queue.json`. |

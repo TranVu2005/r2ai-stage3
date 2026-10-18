@@ -1137,8 +1137,19 @@
         "docs_sha256": "f4ce4dc470fc1d4abbd02971cfcedebbdfa6f5c0bd687f935caf323c6a0bd833",
         "docs_v2": 4259
       },
-      "native_rerun_complete": false,
-      "validation_note": "Build exists; streamed full-text validation attempt exited after cache population, no validator sidecar."
+      "native_rerun_complete": true,
+      "validation_note": "Build exists; streamed full-text validation attempt exited after cache population, no validator sidecar.",
+      "streamed_validator": {
+        "rows": 1200,
+        "chunks": 126758,
+        "errors": 0,
+        "ok": true,
+        "validator": "r2ai.submit.validate_submission checks, ZIP row-streamed + SQLite full-text",
+        "cap_bytes": 102600000,
+        "zip_sha256": "b8ff9a46b25e03211d53ecd9f4291c88f74f902cda6734ef0e6611527952f339",
+        "zip_bytes": 90224639,
+        "validated_at_utc": "2026-10-18T14:35:18.329822+00:00"
+      }
     }
   },
   "submission_approved": false,
@@ -1250,19 +1261,39 @@
       "status": "incomplete",
       "local_checks_passed": true,
       "native_validator_passed": false,
-      "note": "C3 native validator did not complete under available memory; no sidecar."
+      "note": "C3 native validate call did not finish after 3 minutes; no sidecar was produced."
     },
     "P2-vi+10": {
-      "status": "incomplete",
-      "local_checks_passed": true,
-      "native_validator_passed": false,
-      "note": "Streaming source cache built; process exited during ZIP row-stream validation; no sidecar."
+      "status": "pass",
+      "streamed_full_validator_checks_passed": true,
+      "validator_kind": "row-streamed r2ai.submit.validate_submission checks with SQLite full-text adapter",
+      "summary": {
+        "rows": 1200,
+        "chunks": 126758,
+        "errors": 0,
+        "ok": true,
+        "validator": "r2ai.submit.validate_submission checks, ZIP row-streamed + SQLite full-text",
+        "cap_bytes": 102600000,
+        "zip_sha256": "4b5dfbfafe50cfe4439cfcc3d3ba968d6500e5d2cac3c53cee32bda42b37249b",
+        "zip_bytes": 90274408,
+        "validated_at_utc": "2026-10-18T14:31:55.227803+00:00"
+      }
     },
     "P2-vi+20": {
-      "status": "incomplete",
-      "local_checks_passed": true,
-      "native_validator_passed": false,
-      "note": "Streaming source cache built; process exited during ZIP row-stream validation; no sidecar."
+      "status": "pass",
+      "streamed_full_validator_checks_passed": true,
+      "validator_kind": "row-streamed r2ai.submit.validate_submission checks with SQLite full-text adapter",
+      "summary": {
+        "rows": 1200,
+        "chunks": 126758,
+        "errors": 0,
+        "ok": true,
+        "validator": "r2ai.submit.validate_submission checks, ZIP row-streamed + SQLite full-text",
+        "cap_bytes": 102600000,
+        "zip_sha256": "79edfb519cfd7b83b4e699ce9fd72b668ac1c6b71c75611ad10bc01f6a9749cf",
+        "zip_bytes": 90336338,
+        "validated_at_utc": "2026-10-18T14:33:38.519000+00:00"
+      }
     },
     "P2": {
       "status": "pass",
@@ -1271,20 +1302,40 @@
     },
     "P2-vi+10-tamS18": {
       "status": "pass",
-      "note": "1,200 rows, 126,758 chunks, 0 errors; unmodified all-at-once CLI was not run to completion.",
       "streamed_full_validator_checks_passed": true,
-      "validator_kind": "row-streamed r2ai.submit.validate_submission checks with SQLite full-text adapter"
+      "validator_kind": "row-streamed r2ai.submit.validate_submission checks with SQLite full-text adapter",
+      "summary": {
+        "rows": 1200,
+        "chunks": 126758,
+        "errors": 0,
+        "ok": true,
+        "validator": "r2ai.submit.validate_submission checks, ZIP row-streamed + SQLite full-text",
+        "cap_bytes": 102600000,
+        "zip_sha256": "3198e04fd30fa62e1bb639d5faa90cee14fc562b9d371b74bed8f30bccfbd76e",
+        "zip_bytes": 90291745,
+        "validated_at_utc": "2026-10-18T14:17:59.524563+00:00"
+      }
     },
     "hf_release_check": {
       "status": "skipped",
       "reason": "User requested skip because DNS prevents HF release check."
     },
     "P2-tamS18": {
-      "status": "incomplete",
-      "local_build_passed": true,
-      "native_validator_passed": false,
-      "note": "Native/streamed validator did not complete after cache population; no sidecar. P2-vi+10-tamS18 separately passed streamed full checks."
+      "status": "pass",
+      "streamed_full_validator_checks_passed": true,
+      "validator_kind": "row-streamed r2ai.submit.validate_submission checks with SQLite full-text adapter",
+      "summary": {
+        "rows": 1200,
+        "chunks": 126758,
+        "errors": 0,
+        "ok": true,
+        "validator": "r2ai.submit.validate_submission checks, ZIP row-streamed + SQLite full-text",
+        "cap_bytes": 102600000,
+        "zip_sha256": "b8ff9a46b25e03211d53ecd9f4291c88f74f902cda6734ef0e6611527952f339",
+        "zip_bytes": 90224639,
+        "validated_at_utc": "2026-10-18T14:35:18.329822+00:00"
+      }
     }
   },
-  "updated_utc": "2026-10-18T14:28:27+00:00"
+  "updated_utc": "2026-10-18T14:39:16+00:00"
 }

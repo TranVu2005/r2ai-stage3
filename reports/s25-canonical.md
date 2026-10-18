@@ -205,7 +205,8 @@ Sau khi đóng băng, `data/canonical-20261018` (17 GB) sẽ trùng với index/
 - **Chưa di chuyển gì.** `relocate --check` (`out/runs/s25-canonical/relocate-*/report.json`) cho kết quả:
   - plan khớp SHA đã duyệt;
   - 89 mục sẵn sàng (23.990.975.290 B), 0 mục bị chặn khi kiểm lại (số file/byte, git, tham chiếu, dùng bởi canonical/live);
-  - 39 mục pytest ở ổ C: (worktree `diag-lang`, 61.081.347 B) bị bỏ qua, vì di chuyển khác ổ thực chất là copy + xoá. Cần Vu quyết riêng.
+  - 39 mục pytest ở ổ C: (worktree `diag-lang`, 61.081.347 B): Vu cho phép (18/10) copy sang `D:\_to_delete_r2ai\C\…`, so SHA-256 từng file, chỉ xoá bản gốc khi mọi file của mục đều khớp. Nếu lệch, giữ bản gốc và dừng (`copy_verify_delete`, có test).
+  - Lần kiểm lại 16:20: 89 mục rename trên D: + 39 mục copy-verify-delete = 128 mục / 24.052.056.637 B, 0 mục bị chặn.
 - **Gate GPU chưa đạt.** `delta-queue.json` (cập nhật lần cuối 11:20) còn 6 status chờ, trong đó `delta_vi_2` (embed VOV + baolangson) là `queued_after_delta_zh`. Lệnh chạy thật cần cả cờ `--s15-queue-empty` lẫn file queue không còn status chờ. Nếu S15 đã xong mà file chưa cập nhật, S15 cần cập nhật file trước.
 - **Dựng lại P2 từ canonical (chạy khô trước di chuyển, `p2rebuild`).** Skeleton chỉ lưu (doc_id, char_start, char_end) vào `doc_text` canonical, không lưu text. Kết quả:
   - 123.323 chunk là lát cắt đúng của canonical; 3.435 chunk Tâm Anh thay bằng body S18 (Q1);

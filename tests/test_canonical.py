@@ -59,3 +59,24 @@ def test_relocate_gate_and_destination():
     assert queue_blockers({'queue': [{'status': 'done'}]}) == []
     assert destination(Path('D:/GitHub/r2ai-stage3/data/chunks_zh_full')) == \
         Path('D:/_to_delete_r2ai/D/GitHub/r2ai-stage3/data/chunks_zh_full')
+
+
+def test_copy_verify_delete_keeps_source_on_mismatch(tmp_path, monkeypatch):
+    import io
+    from r2ai.canonical import relocate as R
+    monkeypatch.setattr(R, 'TRASH', tmp_path / 'trash')
+    src = tmp_path / 'c' / 'pytest-x'
+    (src / 'sub').mkdir(parents=True)
+    (src / 'sub' / 'a.bin').write_bytes(b'abc')
+    (src / 'empty').mkdir()
+    real = R.sha_file
+    monkeypatch.setattr(R, 'sha_file', lambda f: 'x' if 'trash' in str(f) else real(f))
+    with pytest.raises(RuntimeError):
+        R.copy_verify_delete(src, tmp_path / 'trash' / 'C' / 'pytest-x', io.StringIO())
+    assert (src / 'sub' / 'a.bin').read_bytes() == b'abc'          # source kept
+    monkeypatch.setattr(R, 'sha_file', real)
+    ledger = io.StringIO()
+    dst = tmp_path / 'trash' / 'C' / 'pytest-y'
+    R.copy_verify_delete(src, dst, ledger)
+    assert not src.exists() and (dst / 'sub' / 'a.bin').read_bytes() == b'abc' and (dst / 'empty').is_dir()
+    assert '"done": "copy-verify-delete"' in ledger.getvalue()

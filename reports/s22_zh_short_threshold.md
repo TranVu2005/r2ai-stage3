@@ -39,3 +39,9 @@ Tổng histogram: **12,665** doc raw-backed; bin 50–199 có **10,967** doc. Tr
 
 - Mỗi host là batch `cc-s22-{host}`; schema CC, manifest và segment chunk t256 giữ nguyên; segment IDs là provisional để S15 cấp ID/embed khi nhập.
 - Các doc <50 CJK vẫn thin. Raw không có cho các lỗi ban đầu được đếm riêng; không tự đi crawl.
+
+## Kiểm tra tính tất định và nguyên nhân chênh hash
+
+- Re-extract **100/552** doc hash khác, phân tầng theo host (familydoctor 24, jbk 24, youlai 24, zhongyibaodian 24, wujue 4), dùng raw shard từ provenance. Chạy hai process độc lập trên cùng raw HTML với `PYTHONHASHSEED=1` và `777`; SHA-256 body: **100/100 trùng, 0 lệch**. Không dựng lại bundle.
+- 552 hash khác giữa raw-recovery cũ và bundle short-threshold không phải nondeterminism được tái lập. `662f285` đổi predicate trong `_extract_recovery_doc` từ `good_text` (≥200 code point) sang `good_text_for_lang` (zh nhận thêm ≥50 CJK). Số đo xác nhận: toàn bộ 552 body mới nằm trong bin 50–199 CJK; provenance extractor đổi giữa `generic_recovery` và extractor riêng host. Breakdown: youlai 255, familydoctor 189, zhongyibaodian 65, jbk 39, wujue 4. Predicate mới khiến nhánh primary/fallback được chọn khác. Hai process cho hash trùng; chưa có bằng chứng phụ thuộc thứ tự dict/set hoặc chuẩn hóa whitespace. Không sửa extractor.
+- Bundle cũ từng ở `C:\Users\Admin\.codex\worktrees\zh-short-threshold\r2ai-stage3\data\s22_zh_short_threshold`. Artifact registry hiện ghi worktree `zh-short-threshold` đã archived; thư mục bundle không còn ở checkout đó. `git check-ignore` xác nhận `data/` bị ignore. Archive snapshot lưu tracked và non-ignored untracked, còn ignored files phải được bảo toàn riêng; bundle ignored đã biến mất cùng checkout khi archive. Không có dấu vết cho thấy bundle bị ghi đè riêng hay bị sandbox giữ lại.

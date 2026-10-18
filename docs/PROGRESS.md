@@ -1,8 +1,8 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-17 18:52 (UTC+7)
+- Cập nhật: 2026-10-18 12:19 (UTC+7)
 - Model thực hiện: GPT-6 (Codex)
-- Commit HEAD đã kiểm trước cập nhật này: `662f2855376ae14e47bd940c51de5288cee699b2`, nhánh `feat/s22-reextract`
+- Commit HEAD đã kiểm trước cập nhật này: `dc040cd9429233561b2225906ad00f93e01a63ea`, nhánh `feat/s22-reextract`
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - **Bản tốt nhất đã đo: VS-append Final 0,2168** (07/10, người dùng cung cấp; (0,2373 + 0,1964)/2 = 0,21685 làm tròn): Doc F2 0,2373 · Doc P 0,1353 · Doc R 0,3716 · chunk giống RD150; RD150 + 20 id/query theo BM25 slug từ URL vi không crawl được, `out/runs/selective-check/VS-append/VS_append.zip`, SHA256 `48da9d87…53fe`. **Config best vẫn = RD150; chốt VS-append là việc của lượt sau** (sau VS40/VS60/VS-swap). Bản nền RD150 Final 0,2139 (06/10), Doc F2 0,2313 · Doc P 0,1431 · Doc R 0,3412 · Chunk F2 0,1964 · Chunk P 0,2340 · Chunk R 0,2199. File `out/runs/rrf-docs-2026-10-06/RD150/sub_RD150.zip`; ZIP SHA256 `9eaf78b4…ccfd`, JSON `136c2591…e950`. `configs/submission-best.yaml` = RD150 (commit `5c8b7e6`, replay JSON `136c2591…e950` khớp). Trần ZIP 104.857.600 byte. Tổng **27 lượt nộp** (người dùng cung cấp).
 - Z-append (RD150 + ≤ 100 doc zh mẫu 2% nối cuối, chẩn đoán) Final 0,1916, **Doc R 0,3429 (+0,0017 so với RD150, trên ngưỡng 0,0002)** → **quyết định crawl toàn bộ zh** (agent zh làm); chưa nộp bản trộn zh trước khi có calibration. P300 (RRF trên pool rerank 300 doc) đã nộp 06/10: Final 0,2135, thua RD150 → dừng phía doc vi; ứng viên kế tiếp: VS40/VS60/VS-swap (luồng slug). Chi tiết mục 5, M9/M10, `submissions/LOG.md`.
@@ -136,6 +136,8 @@ Luồng slug vi không crawl được (07/10, `out/runs/selective-check/REPORT.m
 
 ## 6. Lệch so với `R2AI_STAGE3_CONTEXT.md`
 
+Cập nhật 2026-10-18 12:19 (UTC+7), GPT-6 (Codex): S22 kiểm tính tất định trên 100/552 doc raw, 2 process / hash seed 1 và 777; 100/100 SHA-256 body trùng. 552 hash chênh lịch sử đều ở bin 50–199 CJK; nguyên nhân là commit `662f285` đổi predicate zh trong `_extract_recovery_doc`, làm đổi lựa chọn primary/fallback extractor; chưa tái lập nondeterminism. Bundle cũ mất cùng worktree `zh-short-threshold` đã archive vì `data/` bị Git ignore và archive không snapshot ignored files; không có dấu vết overwrite. Không dựng lại bundle, không sửa extractor. Chi tiết `reports/s22_zh_short_threshold.md`.
+
 Cập nhật 2026-10-17 18:52 (UTC+7), GPT-6 (Codex): S22 follow-up min-token theo yêu cầu Vu. Trong index S11 có 1.722 doc `status=ok` dưới ngưỡng 50 token (ask.39 1.706, wujue 13, fitness 1, heart 1, zydcd 1), đều 27–49 token và chưa có trong segment hiện hành. Tạo bundle CC riêng `data/s22_zh_minTok/`, 5 batch / 5.034 chunk t256 với min zh=1; `source=s11-minTok`, raw shard gốc còn đủ 989 shard. Đã xác minh schema, SHA raw, chunk verbatim và 1.722/1.722 group thuộc v2; không ghi index. Bundle là output ignored trong worktree riêng, không commit dữ liệu. Báo cáo `reports/s22_zh_minTok.md`.
 
 Cập nhật 2026-10-17 18:35 (UTC+7), GPT-6 (Codex): S22 follow-up zh short threshold trong worktree `codex/zh-short-threshold`. Histogram trên 12.665 doc thin có raw của 7 host; 60/60 mẫu 50–199 có nội dung y khoa, ask.39 10/10 có Q&A; ask.39 bin 0 = 0/10.317. Thêm điều kiện zh ≥50 chữ Hán (giữ điều kiện cũ ≥200 code point), vi vẫn ≥200; min-token zh=1, vi=50. Thu hồi thêm 10.967 doc trong 7 host, cộng 16 Youlai khi áp dụng cho toàn bộ 10 batch zh; còn 1.698 raw-backed dưới 50 và 604 lỗi không có raw. Re-segment 12.343 doc / 35.479 chunk t256, membership v2 100%; không ghi index. Báo cáo `reports/s22_zh_short_threshold.md`, mẫu ID `reports/s22_zh_short_samples.csv`; test focused 76 passed / 3 deselected (fixture raw thiếu).
@@ -238,6 +240,7 @@ Hai dòng ❓ từ CONTEXT:
 
 | Thời gian (UTC+7) | Ai | Thay đổi |
 |---|---|---|
+| 2026-10-18 12:19 | Codex (GPT-6) | S22: xác minh deterministic 100/100 hash trên 2 process; 552 hash khác lịch sử do predicate ≥50 CJK ở `662f285`, chưa tái lập nondeterminism; ghi nhận bundle cũ nằm trong ignored `data/` của worktree đã archive. Chỉ cập nhật report/docs, không dựng bundle hoặc đổi extractor. |
 | 2026-10-17 18:52 | Codex (GPT-6) | S22: đếm 1.722 doc zh S11 status=ok bị min-token 50 loại; tạo 5 CC batch riêng min-token=1 (5.034 chunk), 100% v2, 989 raw shard hash khớp, không ghi index; report `reports/s22_zh_minTok.md`. |
 | 2026-10-17 18:35 | Codex (GPT-6) | S22 zh short threshold: audit histogram/mẫu 7 host, giữ nội dung zh ≥50 chữ Hán, chunk min-token zh=1, re-segment 10 batch zh trong bundle CC riêng; 100% v2, không ghi index; focused test 76 pass / 3 deselected. |
 | 2026-10-17 18:01 | Codex (GPT-6) | S22: audit 17 host S20 VI/ZH chỉ từ raw local, chẩn đoán 340 mẫu; stage 17 CC batch riêng (22.238 docs raw-backed, 4.652 đạt ≥200 code point, 696 ID thiếu raw, 100% membership v2), không ghi index; S15 nhận contract hiện có. Test extractor liên quan: 66 passed. Push bỏ qua theo chỉ thị không mạng. |

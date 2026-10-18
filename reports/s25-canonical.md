@@ -197,8 +197,22 @@ Sau khi đóng băng, `data/canonical-20261018` (17 GB) sẽ trùng với index/
 ## 7. Câu hỏi cho Vu
 
 - **Q1 — đã chốt (Vu, 18/10):** giữ text S18 (seg00400) cho 1.662 doc Tâm Anh như hiện tại. Kiểm SHA sau di chuyển ở bước 8 được chấp nhận lệch đúng 3.435 chunk Tâm Anh này (P2.zip mang body base cũ đã bị supersede); mọi lệch khác ngoài tập đó vẫn là lỗi.
-- **Q2:** 1.261 ID chỉ-có-ID trong `relevant_docs` không có text ở bất kỳ đâu. Xác nhận canonical không cần chứa chúng (dựng lại P2 sẽ lấy ID từ nguồn gốc của luồng slug).
-- **Q3:** Duyệt `reports/s25/delete-plan.csv` (128 mục / 24,05 GB). Ngay cả khi duyệt, chỉ di chuyển sau khi S15 xác nhận hàng chờ GPU rỗng.
+- **Q2 — đã chốt (Vu, 18/10):** canonical không chứa 1.261 ID chỉ-có-ID.
+- **Q3 — đã duyệt (Vu, 18/10):** `reports/s25/delete-plan.csv` (SHA256 `c032c340…abbf4`). Chỉ di chuyển sang `D:\_to_delete_r2ai\<đường dẫn gốc>` khi S15 báo hàng chờ GPU rỗng.
+
+### Trạng thái Pha 3 (16:10)
+
+- **Chưa di chuyển gì.** `relocate --check` (`out/runs/s25-canonical/relocate-*/report.json`) cho kết quả:
+  - plan khớp SHA đã duyệt;
+  - 89 mục sẵn sàng (23.990.975.290 B), 0 mục bị chặn khi kiểm lại (số file/byte, git, tham chiếu, dùng bởi canonical/live);
+  - 39 mục pytest ở ổ C: (worktree `diag-lang`, 61.081.347 B) bị bỏ qua, vì di chuyển khác ổ thực chất là copy + xoá. Cần Vu quyết riêng.
+- **Gate GPU chưa đạt.** `delta-queue.json` (cập nhật lần cuối 11:20) còn 6 status chờ, trong đó `delta_vi_2` (embed VOV + baolangson) là `queued_after_delta_zh`. Lệnh chạy thật cần cả cờ `--s15-queue-empty` lẫn file queue không còn status chờ. Nếu S15 đã xong mà file chưa cập nhật, S15 cần cập nhật file trước.
+- **Dựng lại P2 từ canonical (chạy khô trước di chuyển, `p2rebuild`).** Skeleton chỉ lưu (doc_id, char_start, char_end) vào `doc_text` canonical, không lưu text. Kết quả:
+  - 123.323 chunk là lát cắt đúng của canonical; 3.435 chunk Tâm Anh thay bằng body S18 (Q1);
+  - JSON dựng lại có SHA `20ac2b4e…6ee6`, lệch 723 dòng, đúng 3.435 chunk, 0 lệch ngoài dự kiến;
+  - khi đặt lại riêng 3.435 chunk đó, SHA = `47515fd7…88ff`, trùng P2 đã duyệt.
+
+  Sau khi di chuyển, `relocate --run` tự chạy lại phép này. Phải đạt cùng kết quả mới coi là xong.
 
 ## 8. Tái tạo
 
@@ -210,10 +224,12 @@ python -m r2ai.canonical.versions --workers 4      # -> out/runs/s25-canonical/v
 python -m r2ai.canonical.build                     # -> data/canonical-20261018 (506 s)
 python -m r2ai.canonical.verify --zip P1=out/runs/reranker-trial/release/P1.zip --zip P2=out/runs/reranker-trial/release/P2.zip
 python -m r2ai.canonical.deleteplan                # -> out/runs/s25-canonical/delete-plan (CSV only)
+python -m r2ai.canonical.p2rebuild map && python -m r2ai.canonical.p2rebuild rebuild
+python -m r2ai.canonical.relocate --check           # sau khi S15 báo queue rỗng: --run --s15-queue-empty
 ```
 
 Hai build thất bại trước đó được chuyển sang `out/runs/s25-canonical/failed-build-{1,2}`, không xoá:
 - lần 1: tràn offset string 32-bit khi `take` trên `text.arrow` của base; đã chuyển sang `take_texts`;
 - lần 2: dừng ở bước chunk extract vì nguồn pytest không có cột `paragraphs`; sau đó thêm bộ lọc nguồn test.
 
-Test: `pytest -q` trong worktree: **819 passed, 2 deselected** (393 s), gồm 7 test mới ở `tests/test_canonical.py`.
+Test: `pytest -q` trong worktree: **819 passed, 2 deselected** (393 s), gồm 7 test mới (sau đó thêm 1 test gate relocate: `tests/test_canonical.py` 8 passed) ở `tests/test_canonical.py`.

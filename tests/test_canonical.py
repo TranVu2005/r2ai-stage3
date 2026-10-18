@@ -48,3 +48,14 @@ def test_test_paths_are_never_versions():
     assert is_test_path(r'D:\w\out\diag\synthetic-test-green\a.parquet')
     assert not is_test_path(r'D:\GitHub\r2ai-stage3\data\docs_vi\thanhnien.vn__2026.parquet')
     assert not is_test_path(r'D:\GitHub\r2ai-stage3\data\chunks_zh_v2\seg00109-v2n-003-ask.39.net\docs.parquet')
+
+
+def test_relocate_gate_and_destination():
+    from pathlib import Path
+    from r2ai.canonical.relocate import destination, queue_blockers
+    q = {'execution_plan': {'delta_vi_2': {'status': 'queued_after_delta_zh'}, 'p1': {'status': 'built'}},
+         'queue': [{'status': 'done'}]}
+    assert queue_blockers(q) == ['queue.execution_plan.delta_vi_2: queued_after_delta_zh']
+    assert queue_blockers({'queue': [{'status': 'done'}]}) == []
+    assert destination(Path('D:/GitHub/r2ai-stage3/data/chunks_zh_full')) == \
+        Path('D:/_to_delete_r2ai/D/GitHub/r2ai-stage3/data/chunks_zh_full')

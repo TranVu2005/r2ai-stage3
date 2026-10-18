@@ -484,6 +484,7 @@ Cập nhật 2026-10-17 20:25 (UTC+7), GPT-6 (Codex, S24 recovery): D21 bỏ qua
 
 | Thời gian (UTC+7) | Ai | Thay đổi |
 |---|---|---|
+| 2026-10-18 16:10 | Claude Opus 5.5 | S25 Q2/Q3: Vu chốt không chứa 1.261 ID chỉ-có-ID; duyệt delete-plan (SHA `c032c340…`). Chưa di chuyển: gate GPU S15 chưa rỗng (`delta_vi_2` queued). `relocate --check`: 89 mục/23,99 GB sẵn sàng, 39 mục ổ C: bỏ qua. Dựng lại P2 từ canonical (khô): chỉ lệch 3.435 chunk Q1; đặt lại chúng thì SHA = P2 đã duyệt `47515fd7…`. |
 | 2026-10-18 16:00 | Claude Opus 5.5 | S25 Q1: Vu chốt giữ text S18 cho 1.662 doc Tâm Anh; kiểm SHA P2 sau di chuyển chấp nhận lệch đúng 3.435 chunk Tâm Anh. Q2, Q3 còn chờ. |
 | 2026-10-18 15:45 | Claude Opus 5.5 | S25: kiểm kê 387.763 file / 231,8 GB (+854 file worktree ngoài phạm vi); catalog 2.743.888 phiên bản / 887.151 ID; canonical `data/canonical-20261018` (docs, chunks t256, vectors, decisions, provenance, reembed, manifest SHA). Xác minh ID/verbatim/vector đạt; P1/P2 lệch đã liệt kê. Delete-plan 128 mục / 24,05 GB chỉ đề xuất. Code `src/r2ai/canonical`, report `reports/s25-canonical.md`. |
 | 2026-10-18 04:16 | GPT-6 (Codex) | S24 recovery: webMedQA provisional ID 20006, S23 seg20004 intact (1.463 doc/8.327 chunk); VOV direct 8.392 attempts, 8.385 HTTP 200/docs, 8.364 text-good, 7 redirect un-followed. Batch S15 extract-only, no chunk/embed/index. Wayback stopped; thaythuoc dead. All outputs under `out/`. |

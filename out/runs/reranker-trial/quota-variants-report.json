@@ -1105,6 +1105,40 @@
         "hf_release_check": "skipped by request (DNS blocked)",
         "validated_at_utc": "2026-10-18T14:17:59.524563+00:00"
       }
+    },
+    "P2-tamS18": {
+      "zip_path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\release\\P2-tamS18.zip",
+      "zip_bytes": 90224639,
+      "zip_sha256": "b8ff9a46b25e03211d53ecd9f4291c88f74f902cda6734ef0e6611527952f339",
+      "json_sha256": "8bf8a80e8d1bc7b9bd2fd47da36be1bb9596ac23f3ad2d141d72b8da3dc2edbd",
+      "compression": {
+        "method": "ZIP_LZMA",
+        "dictionary_mib": 256,
+        "dictionary_bytes": 268435456,
+        "lc": 3,
+        "lp": 0,
+        "pb": 2,
+        "zip_lzma_version": [
+          9,
+          4
+        ],
+        "properties_hex": "5d00000010"
+      },
+      "query_count": 1200,
+      "chunks": 126758,
+      "tamanh_chunk_docs": 1662,
+      "tamanh_chunks_changed": 3435,
+      "s18_pin": {
+        "manifest_path": "D:\\GitHub\\r2ai-stage3\\data\\index\\vi_s18_segments\\manifest.json",
+        "manifest_sha256": "564eb3511ebc1c060d9214db843a87b369c6a92ce7c608046ca94cb67e5c585d",
+        "segment": "seg00400-s18-tamanhhospital.vn",
+        "segment_sha256": "eb461398b669f54dc8e93bdd3c8cb94b3ed021f58ee233d8289beb06b261f81a",
+        "docs_path": "D:\\GitHub\\r2ai-stage3\\data\\chunks_vi_s18\\seg00400-s18-tamanhhospital.vn\\docs.parquet",
+        "docs_sha256": "f4ce4dc470fc1d4abbd02971cfcedebbdfa6f5c0bd687f935caf323c6a0bd833",
+        "docs_v2": 4259
+      },
+      "native_rerun_complete": false,
+      "validation_note": "Build exists; streamed full-text validation attempt exited after cache population, no validator sidecar."
     }
   },
   "submission_approved": false,
@@ -1244,7 +1278,13 @@
     "hf_release_check": {
       "status": "skipped",
       "reason": "User requested skip because DNS prevents HF release check."
+    },
+    "P2-tamS18": {
+      "status": "incomplete",
+      "local_build_passed": true,
+      "native_validator_passed": false,
+      "note": "Native/streamed validator did not complete after cache population; no sidecar. P2-vi+10-tamS18 separately passed streamed full checks."
     }
   },
-  "updated_utc": "2026-10-18T14:24:19+00:00"
+  "updated_utc": "2026-10-18T14:28:27+00:00"
 }

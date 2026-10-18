@@ -130,7 +130,7 @@ Hai loại "body span" và "answer span" là cách `make_submission.load_full_te
 
 Toàn bộ trường hợp lệch nằm trong `reports/s25/zip-mismatches.csv`:
 1. **1.261 ID không có text ở bất kỳ đâu** (thaythuocvietnam 499, nhathuoclongchau 432, youmed 279, thanhnien 26, medlatec 17, suckhoedoisong 3). Catalog không có dòng nào cho các ID này: đó là ID chỉ-có-ID (slug-append) trong `relevant_docs`. Canonical không thể chứa chúng; đây không phải lỗi dựng.
-2. **3.435 chunk Tâm Anh (1.662 doc) trong P2 là body cũ của base-t256**, bản đã bị seg00400 S18 supersede. Đã kiểm 3.435/3.435 trùng body base cũ. Index P2 dùng text S18, nhưng ZIP P2 (thừa kế C3/S6-f) vẫn chứa text cũ. Canonical đang theo index (S18). **Cần Vu quyết** (câu hỏi Q1).
+2. **3.435 chunk Tâm Anh (1.662 doc) trong P2 là body cũ của base-t256**, bản đã bị seg00400 S18 supersede. Đã kiểm 3.435/3.435 trùng body base cũ. Index P2 dùng text S18, nhưng ZIP P2 (thừa kế C3/S6-f) vẫn chứa text cũ. Canonical theo index (S18). **Vu đã chốt (18/10): giữ S18** (xem Q1).
 3. P1 có thêm 6 chunk zh ask.39.net lệch và 2 chuỗi con: đó là text trước S22. P2 đã thay bằng text S22, nên ở P2 không còn.
 4. 45 chunk vi P2 chỉ là chuỗi con: answer bị cắt khác biên span chunk (vinmec/thanhnien/hellobacsi). Text vẫn nằm nguyên trong doc_text canonical.
 
@@ -196,7 +196,7 @@ Sau khi đóng băng, `data/canonical-20261018` (17 GB) sẽ trùng với index/
 
 ## 7. Câu hỏi cho Vu
 
-- **Q1 (chặn kiểm SHA sau di chuyển):** 1.662 doc Tâm Anh. Index P2 dùng text S18 (seg00400). ZIP P2 vẫn chứa 3.435 chunk là body base cũ đã bị supersede. Canonical nên giữ S18 (như hiện tại, đúng theo index) hay giữ text cũ để "dựng lại P2 từ canonical → JSON giống hệt"? Nếu giữ S18 thì phép kiểm SHA ở bước 8 chắc chắn lệch đúng 3.435 chunk này, trừ khi lấy text đó từ bản thay thế được ghi trong `decisions.parquet`.
+- **Q1 — đã chốt (Vu, 18/10):** giữ text S18 (seg00400) cho 1.662 doc Tâm Anh như hiện tại. Kiểm SHA sau di chuyển ở bước 8 được chấp nhận lệch đúng 3.435 chunk Tâm Anh này (P2.zip mang body base cũ đã bị supersede); mọi lệch khác ngoài tập đó vẫn là lỗi.
 - **Q2:** 1.261 ID chỉ-có-ID trong `relevant_docs` không có text ở bất kỳ đâu. Xác nhận canonical không cần chứa chúng (dựng lại P2 sẽ lấy ID từ nguồn gốc của luồng slug).
 - **Q3:** Duyệt `reports/s25/delete-plan.csv` (128 mục / 24,05 GB). Ngay cả khi duyệt, chỉ di chuyển sau khi S15 xác nhận hàng chờ GPU rỗng.
 

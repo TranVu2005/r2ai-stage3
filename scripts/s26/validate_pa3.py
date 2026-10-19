@@ -4,7 +4,8 @@ Format: single JSON file in a ZIP_LZMA dict 256 MiB under 102,600,000 B; exactly
 relevant_docs ints in links_corpus_vi_en_zh, no duplicates; chunks {doc_id, chunk_text}, non-empty, doc_id in the row's
 relevant_docs, at most 1 chunk per doc_id per row.
 Verbatim: a chunk passes if its (doc_id, chunk_text) pair is shipped by P1-vi+10 (natively validated when P1 passed),
-or if chunk_text is a substring of the canonical doc_text of its canonical doc (canonical-20261018, S25-verified).
+or if chunk_text is a substring of the canonical doc_text of that ID (its own docs.parquet row, else the owner of its
+alias group; canonical-20261018, S25-verified).
 Usage: validate_pa3.py <zip>
 """
 import hashlib, json, os, sys, zipfile
@@ -62,7 +63,9 @@ for r in stream_rows():
         if (c['doc_id'], hashlib.sha256(c['chunk_text'].encode()).digest()) in pairs:
             src['p1_pair'] += 1
         else:
-            todo.append((cid2doc.get(c['doc_id']), c['chunk_text']))
+            todo.append((c['doc_id'], c['chunk_text']))
+in_docs = set(pq.read_table(f'{CAN}/docs.parquet', columns=['doc_id'])['doc_id'].to_pylist())
+todo = [(d if d in in_docs else cid2doc.get(d), t) for d, t in todo]   # the ID's own canonical text, else its group owner
 need = sorted({d for d, _ in todo if d is not None})
 txt = dict(zip(*[pq.read_table(f'{CAN}/docs.parquet', columns=['doc_id', 'doc_text'], filters=[('doc_id', 'in', need)])[k].to_pylist()
                  for k in ('doc_id', 'doc_text')]))

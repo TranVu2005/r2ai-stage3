@@ -15,7 +15,7 @@ same P1-vi+10 row, so the chunk count per query equals P1-vi+10 (same text rule,
 Options after `nc`: `k=<x>` scales K_q (round(K_q*x)); `ncx=<x>` scales n_c (round(n_c*x), at most K_q);
 `ref=<zip>` reports the chosen canonical docs that are not in the same row of that ZIP (default pa3/P-A3-nc.zip).
 In `nc` mode the chunks go to the highest-ranked chosen docs that can carry one (P1 text or >=1 t256 chunk); a chosen
-doc with no chunk source (no chunks_t256 row, e.g. thin/empty text) stays in relevant_docs and its chunk goes to the
+doc with no chunk source (no chunks_t256 row for it or for its alias-group owner: the thin docs) stays in relevant_docs and its chunk goes to the
 next doc, so every row keeps its target chunk count when enough carriers exist.
 `new=body`: a chosen doc without a P1 chunk gets its whole body rebuilt from canonical (body_check.py rule, 99.0% byte
 match with P1's own chunks on 200 samples) instead of a t256 chunk; if the ZIP reaches the ceiling, every such body is
@@ -57,7 +57,17 @@ _, first = np.unique(ch_doc, return_index=True)
 grp = dict(zip(ch_doc[first].tolist(), ct['doc_ids'].take(first).to_pylist())); del ct
 cid2doc = {int(a): int(d) for d, ids in grp.items() for a in ids}
 dq = pq.read_table(f'{CAN}/docs.parquet', columns=['doc_id', 'lang', 'quality']).to_pandas().set_index('doc_id')
-doc_lang, thin = dq.lang, set(dq.index[dq.quality == 'thin'].tolist()); del dq
+doc_lang, thin = dq.lang, set(dq.index[dq.quality == 'thin'].tolist())
+# alias docs (rule a): no chunks of their own; the canonical doc whose chunks_t256 alias group lists them holds the same
+# text and the chunks (phys_id is not used: it often points to a doc absent from docs.parquet)
+phys = {int(d): cid2doc[int(d)] for d in dq.index if d not in grp and int(d) in cid2doc}; del dq
+
+
+def cdoc(d):
+    """canonical doc that holds the chunks of d (d itself, or the owner of its alias group)"""
+    return d if d in grp else phys.get(d, d)
+
+
 ref = {}                                                # query id -> canonical docs of the reference ZIP
 if REF.exists():
     with zipfile.ZipFile(REF) as zr, zr.open(zr.namelist()[0]) as f:
@@ -121,7 +131,7 @@ for r in rows:
                   'zh_new': sum(doc_lang.get(d) == 'zh' for d in chosen), 'vi_new': sum(doc_lang.get(d) == 'vi' for d in chosen),
                   'zh_p1': sum(doc_lang.get(d) == 'zh' for d in order_p1), 'vi_p1': sum(doc_lang.get(d) == 'vi' for d in order_p1),
                   'new_vs_ref': sum(d not in ref[r['id']] for d in chosen) if ref else None,
-                  'no_chunk_docs': sum(d not in grp for d in chosen), 'thin_docs': sum(d in thin for d in chosen)})
+                  'no_chunk_docs': sum(cdoc(d) not in grp for d in chosen), 'thin_docs': sum(d in thin for d in chosen)})
 print(f'docs chosen {time.time() - t0:.0f}s', flush=True)
 
 # chunk texts: P1 text (this row, then any row) else best t256 chunk of the canonical doc by dense cosine
@@ -132,7 +142,7 @@ def carriers(r, pk):
     if not NC:
         return pk
     own, n = {c['doc_id'] for c in r['relevant_chunks']}, min(round(len(r['relevant_chunks']) * NCX), len(pk))
-    return [x for x in pk if x[1] in own or x[1] in gtext or x[0] in grp][:n]
+    return [x for x in pk if x[1] in own or x[1] in gtext or cdoc(x[0]) in grp][:n]
 
 
 need = {}                                               # canonical doc -> list of row indexes needing a t256 chunk
@@ -140,7 +150,7 @@ for k, (r, pk) in enumerate(zip(rows, picked)):
     own = {c['doc_id']: c['chunk_text'] for c in r['relevant_chunks']}
     for d, cid in carriers(r, pk):
         if cid not in own and cid not in gtext:
-            need.setdefault(d, []).append(k)
+            need.setdefault(cdoc(d), []).append(k)
 if NEW == 't256':
     vrow_all = np.where(ch_has, np.cumsum(ch_has) - 1, -1)
     r_need = np.flatnonzero(np.isin(ch_doc, np.fromiter(need, np.int64)))
@@ -171,9 +181,13 @@ if NEW == 't256':
 
 else:                                                   # whole body rebuilt from canonical (body_check.py rule)
     from body_check import body_span, load_spans
-    bt = pq.read_table(f'{CAN}/docs.parquet', columns=['doc_id', 'lang', 'doc_text'], filters=[('doc_id', 'in', sorted(need))])
-    spans = load_spans(set(need))
-    btext = {int(d): body_span(t, lg, spans.get(int(d), {})) for d, lg, t in
+    # text from the chosen doc itself (always in docs.parquet), field spans from the doc holding its chunks: for an
+    # alias doc whose group owner is absent from docs.parquet the owner's offsets index the alias text (verified)
+    tdocs = {d for r, pk in zip(rows, picked) for d, cid in carriers(r, pk)
+             if cid not in gtext and cid not in {c['doc_id'] for c in r['relevant_chunks']}}
+    bt = pq.read_table(f'{CAN}/docs.parquet', columns=['doc_id', 'lang', 'doc_text'], filters=[('doc_id', 'in', sorted(tdocs))])
+    spans = load_spans({cdoc(d) for d in tdocs})
+    btext = {cdoc(int(d)): body_span(t, lg, spans.get(cdoc(int(d)), {})) for d, lg, t in
              zip(bt['doc_id'].to_pylist(), bt['lang'].to_pylist(), bt['doc_text'].to_pylist())}; del bt
     print(f'canonical bodies {len(btext)} {time.time() - t0:.0f}s', flush=True)
 
@@ -186,17 +200,17 @@ for k, (r, pk) in enumerate(zip(rows, picked)):
             t = own[cid]; src['p1_row'] += 1
         elif cid in gtext:
             t = gtext[cid]; src['p1_any'] += 1
-        elif NEW == 't256' and (k, d) in best_row:
-            t = ctext[best_row[(k, d)]]; src['t256'] += 1
-        elif NEW == 'body' and btext.get(d, '').strip():
-            t = btext[d]; src['body'] += 1
+        elif NEW == 't256' and (k, cdoc(d)) in best_row:
+            t = ctext[best_row[(k, cdoc(d))]]; src['t256'] += 1
+        elif NEW == 'body' and btext.get(cdoc(d), '').strip():
+            t = btext[cdoc(d)]; src['body'] += 1
             chunks.append({'doc_id': int(cid), 'chunk_text': t, '_new': True}); continue
         else:
             src['none'] += 1; continue
         chunks.append({'doc_id': int(cid), 'chunk_text': t})
     new_rows.append({'id': r['id'], 'relevant_docs': [int(c) for _, c in pk], 'relevant_chunks': chunks})
 st = pd.DataFrame(stats); st.to_parquet(out / f'{name}.query_stats.parquet', index=False)
-tmp = zpath.with_suffix('.zip.tmp')
+tmp = zpath.with_suffix(f'.{os.getpid()}.zip.tmp')       # per-process: concurrent builds never share a tmp
 
 
 def build(N):

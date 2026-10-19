@@ -487,7 +487,7 @@ Cập nhật 2026-10-17 20:25 (UTC+7), GPT-6 (Codex, S24 recovery): D21 bỏ qua
 
 | Thời gian (UTC+7) | Ai | Thay đổi |
 |---|---|---|
-| 2026-10-19 17:35 | Claude Opus 5.5 | S26 P-A3: P-A3 (top-K_q doc-level trên 125.605 doc, không gate τ, 1 chunk/doc) ZIP 86.264.388 B SHA `19391ad9…516c`, validator 0 lỗi, chưa nộp; P-A3r vượt trần (109.611.284 B), chờ Vu chọn cách giảm; khởi chạy nhúng toàn bộ 887.151 doc cho P-A4. |
+| 2026-10-19 17:35 | Claude Opus 5.5 | S26 P-A3: P-A3 (top-K_q doc-level trên 125.605 doc, không gate τ, 1 chunk/doc) ZIP 86.264.388 B SHA `19391ad9…516c`, validator 0 lỗi, chưa nộp; P-A3r vượt trần (109.611.284 B), Vu quyết định để yên; khởi chạy nhúng toàn bộ 887.151 doc cho P-A4. |
 | 2026-10-19 15:04 | Claude Opus 5.5 | S26 P-A: Qwen3-Embedding-4B NF4 doc_text 512 trên mẫu con 10k (12.564 s) đạt AUC −min-rank 0,757, BGE-M3 cùng mẫu 0,915 ⇒ loại Qwen3, giữ kết luận BGE-M3 doc-level. |
 | 2026-10-19 11:43 | Claude Opus 5.5 | S26 P-A2: nhúng BGE-M3 doc_text 512 cho 125.605 doc của P1-vi+10 (3.229 s, sau khi job vi2 xong). Trùng top-50 doc-level/P1 23,4/50 (ngẫu nhiên 15,3). Dựng P1-docrank (docs giữ nguyên, chunk dồn theo doc-level, text chunk lấy lại từ P1): ZIP 80.706.521 B SHA `b4248359…ce31`, kiểm 0 lỗi, native chưa chạy. Chưa nộp. Sửa diễn giải P-A: biến thể tốt nhất là doc_text nguyên (đã gồm title), không phải chỉ body. |
 | 2026-10-19 09:39 | Claude Opus 5.5 | S26 P-A: fingerprint retriever pool zh — BGE-M3 dense doc-level doc_text 512, query vi đạt AUC −min-rank 0,924 (19 biến thể). Pool test vi bằng link nội bộ: không chọn theo query. Dịch 1.200 query sang zh bằng qwen2.5:7b (Ollama, local). Qwen3-Embedding-4B hoãn (GPU bận). Đề xuất P-A2 xếp hạng theo doc-level. Không nộp, không ghi index. |

@@ -227,6 +227,22 @@ Theo Vu: bản tiếp theo dựng trên bản P-A4 tốt nhất (sau khi có đi
 
 Số liệu trên dùng K_q ×1,0. Khi có điểm, bản thật sẽ dựng với hệ số K/n_c của bản P-A4 tốt nhất nên số có thể lệch nhẹ. Lệnh: `pa3_build.py … <name> pa3 nc new=body [k=x] [ncx=x] extra=out/runs/s27-pharmacity/handoff/cc-s27-pharmacity extravec=out/runs/s27-pharmacity/vectors/handoff`; validate: `validate_pa3.py <zip> out/runs/s27-pharmacity/handoff/cc-s27-pharmacity`. Hồi quy P-A3-nc sau khi sửa: JSON `72e06b20…18e6`.
 
+**P-A4-K90-ph đã dựng (20/10, chưa nộp).** Dựng theo quyết định của Vu: K90 cộng 612 doc pharmacity vào pool doc-level, cùng quy tắc chunk (n_c của P1, nguyên body cho doc mới).
+
+| | Giá trị |
+|---|---:|
+| Lượt doc pharmacity lọt top-K_q (tổng) | 204 |
+| Query có ≥1 doc pharmacity | 165 / 1.200 |
+| Doc pharmacity khác nhau được chọn | 135 |
+| Selection rate (135 / 612) | **22,1%** |
+| Lượt doc pharmacity nhận chunk | 134 |
+| Doc khác K90, mỗi query (thêm / bớt) | 0,17 / 0,17 |
+| vi / zh mỗi query | 127,1 / 35,5 |
+| Chunk (mục tiêu) | 126.133 (126.228) |
+
+- `out/runs/s26-gold-structure/pa4/P-A4-K90-ph.zip`: 70.991.673 B, SHA256 `b291124fa22e9f07fbddaeb3891455ff2c71757f3de1a1c0404fb82382389c6e`; JSON SHA256 `83296036b3c01ef584a570599176282e1523ba7e20a845c2bfd36cb79b2d7126`. Không cắt N.
+- Validator (kèm thư mục handoff pharmacity làm nguồn verbatim): 0 lỗi; 71.416 cặp P1 + 54.717 substring (canonical hoặc pharmacity).
+
 ## 5f. P-A5: cách chọn số doc mỗi query, trên nền K90 (20/10, chưa nộp)
 
 **LB (Vu báo):** P-A4 0,3747; **K90 0,3750** (Doc 0,3811 / Chunk 0,3689), tốt nhất; K110 0,3738. K90 được chọn làm nền. Bản nc120 do Vu nộp tiếp.

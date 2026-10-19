@@ -17,7 +17,10 @@ Options after `nc`: `k=<x>` scales K_q (round(K_q*x)); `ncx=<x>` scales n_c (rou
 In `nc` mode the chunks go to the highest-ranked chosen docs that can carry one (P1 text or >=1 t256 chunk); a chosen
 doc with no chunk source (no chunks_t256 row, e.g. thin/empty text) stays in relevant_docs and its chunk goes to the
 next doc, so every row keeps its target chunk count when enough carriers exist.
-Usage: pa3_build.py <out_dir> <scratch_dir> <doc_vectors.npz> <name> {pa3|pa3r} [nc] [k=x] [ncx=x] [ref=zip]
+`new=body`: a chosen doc without a P1 chunk gets its whole body rebuilt from canonical (body_check.py rule, 99.0% byte
+match with P1's own chunks on 200 samples) instead of a t256 chunk; if the ZIP reaches the ceiling, every such body is
+cut to its first N chars (verbatim prefix), N the largest found by bisection that fits (reported as body_cut_chars).
+Usage: pa3_build.py <out_dir> <scratch_dir> <doc_vectors.npz> <name> {pa3|pa3r} [nc] [k=x] [ncx=x] [ref=zip] [new=body]
 """
 import hashlib, json, os, sys, time, zipfile
 from pathlib import Path
@@ -32,6 +35,7 @@ out, S, vec, name, mode = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]
 NC = 'nc' in sys.argv[6:]
 OPT = dict(a.split('=', 1) for a in sys.argv[6:] if '=' in a)
 KX, NCX = float(OPT.get('k', 1)), float(OPT.get('ncx', 1))
+NEW = OPT.get('new', 't256'); assert NEW in ('t256', 'body')
 REF = Path(OPT.get('ref', 'out/runs/s26-gold-structure/pa3/P-A3-nc.zip'))
 out.mkdir(parents=True, exist_ok=True); zpath = out / f'{name}.zip'
 if zpath.exists():
@@ -137,34 +141,43 @@ for k, (r, pk) in enumerate(zip(rows, picked)):
     for d, cid in carriers(r, pk):
         if cid not in own and cid not in gtext:
             need.setdefault(d, []).append(k)
-vrow_all = np.where(ch_has, np.cumsum(ch_has) - 1, -1)
-r_need = np.flatnonzero(np.isin(ch_doc, np.fromiter(need, np.int64)))
-sub = pd.DataFrame({'index': r_need, 'doc_id': ch_doc[r_need], 'vrow': vrow_all[r_need]})   # index = chunk row
-V = np.load(f'{CAN}/vectors/dense.npy', mmap_mode='r')
-vr = sub.vrow.values; ok = vr >= 0
-CV = np.zeros((len(sub), V.shape[1]), np.float16)
-o = np.argsort(vr[ok]); rows_ok = np.flatnonzero(ok)[o]
-for b in range(0, len(rows_ok), 200_000):
-    sel = rows_ok[b:b + 200_000]; CV[sel] = V[vr[sel]]
-print(f'chunk vectors {len(sub)} ({ok.sum()} with vector) {time.time() - t0:.0f}s', flush=True)
-best_row = {}                                           # (row k, canonical doc) -> chunk row
-for d, g in sub.groupby('doc_id'):
-    gi = g.index.values; has = ok[gi]          # gi = positions in sub (RangeIndex)
-    for k in need[d]:
-        if has.any():
-            sc = CV[gi[has]].astype(np.float32) @ Q[qpos[rows[k]['id']]]; best_row[(k, d)] = int(g['index'].values[has][np.argmax(sc)])
-        else:
-            best_row[(k, d)] = int(g['index'].values[0])
-want = np.array(sorted(set(best_row.values())), np.int64); ctext = {}
-pf = pq.ParquetFile(f'{CAN}/chunks_t256.parquet'); lo = 0
-for g in range(pf.num_row_groups):                      # read only row groups holding wanted chunk rows
-    n = pf.metadata.row_group(g).num_rows; w = want[(want >= lo) & (want < lo + n)]
-    if len(w):
-        ctext.update(zip(w.tolist(), pf.read_row_group(g, columns=['text'])['text'].take(w - lo).to_pylist()))
-    lo += n
-print(f't256 chunks {len(want)} {time.time() - t0:.0f}s', flush=True)
+if NEW == 't256':
+    vrow_all = np.where(ch_has, np.cumsum(ch_has) - 1, -1)
+    r_need = np.flatnonzero(np.isin(ch_doc, np.fromiter(need, np.int64)))
+    sub = pd.DataFrame({'index': r_need, 'doc_id': ch_doc[r_need], 'vrow': vrow_all[r_need]})   # index = chunk row
+    V = np.load(f'{CAN}/vectors/dense.npy', mmap_mode='r')
+    vr = sub.vrow.values; ok = vr >= 0
+    CV = np.zeros((len(sub), V.shape[1]), np.float16)
+    o = np.argsort(vr[ok]); rows_ok = np.flatnonzero(ok)[o]
+    for b in range(0, len(rows_ok), 200_000):
+        sel = rows_ok[b:b + 200_000]; CV[sel] = V[vr[sel]]
+    print(f'chunk vectors {len(sub)} ({ok.sum()} with vector) {time.time() - t0:.0f}s', flush=True)
+    best_row = {}                                           # (row k, canonical doc) -> chunk row
+    for d, g in sub.groupby('doc_id'):
+        gi = g.index.values; has = ok[gi]          # gi = positions in sub (RangeIndex)
+        for k in need[d]:
+            if has.any():
+                sc = CV[gi[has]].astype(np.float32) @ Q[qpos[rows[k]['id']]]; best_row[(k, d)] = int(g['index'].values[has][np.argmax(sc)])
+            else:
+                best_row[(k, d)] = int(g['index'].values[0])
+    want = np.array(sorted(set(best_row.values())), np.int64); ctext = {}
+    pf = pq.ParquetFile(f'{CAN}/chunks_t256.parquet'); lo = 0
+    for g in range(pf.num_row_groups):                      # read only row groups holding wanted chunk rows
+        n = pf.metadata.row_group(g).num_rows; w = want[(want >= lo) & (want < lo + n)]
+        if len(w):
+            ctext.update(zip(w.tolist(), pf.read_row_group(g, columns=['text'])['text'].take(w - lo).to_pylist()))
+        lo += n
+    print(f't256 chunks {len(want)} {time.time() - t0:.0f}s', flush=True)
 
-new_rows, src = [], {'p1_row': 0, 'p1_any': 0, 't256': 0, 'none': 0}
+else:                                                   # whole body rebuilt from canonical (body_check.py rule)
+    from body_check import body_span, load_spans
+    bt = pq.read_table(f'{CAN}/docs.parquet', columns=['doc_id', 'lang', 'doc_text'], filters=[('doc_id', 'in', sorted(need))])
+    spans = load_spans(set(need))
+    btext = {int(d): body_span(t, lg, spans.get(int(d), {})) for d, lg, t in
+             zip(bt['doc_id'].to_pylist(), bt['lang'].to_pylist(), bt['doc_text'].to_pylist())}; del bt
+    print(f'canonical bodies {len(btext)} {time.time() - t0:.0f}s', flush=True)
+
+new_rows, src = [], {'p1_row': 0, 'p1_any': 0, 't256': 0, 'body': 0, 'none': 0}
 for k, (r, pk) in enumerate(zip(rows, picked)):
     own = {c['doc_id']: c['chunk_text'] for c in r['relevant_chunks']}
     chunks = []
@@ -173,23 +186,73 @@ for k, (r, pk) in enumerate(zip(rows, picked)):
             t = own[cid]; src['p1_row'] += 1
         elif cid in gtext:
             t = gtext[cid]; src['p1_any'] += 1
-        elif (k, d) in best_row:
+        elif NEW == 't256' and (k, d) in best_row:
             t = ctext[best_row[(k, d)]]; src['t256'] += 1
+        elif NEW == 'body' and btext.get(d, '').strip():
+            t = btext[d]; src['body'] += 1
+            chunks.append({'doc_id': int(cid), 'chunk_text': t, '_new': True}); continue
         else:
             src['none'] += 1; continue
         chunks.append({'doc_id': int(cid), 'chunk_text': t})
     new_rows.append({'id': r['id'], 'relevant_docs': [int(c) for _, c in pk], 'relevant_chunks': chunks})
 st = pd.DataFrame(stats); st.to_parquet(out / f'{name}.query_stats.parquet', index=False)
-payload = ('[\n' + ',\n'.join(json.dumps(r, ensure_ascii=False) for r in new_rows) + '\n]\n').encode('utf-8')
 tmp = zpath.with_suffix('.zip.tmp')
-with lzma_dictionary(256), zipfile.ZipFile(tmp, 'w', compression=zipfile.ZIP_LZMA) as z:
-    info = zipfile.ZipInfo(f'{name}.json', date_time=DATE_TIME); info.compress_type = zipfile.ZIP_LZMA
-    with z.open(info, 'w', force_zip64=True) as f:
-        f.write(payload)
-size = tmp.stat().st_size
-rep = {'name': name, 'mode': mode, 'chunks_rule': 'n_c of P1 row' if NC else '1 per chosen doc', 'doc_vectors': str(vec), 'n_doc_vectors': len(ids), 'base': ZP, 'queries': len(new_rows),
+
+
+def build(N):
+    """JSON payload with every new-doc body cut to its first N chars (None = whole), and its ZIP size"""
+    def row(r):
+        return {**r, 'relevant_chunks': [{'doc_id': c['doc_id'], 'chunk_text': c['chunk_text'][:N] if c.get('_new') and N else c['chunk_text']}
+                                         for c in r['relevant_chunks']]}
+    payload = ('[\n' + ',\n'.join(json.dumps(row(r), ensure_ascii=False) for r in new_rows) + '\n]\n').encode('utf-8')
+    with lzma_dictionary(256), zipfile.ZipFile(tmp, 'w', compression=zipfile.ZIP_LZMA) as z:
+        info = zipfile.ZipInfo(f'{name}.json', date_time=DATE_TIME); info.compress_type = zipfile.ZIP_LZMA
+        with z.open(info, 'w', force_zip64=True) as f:
+            f.write(payload)
+    print(f'  N={N} json {len(payload)} zip {tmp.stat().st_size} {time.time() - t0:.0f}s', flush=True)
+    return payload, tmp.stat().st_size
+
+
+N, tries = None, []
+payload, size = build(None); tries.append((None, size))
+if size >= CEIL and NEW == 'body' and src['body']:
+    # largest N with ZIP < CEIL. ZIP size is taken as linear in the JSON bytes of the new-doc bodies: pick N whose JSON
+    # size the line through the last two measured points puts just under the ceiling (secant), measure, repeat; keep
+    # the largest N that fits, stop when it is within 0.5% of the ceiling or after 8 measurements.
+    newb = [c['chunk_text'] for r in new_rows for c in r['relevant_chunks'] if c.get('_new')]
+    nb_full = sum(len(t.encode('utf-8')) for t in newb)
+
+    def nbytes(n):                                      # UTF-8 bytes of all new bodies cut to n chars
+        return sum(len(t[:n].encode('utf-8')) for t in newb)
+
+    def n_for(target):                                  # largest n with nbytes(n) <= target (bisection, no compression)
+        lo, hi = 1, max(len(t) for t in newb)
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            lo, hi = (mid, hi) if nbytes(mid) <= target else (lo, mid - 1)
+        return lo
+    pts = [(nb_full, size)]; slope = size / len(payload); best = None
+    while len(tries) < 9:
+        x1, y1 = pts[-1]
+        target_nb = x1 - (y1 - CEIL * 0.997) / slope
+        n = n_for(max(target_nb, 0))
+        if any(t == n for t, _ in tries):
+            break
+        pl, sz = build(n); tries.append((n, sz)); pts.append((nbytes(n), sz))
+        if sz < CEIL and (best is None or n > best[0]):
+            best = (n, pl, sz)
+        (xa, ya), (xb, yb) = pts[-2], pts[-1]
+        slope = (yb - ya) / (xb - xa) if xb != xa and yb != ya else slope
+        if best and CEIL - best[2] < CEIL * 0.005:
+            break
+    if best:
+        N, payload, size = best
+        if tries[-1][0] != N:                               # leave the chosen N in tmp
+            payload, size = build(N)
+rep = {'name': name, 'mode': mode, 'new_doc_chunk': NEW, 'body_cut_chars': N, 'size_tries': tries, 'chunks_rule': 'n_c of P1 row' if NC else '1 per chosen doc', 'doc_vectors': str(vec), 'n_doc_vectors': len(ids), 'base': ZP, 'queries': len(new_rows),
        'zip_bytes': size, 'json_bytes': len(payload), 'json_sha256': hashlib.sha256(payload).hexdigest(), 'ceiling': CEIL,
-       'docs_total': int(st.K.sum()), 'chunks_total': sum(len(r['relevant_chunks']) for r in new_rows), 'chunk_source': src,
+       'docs_total': int(st.K.sum()), 'chunks_total': sum(len(r['relevant_chunks']) for r in new_rows),
+       'new_body_chars_mean': float(np.mean([len(c['chunk_text']) for r in new_rows for c in r['relevant_chunks'] if c.get('_new')] or [0])), 'chunk_source': src,
        'new_vs_p1_mean': float(st.new_vs_p1.mean()), 'new_vs_p1_quantiles': st.new_vs_p1.quantile([.1, .5, .9]).to_dict(),
        'zh_per_query': float(st.zh_new.mean()), 'vi_per_query': float(st.vi_new.mean()),
        'zh_per_query_p1': float(st.zh_p1.mean()), 'vi_per_query_p1': float(st.vi_p1.mean()),

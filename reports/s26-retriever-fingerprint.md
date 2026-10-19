@@ -7,7 +7,7 @@ en đã đóng: Vu báo EN-only-Q (top-20 Qwen) = 0 trên 24.000 doc. Nếu en v
 ## 0. Tóm tắt
 
 - **zh: retriever của BTC gần như chắc chắn là BGE-M3 dense (hoặc model rất giống) nhúng nguyên doc (doc_text: title một lần rồi body), cắt ở 512 token, với query tiếng Việt gốc.** Biến thể này đạt AUC −min-rank **0,924** (max-chunk t256 chỉ 0,833), AUC trong từng domain 0,91. AUC đạt đỉnh ở 512 rồi giảm ở 1024/2048; 512 là `max_length` mặc định của BGE-M3.
-- Query dịch sang tiếng Trung, BM25 zh, sparse và e5-small đều kém hơn. Qwen3-Embedding-4B **chưa đo**: GPU đang chạy job `run_vi2_score_launcher.py --command full-score --snapshot-tag s24-vi2` của session khác (từ 01:16 19/10); hai lần chạy chung GPU bị tràn VRAM, không ra kết quả sau 5,5 giờ, đã dừng để không làm chậm job đó.
+- Query dịch sang tiếng Trung, BM25 zh, sparse và e5-small đều kém hơn. Qwen3-Embedding-4B (NF4, doc_text 512, mẫu con 10k) chỉ đạt AUC −min-rank 0,757, thấp hơn hẳn BGE-M3 trên cùng mẫu (0,915) ⇒ không phải retriever của BTC.
 - Trần đo được gần 1: decile min-rank thấp nhất có 0/2.939 doc được giữ ⇒ BTC không lấp ngẫu nhiên; phần AUC còn thiếu (0,924 → 1) nhiều khả năng do khác bản extract text (BTC nhúng text của họ, mình nhúng text extract của mình).
 - **vi: không có dấu hiệu pool.** Trên 7 site chỉ nói về y tế, bài trong corpus không gần query hơn bài cùng site ngoài corpus (AUC 0,52). Riêng Vinmec ngược chiều (AUC 0,44): BTC đã loại bớt bài giống query (trang nguồn).
 - Đề xuất: probe P-A2 xếp hạng lại vi+zh theo BGE-M3 dense doc-level doc_text 512 (mục 5), để kiểm giả thuyết "gold sinh từ cùng retriever".
@@ -52,9 +52,9 @@ Nếu một phần doc kept được lấp ngẫu nhiên (không theo điểm), 
 | BGE-M3 dense title lặp + doc 1024 | 0,823 | 0,906 | 0,516 | 0,450 |
 | BGE-M3 dense title lặp + doc 512 | 0,825 | 0,913 | 0,528 | 0,462 |
 | **BGE-M3 dense doc_text nguyên 512** | **0,833** | **0,924** | **0,548** | **0,493** |
-| Qwen3-Embedding-4B (NF4) doc_text 512, query vi | chưa đo | chưa đo | | |
+| Qwen3-Embedding-4B (NF4) doc_text 512, query vi, mẫu con 10k* | 0,756 | 0,757 | 0,545 | |
 
-Qwen3-Embedding-4B: script `pool_fingerprint_qwen3.py --body-only --subsample 10000` (đủ 2.413 kept + 7.587 dropped ngẫu nhiên seed 42, in kèm mốc BGE-M3 doc_text 512 trên cùng tập) sẵn sàng chạy khi GPU rảnh.
+\* Mẫu con 10.000 doc (đủ 2.413 kept + 7.587 dropped ngẫu nhiên, seed 42) vì bản 4B 4-bit chạy chậm trên RTX 3050 (12.564 s cho 10k doc). Mốc BGE-M3 doc_text 512 trên đúng mẫu con: AUC best 0,828, AUC −min-rank 0,915, kept khi min-rank = 1 là 0,771 (mẫu nhỏ hơn nên min-rank không so trực tiếp với dòng 29k). Query Qwen3 theo prompt model-card "Instruct: Given a web search query, retrieve relevant passages that answer the query".
 
 Ghi chú: biến thể "per-query z-score" chỉ đổi AUC best (0,814), không đổi min-rank. Bản dịch zh do `qwen2.5:7b` (Ollama, temperature 0, seed 42) tạo; 23/1.200 bản còn sót chữ Việt.
 

@@ -10,7 +10,7 @@ en đã đóng: Vu báo EN-only-Q (top-20 Qwen) = 0 trên 24.000 doc. Nếu en v
 - Query dịch sang tiếng Trung, BM25 zh, sparse và e5-small đều kém hơn. Qwen3-Embedding-4B (NF4, doc_text 512, mẫu con 10k) chỉ đạt AUC −min-rank 0,757, thấp hơn hẳn BGE-M3 trên cùng mẫu (0,915) ⇒ không phải retriever của BTC.
 - Trần đo được gần 1: decile min-rank thấp nhất có 0/2.939 doc được giữ ⇒ BTC không lấp ngẫu nhiên; phần AUC còn thiếu (0,924 → 1) nhiều khả năng do khác bản extract text (BTC nhúng text của họ, mình nhúng text extract của mình).
 - **vi: không có dấu hiệu pool.** Trên 7 site chỉ nói về y tế, bài trong corpus không gần query hơn bài cùng site ngoài corpus (AUC 0,52). Riêng Vinmec ngược chiều (AUC 0,44): BTC đã loại bớt bài giống query (trang nguồn).
-- **P1-docrank (P-A2) LB 0,2937** (Chunk F2 0,2773 → 0,2978), nên thứ tự doc-level được dùng để chọn doc. P-A3 (top-K_q doc-level trên 125.605 doc) đã dựng, validate 0 lỗi, chưa nộp; P-A3r vượt trần, Vu quyết định để yên; P-A4 chờ nhúng toàn bộ 887k (mục 5c).
+- **P1-docrank (P-A2) LB 0,2937** (Chunk F2 0,2773 → 0,2978), nên thứ tự doc-level được dùng để chọn doc. P-A3 (top-K_q doc-level trên 125.605 doc) đã dựng, validate 0 lỗi, chưa nộp; P-A3r 109,6 MB vượt trần, dựng theo yêu cầu Vu; P-A4 chờ nhúng toàn bộ 887k (mục 5c).
 - Đề xuất: probe P-A2 xếp hạng lại vi+zh theo BGE-M3 dense doc-level doc_text 512 (mục 5), để kiểm giả thuyết "gold sinh từ cùng retriever".
 
 ## 1. Dữ liệu và phép đo
@@ -143,14 +143,14 @@ Thứ tự doc-level tương quan với P1 nhưng khác rõ: khoảng một nử
 | Tỷ lệ zh | 8,25% | 10,51% | 8,22% |
 | Chunk / query | 105,2 | 180,7 | 180,7 |
 | Nguồn chunk p1_row / p1_any / t256 | | 70.498 / 91.186 / 55.182 | 120.858 / 50.433 / 45.575 |
-| ZIP (B) | 80.706.521 (P1-docrank) | 86.264.388 | **109.611.284 > trần, chưa ghi** |
-| Validator | | 0 lỗi | chưa chạy |
+| ZIP (B) | 80.706.521 (P1-docrank) | 86.264.388 | **109.611.284 > trần** (Vu chấp nhận) |
+| Validator | | 0 lỗi | 0 lỗi ngoài `zip_over_ceiling` |
 
 Ghi chú bảng: cột P1-vi+10 đếm doc canonical của P1. zh/vi đếm theo `lang` canonical. Mốc ZIP của P1-vi+10 lấy từ P1-docrank (cùng doc, cùng chunk).
 
 **`P-A3.zip` (chưa nộp).** `out/runs/s26-gold-structure/pa3/P-A3.zip`: 86.264.388 B, SHA256 `19391ad99863ff7d658d8770c3c5ac73fbdfd9a605b3a29bf4ece13b2432516c`. JSON 1.015.704.479 B, SHA256 `542c1646399a18f6833a34daefa80ef97560b1e54f018134fa9a4d690f5eae61`. LZMA props `5d00000010`. Validator: 0 lỗi (161.684 cặp P1 + 55.182 substring canonical).
 
-**P-A3r vượt trần.** JSON 1.189.817.052 B, nén còn 109.611.284 B, vượt 7,0 MB so với 102.600.000. Nguyên nhân: RRF giữ nhiều doc của P1 hơn, nên nhiều chunk P1 dài hơn (chunk P1 trung bình 6.487 B, chunk t256 khoảng 1 KB). Vu quyết định để yên: không giảm dung lượng, không dựng P-A3r.
+**P-A3r vượt trần.** JSON 1.189.817.052 B, nén còn 109.611.284 B, vượt 7,0 MB so với 102.600.000. Nguyên nhân: RRF giữ nhiều doc của P1 hơn, nên nhiều chunk P1 dài hơn (chunk P1 trung bình 6.487 B, chunk t256 khoảng 1 KB). Vu quyết định không giảm dung lượng và vẫn dựng: `out/runs/s26-gold-structure/pa3/P-A3r.zip` 109.611.284 B, SHA256 `acb2513affcd41c83a37f58e8061a30aaeaebd536a8e5580fab5668296d0a140`; JSON SHA256 `0d3aa7e67c3d97bed44707cb31b24239d8266641c8271ddb709ca0244998b344` (đọc lại khớp log build). Validator: lỗi duy nhất là `zip_over_ceiling` (171.291 cặp P1 + 45.575 substring canonical). ZIP cũng lớn hơn 100 MiB (104.857.600 B); nếu giới hạn upload là 100 MiB thì có thể bị từ chối. Chưa nộp.
 
 **P-A4.** Nhúng toàn bộ 887.151 doc đang chạy (`full_embed.py`). Tái sử dụng 125.605 vector của pa2. Thứ tự nhúng: zh trước, sau đó vi theo host tamanhhospital, tiemchunglongchau, medlatec, vinmec, hellobacsi, rồi các host còn lại theo tỷ lệ doc nằm trong P1-vi+10 giảm dần. Lưu checkpoint mỗi 5.000 doc vào `out/runs/s26-gold-structure/full/full_emb/`. Khi nhúng xong sẽ dựng P-A4 bằng `pa3_build.py … full_doc_dense.npz P-A4 pa3`, cùng quy tắc chunk.
 

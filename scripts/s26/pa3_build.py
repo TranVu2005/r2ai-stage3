@@ -12,7 +12,12 @@ byte for byte; otherwise the canonical chunks_t256 chunk of that doc with the hi
 (canonical chunk vectors, BGE-M3 dense CLS, vectors.json alignment); docs with no vector chunk take their first chunk.
 With a 6th argument `nc`, only the first n_c chosen docs (variant order) get a chunk, n_c = len(relevant_chunks) of the
 same P1-vi+10 row, so the chunk count per query equals P1-vi+10 (same text rule, 1 chunk per doc).
-Usage: pa3_build.py <out_dir> <scratch_dir> <doc_vectors.npz> <name> {pa3|pa3r} [nc]
+Options after `nc`: `k=<x>` scales K_q (round(K_q*x)); `ncx=<x>` scales n_c (round(n_c*x), at most K_q);
+`ref=<zip>` reports the chosen canonical docs that are not in the same row of that ZIP (default pa3/P-A3-nc.zip).
+In `nc` mode the chunks go to the highest-ranked chosen docs that can carry one (P1 text or >=1 t256 chunk); a chosen
+doc with no chunk source (no chunks_t256 row, e.g. thin/empty text) stays in relevant_docs and its chunk goes to the
+next doc, so every row keeps its target chunk count when enough carriers exist.
+Usage: pa3_build.py <out_dir> <scratch_dir> <doc_vectors.npz> <name> {pa3|pa3r} [nc] [k=x] [ncx=x] [ref=zip]
 """
 import hashlib, json, os, sys, time, zipfile
 from pathlib import Path
@@ -24,7 +29,10 @@ from r2ai.compose.base_io import lzma_dictionary  # noqa: E402
 ZP = 'out/runs/reranker-trial/release/P1-vi+10.zip'; CEIL = 102_600_000; DATE_TIME = (2026, 10, 19, 0, 0, 0); RRF_K = 60
 CAN = 'data/canonical-20261018'
 out, S, vec, name, mode = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4], sys.argv[5]
-NC = len(sys.argv) > 6 and sys.argv[6] == 'nc'
+NC = 'nc' in sys.argv[6:]
+OPT = dict(a.split('=', 1) for a in sys.argv[6:] if '=' in a)
+KX, NCX = float(OPT.get('k', 1)), float(OPT.get('ncx', 1))
+REF = Path(OPT.get('ref', 'out/runs/s26-gold-structure/pa3/P-A3-nc.zip'))
 out.mkdir(parents=True, exist_ok=True); zpath = out / f'{name}.zip'
 if zpath.exists():
     raise SystemExit(f'{zpath} exists')
@@ -44,7 +52,15 @@ ch_doc, ch_has = ct['doc_id'].to_numpy(), ct['has_vector'].to_numpy()
 _, first = np.unique(ch_doc, return_index=True)
 grp = dict(zip(ch_doc[first].tolist(), ct['doc_ids'].take(first).to_pylist())); del ct
 cid2doc = {int(a): int(d) for d, ids in grp.items() for a in ids}
-doc_lang = pq.read_table(f'{CAN}/docs.parquet', columns=['doc_id', 'lang']).to_pandas().set_index('doc_id').lang
+dq = pq.read_table(f'{CAN}/docs.parquet', columns=['doc_id', 'lang', 'quality']).to_pandas().set_index('doc_id')
+doc_lang, thin = dq.lang, set(dq.index[dq.quality == 'thin'].tolist()); del dq
+ref = {}                                                # query id -> canonical docs of the reference ZIP
+if REF.exists():
+    with zipfile.ZipFile(REF) as zr, zr.open(zr.namelist()[0]) as f:
+        for line in f:
+            line = line.strip().rstrip(b',')
+            if line.startswith(b'{'):
+                rr = json.loads(line); ref[rr['id']] = {cid2doc.get(c, -c) for c in rr['relevant_docs']}
 p1_any = {}                                             # canonical doc -> corpus ID P1 used for it in any row
 for r in rows:
     for cid in r['relevant_docs']:
@@ -65,7 +81,7 @@ def corpus_id(d, row_ids):
 E = np.load(vec); ids = E['doc_id'].astype(np.int64); Dh = E['dense']
 pos = {int(d): i for i, d in enumerate(ids)}
 Q = np.load(S / 'q_dense.npy').astype(np.float32); qpos = {int(q): i for i, q in enumerate(np.load(S / 'q_ids.npy'))}
-M = 3 * max(len(r['relevant_docs']) for r in rows)      # per query: doc-level top-M (index, score), blockwise fp32
+M = 3 * max(round(len(r['relevant_docs']) * KX) for r in rows)      # per query: doc-level top-M (index, score), blockwise fp32
 top_i = np.zeros((len(Q), 0), np.int64); top_s = np.zeros((len(Q), 0), np.float32)
 for b in range(0, len(ids), 50_000):
     sc = Q @ Dh[b:b + 50_000].astype(np.float32).T
@@ -79,7 +95,7 @@ print(f'loaded {len(rows)} rows, {len(ids)} doc vectors, top-{M} done {time.time
 picked = []                                             # per row: list of (canonical doc, corpus ID)
 stats = []
 for r in rows:
-    qi, K = qpos[r['id']], len(r['relevant_docs'])
+    qi, K = qpos[r['id']], round(len(r['relevant_docs']) * KX)
     row_ids, order_p1 = {}, []
     for cid in r['relevant_docs']:
         d = cid2doc.get(cid)
@@ -99,14 +115,26 @@ for r in rows:
     p1set = set(order_p1)
     stats.append({'query_id': r['id'], 'K': K, 'p1_canon': len(order_p1), 'new_vs_p1': sum(d not in p1set for d in chosen),
                   'zh_new': sum(doc_lang.get(d) == 'zh' for d in chosen), 'vi_new': sum(doc_lang.get(d) == 'vi' for d in chosen),
-                  'zh_p1': sum(doc_lang.get(d) == 'zh' for d in order_p1), 'vi_p1': sum(doc_lang.get(d) == 'vi' for d in order_p1)})
+                  'zh_p1': sum(doc_lang.get(d) == 'zh' for d in order_p1), 'vi_p1': sum(doc_lang.get(d) == 'vi' for d in order_p1),
+                  'new_vs_ref': sum(d not in ref[r['id']] for d in chosen) if ref else None,
+                  'no_chunk_docs': sum(d not in grp for d in chosen), 'thin_docs': sum(d in thin for d in chosen)})
 print(f'docs chosen {time.time() - t0:.0f}s', flush=True)
 
 # chunk texts: P1 text (this row, then any row) else best t256 chunk of the canonical doc by dense cosine
+
+
+def carriers(r, pk):
+    """chosen docs that get a chunk: all of them, or (nc) the first n_c*NCX able to carry one, in variant order"""
+    if not NC:
+        return pk
+    own, n = {c['doc_id'] for c in r['relevant_chunks']}, min(round(len(r['relevant_chunks']) * NCX), len(pk))
+    return [x for x in pk if x[1] in own or x[1] in gtext or x[0] in grp][:n]
+
+
 need = {}                                               # canonical doc -> list of row indexes needing a t256 chunk
 for k, (r, pk) in enumerate(zip(rows, picked)):
     own = {c['doc_id']: c['chunk_text'] for c in r['relevant_chunks']}
-    for d, cid in (pk[:len(r['relevant_chunks'])] if NC else pk):
+    for d, cid in carriers(r, pk):
         if cid not in own and cid not in gtext:
             need.setdefault(d, []).append(k)
 vrow_all = np.where(ch_has, np.cumsum(ch_has) - 1, -1)
@@ -140,7 +168,7 @@ new_rows, src = [], {'p1_row': 0, 'p1_any': 0, 't256': 0, 'none': 0}
 for k, (r, pk) in enumerate(zip(rows, picked)):
     own = {c['doc_id']: c['chunk_text'] for c in r['relevant_chunks']}
     chunks = []
-    for d, cid in (pk[:len(r['relevant_chunks'])] if NC else pk):
+    for d, cid in carriers(r, pk):
         if cid in own:
             t = own[cid]; src['p1_row'] += 1
         elif cid in gtext:
@@ -165,7 +193,12 @@ rep = {'name': name, 'mode': mode, 'chunks_rule': 'n_c of P1 row' if NC else '1 
        'new_vs_p1_mean': float(st.new_vs_p1.mean()), 'new_vs_p1_quantiles': st.new_vs_p1.quantile([.1, .5, .9]).to_dict(),
        'zh_per_query': float(st.zh_new.mean()), 'vi_per_query': float(st.vi_new.mean()),
        'zh_per_query_p1': float(st.zh_p1.mean()), 'vi_per_query_p1': float(st.vi_p1.mean()),
-       'zh_share': float(st.zh_new.sum() / st.K.sum()), 'zh_share_p1': float(st.zh_p1.sum() / (st.zh_p1 + st.vi_p1).sum())}
+       'zh_share': float(st.zh_new.sum() / st.K.sum()), 'zh_share_p1': float(st.zh_p1.sum() / (st.zh_p1 + st.vi_p1).sum()),
+       'k_mult': KX, 'nc_mult': NCX, 'ref': str(REF) if ref else None,
+       'new_vs_ref_mean': float(st.new_vs_ref.mean()) if ref else None,
+       'new_vs_ref_quantiles': st.new_vs_ref.quantile([.1, .5, .9]).to_dict() if ref else None,
+       'no_chunk_docs_total': int(st.no_chunk_docs.sum()), 'thin_docs_total': int(st.thin_docs.sum()),
+       'chunk_target': int(sum(min(round(len(r['relevant_chunks']) * NCX), K) for r, K in zip(rows, st.K))) if NC else None}
 if size >= CEIL:
     (out / f'{name}.build.json').write_text(json.dumps(rep, indent=1), encoding='utf-8')
     raise SystemExit(f'ZIP {size} >= ceiling {CEIL}; not published ({tmp})\n' + json.dumps(rep, indent=1))

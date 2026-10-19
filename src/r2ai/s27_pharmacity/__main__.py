@@ -13,6 +13,9 @@ from pathlib import Path
 from .pipeline import (BATCH, USER_AGENT, Roots, atomic_json, chunk_batch, embed_batch, extract_batch,
                        crawl_halt_report, current_crawl_status, map_batch, sample_and_crawl,
                        title_match_report, verify_batch)
+from .handoff import handoff_lot
+from .cc_backfill import cc_backfill_status, run_cc_backfill
+from .live_resume import live_resume_status, run_live_resume
 
 
 def _manifest(roots: Roots) -> dict:
@@ -68,9 +71,12 @@ def _status(roots: Roots) -> dict:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('step', choices=['map', 'sample', 'crawl', 'halt-report', 'match-report', 'extract', 'chunk', 'verify', 'embed', 'manifest', 'status'])
+    ap.add_argument('step', choices=['map', 'sample', 'crawl', 'halt-report', 'match-report', 'extract', 'chunk', 'verify', 'embed', 'embed-lot', 'handoff', 'cc-backfill', 'cc-status', 'resume-site', 'live-status', 'manifest', 'status'])
     ap.add_argument('--corpus', type=Path, help='corpus_v2_ids.parquet; defaults to R2AI_DATA_DIR/corpus_v2_ids.parquet')
     ap.add_argument('--progress-every', type=int, default=100)
+    ap.add_argument('--limit', type=int, default=1000, help='new docs in this incremental handoff lot (max 1000)')
+    ap.add_argument('--workers', type=int, default=5, help='Common Crawl WARC workers (max 5)')
+    ap.add_argument('--lot-id', help='S15 lot identifier for isolated doc-level vector handoff')
     ap.add_argument('--resume-after-block', action='store_true', help='explicitly retry a saved 403/429/CAPTCHA checkpoint')
     a = ap.parse_args(argv)
     roots = Roots()
@@ -92,6 +98,21 @@ def main(argv=None) -> int:
         result = verify_batch(roots)
     elif a.step == 'embed':
         result = embed_batch(roots)
+    elif a.step == 'embed-lot':
+        if not a.lot_id:
+            ap.error('embed-lot requires --lot-id lot-NNNN')
+        from .pipeline import embed_handoff_lot
+        result = embed_handoff_lot(roots, a.lot_id)
+    elif a.step == 'handoff':
+        result = handoff_lot(roots, limit=a.limit)
+    elif a.step == 'cc-backfill':
+        result = run_cc_backfill(roots, workers=a.workers)
+    elif a.step == 'cc-status':
+        result = cc_backfill_status(roots)
+    elif a.step == 'resume-site':
+        result = run_live_resume(roots)
+    elif a.step == 'live-status':
+        result = live_resume_status(roots)
     elif a.step == 'manifest':
         result = _manifest(roots)
     else:

@@ -34,7 +34,8 @@ TARGET_CHUNK_TOKENS = 256
 S26_DOC_COUNT = 887_151
 EXPECTED_BETA_URLS = 5_333
 EXPECTED_MAPPING_ROWS = 5_337
-CRAWL_TERMINAL = frozenset(('ok', 'low_title_match', 'soft404_or_nonarticle', 'redirect_slug_mismatch', 'unparseable'))
+CRAWL_TERMINAL = frozenset(('ok', 'low_title_match', 'soft404_or_nonarticle', 'redirect_slug_mismatch', 'unparseable',
+                            'unknown', 'cc_dead'))
 S26_FULL_VECTOR_CANDIDATES = (
     run_dir('s26-gold-structure') / 'full' / 'full_doc_dense.npz',
     run_dir('s26-gold-structure') / 'full_doc_dense.npz',
@@ -289,17 +290,54 @@ def _write_raw(roots: Roots, doc_id: int, content: bytes) -> tuple[str, str]:
     return str(path), hashlib.sha256(content).hexdigest()
 
 
-def _request_once(session, c, url: str, timeout: float = 40):
+def _request_delay(*, elapsed: float, minimum: float, jitter_s: float, jitter_value: float) -> float:
+    delay = max(0.0, minimum - elapsed)
+    if delay > 0:
+        delay += max(0.0, jitter_s) * min(1.0, max(0.0, jitter_value))
+    return delay
+
+
+class RequestObserverError(RuntimeError):
+    """Stop safely when the durable per-request audit marker cannot be written."""
+
+
+def _request_once(session, c, url: str, timeout: float = 40, *, min_interval: float = MIN_REQUEST_INTERVAL,
+                  jitter_s: float = 0.0, rng_value: float = 0.0, request_observer=None):
     last = c.execute("SELECT value FROM meta WHERE key='last_request_wall'").fetchone()
+    previous_started = float(last[0]) if last else None
     if last:
-        wait = MIN_REQUEST_INTERVAL - (time.time() - float(last[0]))
+        wait = _request_delay(elapsed=time.time() - previous_started, minimum=min_interval,
+                              jitter_s=jitter_s, jitter_value=rng_value)
         if wait > 0:
             time.sleep(wait)
     started = time.time()
     c.execute("INSERT INTO meta(key,value) VALUES('last_request_wall',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
               (str(started),))
     c.commit()
-    return session.get(url, allow_redirects=False, timeout=timeout), started
+    gap = started - previous_started if previous_started is not None else None
+    if request_observer:
+        try:
+            request_observer({'phase': 'start', 'url': url,
+                              'requested_at_utc': datetime.fromtimestamp(started, timezone.utc).isoformat(
+                                  timespec='milliseconds').replace('+00:00', 'Z'), 'gap_from_previous_start_s': gap})
+        except Exception as exc:
+            raise RequestObserverError(f'cannot persist request start marker: {exc}') from exc
+    try:
+        response = session.get(url, allow_redirects=False, timeout=timeout)
+    except Exception as exc:
+        if request_observer:
+            try:
+                request_observer({'phase': 'finish', 'url': url, 'http_status': None,
+                                  'error': f'{type(exc).__name__}: {exc}'})
+            except Exception as observer_exc:
+                raise RequestObserverError(f'cannot persist request result marker: {observer_exc}') from observer_exc
+        raise
+    if request_observer:
+        try:
+            request_observer({'phase': 'finish', 'url': url, 'http_status': int(response.status_code)})
+        except Exception as exc:
+            raise RequestObserverError(f'cannot persist request result marker: {exc}') from exc
+    return response, started
 
 
 def _challenge(raw: bytes, status: int) -> tuple[bool, str]:
@@ -312,14 +350,22 @@ def _challenge(raw: bytes, status: int) -> tuple[bool, str]:
     return kind in ('bot_challenge', 'cookie_challenge'), reason
 
 
-def _fetch_target(roots: Roots, c: sqlite3.Connection, row: dict, session) -> dict:
+def _fetch_target(roots: Roots, c: sqlite3.Connection, row: dict, session, *,
+                  min_request_interval: float = MIN_REQUEST_INTERVAL, jitter_s: float = 0.0,
+                  rng=None, max_hops: int = 6, request_observer=None) -> dict:
+    if not 1 <= int(max_hops) <= 6:
+        raise ValueError('max_hops must be in 1..6')
     doc_id, original, target, expected_slug = row['doc_id'], row['original_url'], row['mapped_url'], row['slug']
     current, final_url, status, raw, started = target, target, None, b'', None
     redirect_mismatch = False
     redirect_reason = 'redirect_target_has_different_slug'
-    for _hop in range(6):
+    for _hop in range(int(max_hops)):
         try:
-            response, started = _request_once(session, c, current)
+            response, started = _request_once(
+                session, c, current, min_interval=min_request_interval, jitter_s=jitter_s,
+                rng_value=(rng.random() if rng is not None else 0.0), request_observer=request_observer)
+        except RequestObserverError:
+            raise
         except Exception as exc:  # noqa: BLE001 - saved as resumable network failure
             c.execute('''INSERT INTO pages(doc_id,original_url,mapped_url,status,final_url,attempts,reason,updated_at)
                          VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(doc_id) DO UPDATE SET status=excluded.status,
@@ -404,7 +450,8 @@ def _fetch_target(roots: Roots, c: sqlite3.Connection, row: dict, session) -> di
                score['terms'], len(page.get('body', '')), fetched_at, raw_path, raw_sha, 1, reason, time.time()))
     c.commit()
     return {'doc_id': doc_id, 'status': state, 'http_status': status, 'title_match_ratio': score['ratio'],
-            'body_chars': len(page.get('body', '')), 'reason': reason}
+            'body_chars': len(page.get('body', '')), 'selector_found': bool(page.get('selector_found')),
+            'title': page.get('title', ''), 'final_url': final_url, 'reason': reason}
 
 
 def _load_mapping(roots: Roots) -> list[dict]:
@@ -466,6 +513,14 @@ def require_crawl_complete(roots: Roots) -> dict:
     if not coverage['complete']:
         raise RuntimeError(f"S27 crawl is incomplete; downstream step blocked: {coverage}")
     return coverage
+
+
+def _next_handoff_ids(eligible_ids, previous_ids, *, limit: int) -> list[int]:
+    """Choose a stable, duplicate-free incremental handoff lot (later lots are capped at 1,000 docs)."""
+    if not 1 <= int(limit) <= 1000:
+        raise ValueError('handoff lot limit must be in 1..1000')
+    previous = {int(x) for x in previous_ids}
+    return sorted({int(x) for x in eligible_ids} - previous)[:int(limit)]
 
 
 def _refresh_title_scores(c: sqlite3.Connection, mapping: list[dict]) -> int:
@@ -931,10 +986,20 @@ def s26_embedding_gate() -> dict:
                     continue
                 with zf.open('dense.npy') as dense_file:
                     version = npformat.read_magic(dense_file)
-                    shape, _, dtype = npformat._read_array_header(dense_file, version)
+                    if version == (1, 0):
+                        shape, _, dtype = npformat.read_array_header_1_0(dense_file)
+                    elif version == (2, 0):
+                        shape, _, dtype = npformat.read_array_header_2_0(dense_file)
+                    else:
+                        raise ValueError(f'unsupported dense.npy header version: {version}')
                 with zf.open('doc_id.npy') as id_file:
                     version = npformat.read_magic(id_file)
-                    id_shape, _, id_dtype = npformat._read_array_header(id_file, version)
+                    if version == (1, 0):
+                        id_shape, _, id_dtype = npformat.read_array_header_1_0(id_file)
+                    elif version == (2, 0):
+                        id_shape, _, id_dtype = npformat.read_array_header_2_0(id_file)
+                    else:
+                        raise ValueError(f'unsupported doc_id.npy header version: {version}')
                     ids = np.frombuffer(id_file.read(), dtype=id_dtype)
             if (shape == (S26_DOC_COUNT, 1024) and np.dtype(dtype) == np.dtype(np.float16)
                     and id_shape == (S26_DOC_COUNT,) and np.dtype(id_dtype) == np.dtype(np.int64)
@@ -1016,3 +1081,115 @@ def embed_batch(roots: Roots) -> dict:
                'doc_text_prefix_chars': 4096, 's26_gate': gate, 'vector_file': str(out)}
     atomic_json(roots, roots.reports / 'embed.json', summary)
     return summary
+
+
+def embed_handoff_lot(roots: Roots, lot_id: str) -> dict:
+    """Create an isolated BGE-M3 doc-level vector handoff for one verified S15 lot."""
+    roots.preflight()
+    gate = s26_embedding_gate()
+    if not gate.get('complete'):
+        return {'batch': BATCH, 'lot_id': lot_id, 'status': 'waiting_for_s26', 's26_gate': gate,
+                'shared_index_written': False}
+    if not re.fullmatch(r'lot-[0-9]{4,}', str(lot_id)):
+        raise ValueError(f'invalid S27 handoff lot ID: {lot_id!r}')
+    lot_root = roots.guard(roots.root / 'handoff' / BATCH / 'lots' / lot_id)
+    lot_manifest_path = roots.guard(lot_root / 'lot_manifest.json')
+    docs_path = roots.guard(lot_root / 'docs' / 'docs.parquet')
+    if not lot_manifest_path.is_file() or not docs_path.is_file():
+        raise FileNotFoundError(f'S15 lot documents and manifest are required: {lot_id}')
+    lot_manifest = json.loads(lot_manifest_path.read_text(encoding='utf-8'))
+    if lot_manifest.get('batch') != BATCH or lot_manifest.get('contract') != 'S15' or lot_manifest.get('lot_id') != lot_id:
+        raise ValueError(f'invalid S15 lot manifest: {lot_manifest_path}')
+    rows = pq.read_table(docs_path).to_pylist()
+    doc_rows = _document_level_rows(rows)
+    ids = np.asarray([row['doc_id'] for row in doc_rows], dtype=np.int64)
+    expected_ids = sorted(int(doc_id) for doc_id in lot_manifest.get('doc_ids', []))
+    if not len(ids) or ids.tolist() != expected_ids or len(ids) != len(set(ids.tolist())):
+        raise ValueError(f'S15 lot doc_text IDs differ from its manifest: {lot_id}')
+    texts = [row['doc_text'][:512 * 8] for row in doc_rows]
+    lot_sha = _sha256_file(lot_manifest_path)
+    docs_sha = _sha256_file(docs_path)
+    full_input_sha, config_sha = _embedding_cache_hashes(ids, texts)
+    out_dir = roots.guard(roots.vectors / 'handoff' / lot_id)
+    blocks_dir = roots.guard(out_dir / 'blocks')
+    blocks_dir.mkdir(parents=True, exist_ok=True)
+    dense_parts = []
+    encoder = None
+    started = time.time()
+    for block_start in range(0, len(ids), 5000):
+        block_ids = ids[block_start:block_start + 5000]
+        block_texts = texts[block_start:block_start + len(block_ids)]
+        input_sha, block_config_sha = _embedding_cache_hashes(block_ids, block_texts)
+        part = roots.guard(blocks_dir / f'{block_start // 5000:04d}.npz')
+        dense = None
+        if part.is_file():
+            try:
+                with np.load(part, allow_pickle=False) as cached:
+                    if _embedding_cache_matches(cached, block_ids, input_sha, block_config_sha):
+                        dense = cached['dense'].copy()
+            except (OSError, ValueError, EOFError):
+                dense = None
+        if dense is None:
+            if encoder is None:
+                from r2ai.index.bge_m3 import M3Encoder
+                encoder = M3Encoder(max_len=512)
+            order = np.argsort([len(text) for text in block_texts], kind='stable')
+            dense = np.zeros((len(block_ids), 1024), dtype=np.float16)
+            i = 0
+            while i < len(order):
+                size = 64 if len(block_texts[order[i]]) < 600 else 32 if len(block_texts[order[i]]) < 1500 else 16
+                selected = order[i:i + size]
+                dense[selected] = encoder.encode_batch([block_texts[j] for j in selected])[0]
+                i += size
+            tmp_part = roots.guard(part.with_name(part.stem + '.partial.npz'))
+            np.savez(tmp_part, doc_id=block_ids, dense=dense, input_sha256=np.asarray(input_sha),
+                     config_sha256=np.asarray(block_config_sha))
+            os.replace(tmp_part, part)
+        if dense.shape != (len(block_ids), 1024) or dense.dtype != np.dtype(np.float16) or not np.isfinite(dense).all():
+            raise ValueError(f'S27 vector block failed shape/dtype/finiteness checks: {part}')
+        dense_parts.append(dense)
+
+    all_dense = np.concatenate(dense_parts, axis=0)
+    if all_dense.shape != (len(ids), 1024) or not np.isfinite(all_dense).all():
+        raise ValueError(f'S27 lot dense vector output is invalid: {lot_id}')
+    vector_path = roots.guard(out_dir / 'dense_doc_level.npz')
+    tmp_vector = roots.guard(out_dir / 'dense_doc_level.partial.npz')
+    out_dir.mkdir(parents=True, exist_ok=True)
+    np.savez(tmp_vector, doc_id=ids, dense=all_dense)
+    os.replace(tmp_vector, vector_path)
+    vector_manifest = {
+        'batch': BATCH, 'contract': 'S26-P-A4-vector-handoff', 'lot_id': lot_id,
+        'created_at_utc': datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z'),
+        'docs': len(ids), 'doc_ids': ids.tolist(), 'input': 'doc_text (S15 doc_layout)', 'input_prefix_chars': 4096,
+        'encoder': 'r2ai.index.bge_m3.M3Encoder', 'model': 'BAAI/bge-m3', 'max_len': 512,
+        'dense': 'L2-normalized-CLS', 'dense_shape': list(all_dense.shape), 'dtype': str(all_dense.dtype),
+        'input_sha256': full_input_sha, 'config_sha256': config_sha,
+        's15_lot_manifest_sha256': lot_sha, 's15_docs_sha256': docs_sha,
+        's26_gate': gate, 'vector_file': str(vector_path), 'vector_sha256': _sha256_file(vector_path),
+        'elapsed_seconds': round(time.time() - started, 2), 'shared_index_written': False,
+    }
+    vector_manifest_path = roots.guard(out_dir / 'vector_manifest.json')
+    atomic_json(roots, vector_manifest_path, vector_manifest)
+
+    handoff_root = roots.guard(roots.vectors / 'handoff')
+    lot_manifests = []
+    seen_ids = set()
+    for path in sorted(handoff_root.glob('lot-*/vector_manifest.json')):
+        saved = json.loads(roots.guard(path).read_text(encoding='utf-8'))
+        saved_ids = [int(doc_id) for doc_id in saved.get('doc_ids', [])]
+        if seen_ids.intersection(saved_ids):
+            raise ValueError('duplicate doc_id across S27 vector handoff lots')
+        seen_ids.update(saved_ids)
+        lot_manifests.append({'lot_id': saved['lot_id'], 'docs': len(saved_ids),
+                              'vector_file': saved['vector_file'], 'vector_sha256': saved['vector_sha256'],
+                              'vector_manifest': str(path)})
+    handoff_manifest = {'batch': BATCH, 'contract': 'S26-P-A4-vector-handoff',
+                        'updated_at_utc': datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z'),
+                        'lots': lot_manifests, 'docs': len(seen_ids), 's26_gate': gate,
+                        'shared_index_written': False}
+    atomic_json(roots, roots.guard(handoff_root / 'manifest.json'), handoff_manifest)
+    return {'batch': BATCH, 'lot_id': lot_id, 'status': 'complete', 'docs': len(ids),
+            'dense_shape': list(all_dense.shape), 'dtype': str(all_dense.dtype),
+            'vector_file': str(vector_path), 'vector_sha256': vector_manifest['vector_sha256'],
+            'vector_manifest': str(vector_manifest_path), 'elapsed_seconds': vector_manifest['elapsed_seconds'],
+            'shared_index_written': False}

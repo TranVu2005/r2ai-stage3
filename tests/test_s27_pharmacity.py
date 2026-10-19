@@ -1,4 +1,6 @@
 import json
+import struct
+import zipfile
 
 import numpy as np
 import pyarrow as pa
@@ -7,6 +9,7 @@ import pyarrow.parquet as pq
 from r2ai.s27_pharmacity.pipeline import (
     MAPPING_SCHEMA,
     Roots,
+    embed_handoff_lot,
     allowed_redirect_url,
     _challenge,
     _embedding_cache_hashes,
@@ -17,6 +20,7 @@ from r2ai.s27_pharmacity.pipeline import (
     parse_beta_slug,
     selector_document,
     _s26_completion_marker_ok,
+    s26_embedding_gate,
     title_match,
     verification_is_fresh,
     verify_document_ids,
@@ -78,6 +82,86 @@ def test_embedding_gates_require_fresh_verification_and_s26_done_marker():
     assert not verification_is_fresh({'complete': True, 'artifacts_sha256': {'chunks': 'old'}}, hashes)
     assert not _s26_completion_marker_ok('block 153 done soon')
     assert _s26_completion_marker_ok('block 153 done\ndone 887151')
+
+
+def test_s26_gate_reads_public_npy_headers_and_verifies_ids(tmp_path, monkeypatch):
+    import r2ai.s27_pharmacity.pipeline as pipeline
+
+    count = pipeline.S26_DOC_COUNT
+
+    def npy_header(dtype, shape, data=b''):
+        value = repr({'descr': np.dtype(dtype).str, 'fortran_order': False, 'shape': shape}).encode('latin1')
+        value += b' ' * ((16 - ((10 + len(value) + 1) % 16)) % 16) + b'\n'
+        return b'\x93NUMPY\x01\x00' + struct.pack('<H', len(value)) + value + data
+
+    vector = tmp_path / 'full_doc_dense.npz'
+    ids = np.arange(count, dtype=np.int64)
+    with zipfile.ZipFile(vector, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('dense.npy', npy_header(np.float16, (count, 1024)))
+        archive.writestr('doc_id.npy', npy_header(np.int64, (count,), ids.tobytes()))
+    log = tmp_path / 'embed.log'
+    log.write_text('block 153 complete\ndone 887151\n', encoding='utf-8')
+    monkeypatch.setattr(pipeline, 'S26_FULL_VECTOR_CANDIDATES', (vector,))
+
+    result = s26_embedding_gate()
+    assert result['complete'] is True
+    assert result['docs'] == count
+    assert result['dense_shape'] == [count, 1024]
+
+
+def test_handoff_lot_embedding_stays_closed_until_s26_done(tmp_path, monkeypatch):
+    import r2ai.s27_pharmacity.pipeline as pipeline
+
+    roots = Roots(root=tmp_path / 'batch')
+    monkeypatch.setattr(pipeline, 's26_embedding_gate', lambda: {'complete': False, 'reason': 'still-running'})
+    result = embed_handoff_lot(roots, 'lot-0001')
+    assert result['status'] == 'waiting_for_s26'
+    assert not (roots.vectors / 'handoff' / 'lot-0001').exists()
+
+
+def test_handoff_lot_embedding_uses_s26_bge_m3_settings(tmp_path, monkeypatch):
+    import hashlib
+    import r2ai.index.bge_m3 as bge_m3
+    import r2ai.s27_pharmacity.pipeline as pipeline
+    from vicrawl.extract_pipeline import SCHEMA
+
+    roots = Roots(root=tmp_path / 'batch')
+    lot = roots.root / 'handoff' / 'cc-s27-pharmacity' / 'lots' / 'lot-0001'
+    docs_dir = lot / 'docs'
+    docs_dir.mkdir(parents=True)
+    body = 'Nội dung bài viết về sức khỏe và cách chăm sóc phù hợp. ' * 35
+    row = {'doc_ids': [101], 'url': 'https://www.pharmacity.vn/a.htm', 'final_url': 'https://www.pharmacity.vn/a.htm',
+           'domain': 'pharmacity.vn', 'title': 'Bài viết mẫu', 'description': '', 'question': '', 'answer': '',
+           'body': body, 'paragraphs': [body], 'lang': 'vi', 'n_tokens_bge_m3': 100,
+           'text_sha1': hashlib.sha1(body.encode()).hexdigest(), 'fetched_at': 1.0,
+           'url_norm': 'https://www.pharmacity.vn/a.htm', 'status': 'ok', 'extractor': '#pmc-content-blog-detail',
+           'headings': []}
+    pq.write_table(pa.Table.from_pylist([row], schema=SCHEMA), docs_dir / 'docs.parquet')
+    (lot / 'lot_manifest.json').write_text(json.dumps({'batch': 'cc-s27-pharmacity', 'contract': 'S15',
+        'lot_id': 'lot-0001', 'doc_ids': [101]}), encoding='utf-8')
+    monkeypatch.setattr(pipeline, 's26_embedding_gate', lambda: {'complete': True, 'docs': 887151,
+        'dense_shape': [887151, 1024], 'completion_marker': 'done 887151'})
+    seen = {}
+
+    class FakeEncoder:
+        def __init__(self, max_len):
+            seen['max_len'] = max_len
+
+        def encode_batch(self, texts):
+            seen['texts'] = texts
+            dense = np.zeros((len(texts), 1024), dtype=np.float16)
+            dense[:, 0] = 1
+            return dense, []
+
+    monkeypatch.setattr(bge_m3, 'M3Encoder', FakeEncoder)
+    result = embed_handoff_lot(roots, 'lot-0001')
+    with np.load(result['vector_file'], allow_pickle=False) as vectors:
+        assert vectors['doc_id'].tolist() == [101]
+        assert vectors['dense'].shape == (1, 1024)
+        assert vectors['dense'].dtype == np.dtype(np.float16)
+    assert seen['max_len'] == 512
+    assert 'Bài viết mẫu' in seen['texts'][0]
+    assert result['shared_index_written'] is False
 
 
 def test_embedding_block_cache_is_bound_to_ordered_text_and_encoder_config(tmp_path):

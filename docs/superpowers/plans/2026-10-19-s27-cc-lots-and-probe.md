@@ -20,6 +20,7 @@ Recover usable text for the 5,182 pending mapped URLs from the latest 13 Common 
 2. Add lot-scoped docs, provenance, chunks, hashes, and manifest without changing S15 schemas or writing a shared index. Export the current 146 accepted docs and verify counts and file integrity.
 3. Add resumable CC index discovery/fetch/extraction, using the repo's CC parquet/WARC helpers. Match WARC target URI exactly and through `vicrawl.urlnorm.normalize_url`; select an accepted capture; classify (a), (b), and dead. Test with fixtures/mocks; run the real index scan and Range fetch only for mapped corpus URLs.
 4. Add a persisted cooldown/probe gate and ≥5-second jittered live-resume loop. Test time gating, no retry of doc 317850, one-probe behavior, and permanent challenge halt. Implementation is ready; execute only after 22:55:05 UTC+7, and stop on any challenge.
+   If a later challenge/block halts crawling, flush any accepted remainder below 1,000 docs as the final S15 lot before returning.
 5. Update `docs/PROGRESS.md` after each completed step. Run focused S27 tests and output verification. Stage an allowlist only, commit on `feat/s27-pharmacity`, and push.
 
 ## Acceptance evidence

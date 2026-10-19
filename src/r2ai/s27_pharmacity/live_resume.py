@@ -308,6 +308,13 @@ def run_live_resume(roots: P.Roots, *, now: datetime | None = None) -> dict:
                 page_status = saved[0] if saved else None
                 state = 'halted_challenge' if page_status == 'halted_captcha' else (
                     'halted_block' if page_status == 'halted_block' else 'stopped_error')
+                if state in ('halted_challenge', 'halted_block'):
+                    try:
+                        final_lots = _handoff_pending(roots, final=True)
+                        if final_lots:
+                            report.setdefault('handoff_lots', []).extend(final_lots)
+                    except Exception as handoff_exc:  # preserve the permanent stop even if a lot needs manual recovery
+                        report['handoff_flush_error'] = f'{type(handoff_exc).__name__}: {handoff_exc}'
                 report.update(status=state, stop_reason=f'{type(exc).__name__}: {exc}', page_status=page_status,
                               stopped_at_utc=datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z'))
                 _save(roots, report_path, report)

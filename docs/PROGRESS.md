@@ -1,6 +1,6 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-19 22:28 (UTC+7)
+- Cập nhật: 2026-10-19 22:33 (UTC+7)
 - Model thực hiện: GPT-6 (Codex)
 - Commit HEAD đã kiểm trước cập nhật này: `cbd55e49bc74d203436b4f4830578352c896fe0b`, nhánh `feat/s27-pharmacity` (tách từ `feat/s26-gold-structure`)
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
@@ -263,6 +263,8 @@ Cả hai: doc/query 136,48, 0 doc thêm do bảo vệ, chunk CC/query 9,34 (h1) 
 
 ## 6. Lệch so với `R2AI_STAGE3_CONTEXT.md`
 
+Cập nhật 2026-10-19 22:33 (UTC+7), GPT-6 (Codex, S27 Pharmacity): harden luồng resume—nếu challenge/block xuất hiện sau probe trong lúc crawl, xuất ngay phần docs ok còn dưới 1.000 thành lô cuối và thử tạo vector handoff khi S26 gate đạt; lỗi flush được ghi riêng nhưng không đổi trạng thái dừng vĩnh viễn. Test bổ sung xác nhận flush `[True]` ở challenge và không gửi request tiếp. Focused S27: **37 pass**. Parent HEAD kiểm trước commit: `4cb9bf289e92174e3965b9ef69e18c8b0885ef1d`.
+
 **Cập nhật 2026-10-19 22:28 (UTC+7), GPT-6 (Codex, S27 Pharmacity):** CC-first hoàn tất cho 5.182 URL/13 index; 13/13 quét đủ 300 parquet, ledger 1.951.529.868 byte/391 request, 0 capture row và 0 WARC Range. Nhóm (a)=5.182, (b)=0, dead=0, pending=0; exact/normalized WARC 0/0. `doc_id=317850` = `unknown`, không retry. Live gate mở sớm nhất 22:55:05 (halt 19:55:04); chưa gửi request sau halt. `live-status` đã đo 5.182 eligible, 155 state rows ngoài pool. `resume-site`: một probe một hop, marker bền trước request, chỉ resume khi chưa phát request; challenge/block dừng hẳn; sau probe tuần tự ≥5 s + jitter 0–2 s, handoff mỗi 1.000 doc. S26 log kết thúc `done 887151`; gate xác nhận 887.151 ID unique, dense `[887151,1024]` float16. S26/S27 cùng `r2ai.index.bge_m3.M3Encoder`, BAAI/bge-m3, doc_text 4.096 ký tự, max_len 512, L2-normalized CLS. Đã nhúng S15 `lot-0001`: 146 doc, `[146,1024]` float16, ID parity/unique/finite/SHA đều đạt; vector SHA256 `31ee1721a03951b1955f8039eefd846ebd963ed0012142fff601226d037d9fdc`, handoff ở `out/runs/s27-pharmacity/vectors/handoff/`. Sửa gate NumPy 2.4.6 dùng public NPY header reader. Focused tests **36 pass**. Chưa ghi shared index; live site vẫn chờ cooldown.
 
 Cập nhật 2026-10-19 21:50 (UTC+7), GPT-6 (Codex, S27 Pharmacity): xuất lô S15 đầu tiên ngay từ checkpoint hiện có: 146 docs + provenance, 146 chunk docs, 1.225 t256 chunks; min 50 token tiếng Việt, verbatim 1.225/1.225. SHA-256 mọi artifact trong manifest đã kiểm lại. Batch `cc-s27-pharmacity`, lô `lot-0001`; manifest tại `out/runs/s27-pharmacity/handoff/cc-s27-pharmacity/manifest.json`. Không ghi shared index, chưa sinh vector. S26 embed vẫn chạy: log cuối lúc 21:41 ghi 665.000/887.151, ETA 0,68 giờ; chưa qua gate. Crawl site chưa resume; cooldown kết thúc sớm nhất 22:55:05 UTC+7. Lỗi input chunker provenance/docs cùng thư mục đã được xử lý bằng input riêng chỉ chứa docs; lô tiếp tục cùng lot ID.
@@ -497,6 +499,7 @@ Cập nhật 2026-10-17 20:25 (UTC+7), GPT-6 (Codex, S24 recovery): D21 bỏ qua
 
 | Thời gian (UTC+7) | Ai | Thay đổi |
 |---|---|---|
+| 2026-10-19 22:33 | GPT-6 (Codex) | S27: khi live crawl dừng bởi challenge/block, flush phần S15 docs ok còn lại (<1.000) và vector handoff nếu S26 gate đạt. Test no-next-request/flush pass; tổng focused 37 pass. |
 | 2026-10-19 22:28 | GPT-6 (Codex) | S27: CC groups (a) 5.182, (b)/dead 0; 0 WARC capture. S26 exact gate `done 887151`, unique IDs 887.151, `[887151,1024]` fp16. Nhúng `lot-0001` 146 doc BGE-M3 doc-level `[146,1024]` fp16; ID parity/hash pass, vector SHA `31ee1721…d9fdc`, S26 vector handoff riêng, shared index không đổi. NumPy 2.4.6 gate đã sửa; 36 focused tests pass. Chưa gọi site trước cooldown 22:55:05. |
 | 2026-10-19 22:18 | GPT-6 (Codex) | S27 CC-first: quét đủ 13 index/5.182 URL, 0 capture, (a) 5.182, (b) 0, dead 0, WARC 0; doc_id 317850 unknown/no-retry. Thêm cooldown gate, một probe một hop, log URL/status/gap, no-proxy, challenge stop/no-retry, crawl tuần tự ≥5s + jitter; tiếp handoff mỗi 1.000 doc. 32 focused tests pass. Chưa gọi site; gate mở 22:55:05. |
 | 2026-10-19 21:50 | GPT-6 (Codex) | S27 S15 incremental handoff: lô `lot-0001` gồm 146 docs/provenance, 146 chunk docs, 1.225 t256 chunks; SHA-256 xác thực, verbatim 1.225/1.225. Chưa embed/ghi shared index. S26 665k/887.151 tại log 21:41; cooldown site đến 22:55:05. |

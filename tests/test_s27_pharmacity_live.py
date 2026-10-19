@@ -130,3 +130,49 @@ def test_challenge_probe_is_persisted_and_never_retried(monkeypatch, tmp_path):
     second = live.run_live_resume(roots)
     assert second['status'] == 'halted_challenge'
     assert len(calls) == 1
+
+
+def test_live_challenge_flushes_sub_1000_handoff_remainder(monkeypatch, tmp_path):
+    roots, live, calls = _stub_live_inputs(monkeypatch, tmp_path)
+    mapping = {1: {'doc_id': 1, 'original_url': 'https://pmc-ecm-healthblog.beta.pharmacity.io/a',
+                   'mapped_url': 'https://www.pharmacity.vn/a.htm', 'slug': 'a'},
+               2: {'doc_id': 2, 'original_url': 'https://pmc-ecm-healthblog.beta.pharmacity.io/b',
+                   'mapped_url': 'https://www.pharmacity.vn/b.htm', 'slug': 'b'}}
+    reads = 0
+
+    def inputs(_roots):
+        nonlocal reads
+        reads += 1
+        pages = {} if reads == 1 else {1: {'status': 'ok', 'http_status': 200, 'body_chars': 200}}
+        eligible = [1, 2] if not pages else [2]
+        return [(1, 'no_capture'), (2, 'no_capture')], pages, mapping, {'no_capture': 2}, eligible
+
+    import r2ai.s27_pharmacity.pipeline as pipeline
+    monkeypatch.setattr(live, '_read_inputs', inputs)
+    fetch_results = [
+        {'http_status': 200, 'status': 'ok', 'selector_found': True, 'body_chars': 200},
+        RuntimeError('challenge'),
+    ]
+
+    def fetch(*_args, **_kwargs):
+        result = fetch_results[len(calls)]
+        if isinstance(result, Exception):
+            raise result
+        calls.append(True)
+        return result
+
+    monkeypatch.setattr(pipeline, '_fetch_target', fetch)
+    page_reads = 0
+
+    def page(_roots, doc_id):
+        nonlocal page_reads
+        page_reads += 1
+        return None if page_reads == 1 else ('halted_captcha', 200, 0)
+
+    final_flags = []
+    monkeypatch.setattr(live, '_page_for', page)
+    monkeypatch.setattr(live, '_handoff_pending', lambda *_args, final=False: final_flags.append(final) or [])
+    result = live.run_live_resume(roots)
+    assert result['status'] == 'halted_challenge'
+    assert len(calls) == 1
+    assert final_flags == [True]

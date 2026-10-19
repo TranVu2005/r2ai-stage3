@@ -10,6 +10,7 @@ en đã đóng: Vu báo EN-only-Q (top-20 Qwen) = 0 trên 24.000 doc. Nếu en v
 - Query dịch sang tiếng Trung, BM25 zh, sparse và e5-small đều kém hơn. Qwen3-Embedding-4B (NF4, doc_text 512, mẫu con 10k) chỉ đạt AUC −min-rank 0,757, thấp hơn hẳn BGE-M3 trên cùng mẫu (0,915) ⇒ không phải retriever của BTC.
 - Trần đo được gần 1: decile min-rank thấp nhất có 0/2.939 doc được giữ ⇒ BTC không lấp ngẫu nhiên; phần AUC còn thiếu (0,924 → 1) nhiều khả năng do khác bản extract text (BTC nhúng text của họ, mình nhúng text extract của mình).
 - **vi: không có dấu hiệu pool.** Trên 7 site chỉ nói về y tế, bài trong corpus không gần query hơn bài cùng site ngoài corpus (AUC 0,52). Riêng Vinmec ngược chiều (AUC 0,44): BTC đã loại bớt bài giống query (trang nguồn).
+- **P1-docrank (P-A2) LB 0,2937** (Chunk F2 0,2773 → 0,2978), nên thứ tự doc-level được dùng để chọn doc. P-A3 (top-K_q doc-level trên 125.605 doc) đã dựng, validate 0 lỗi, chưa nộp; P-A3r vượt trần; P-A4 chờ nhúng toàn bộ 887k (mục 5c).
 - Đề xuất: probe P-A2 xếp hạng lại vi+zh theo BGE-M3 dense doc-level doc_text 512 (mục 5), để kiểm giả thuyết "gold sinh từ cùng retriever".
 
 ## 1. Dữ liệu và phép đo
@@ -116,6 +117,43 @@ Thứ tự doc-level tương quan với P1 nhưng khác rõ: khoảng một nử
 
 **Đọc kết quả khi nộp.** Chỉ Chunk P/R thay đổi. Nếu Chunk P tăng rõ so với 0,1936 ⇒ thứ tự doc-level chính xác hơn thứ tự P1, ủng hộ giả thuyết gold gắn với retriever của BTC ⇒ bước tiếp là nhúng toàn bộ 887k doc và xếp hạng lại cả tập doc. Nếu giảm hoặc không đổi ⇒ retriever BTC chỉ dùng để chọn pool zh, gold không theo nó.
 
+## 5c. P-A3 / P-A3r / P-A4: chọn doc theo doc-level (19/10, chưa nộp)
+
+**LB P1-docrank (Vu báo):** 0,2937. Chunk F2 0,2773 → 0,2978 (P 0,1936 → 0,2100, R 0,3644 → 0,3883), Doc giữ nguyên. Thứ tự BGE-M3 doc-level (doc_text 512) dự đoán gold tốt hơn thứ tự P1, nên các bản sau dùng nó để chọn doc.
+
+**Quy tắc chung (`pa3_build.py`).**
+- K_q = `len(relevant_docs)` của cùng query trong P1-vi+10 (trung bình 180,7; tổng 216.866).
+- **Không gate τ** (zh chunk-level) và không quota ngôn ngữ. Cosine doc-level quyết định cho cả vi lẫn zh.
+- Một ID corpus cho mỗi doc canonical, theo thứ tự ưu tiên: ID P1 đã dùng trong cùng query; ID P1 đã dùng ở query khác; `doc_id` canonical nếu nằm trong nhóm alias; cuối cùng là alias đầu tiên. 2.113 ID của P1 không map được về canonical (không có vector) nên không được xếp hạng.
+- Đúng 1 chunk cho mỗi doc chọn, chọn theo thứ tự:
+  1. Chunk P1 đã ship cho ID đó, ưu tiên cùng query (`p1_row`), không có thì lấy ở query khác (`p1_any`), lấy nguyên byte.
+  2. Nếu không có, chunk `chunks_t256` của doc đó có cosine dense với query cao nhất (vector chunk canonical) (`t256`).
+- Hệ quả: số chunk tăng từ 105,2 lên 180,7 mỗi query.
+
+**Validator (`validate_pa3.py`).**
+- Format, trần dung lượng và dict 256 MiB.
+- Đủ 1.200 id. Doc nằm trong `links_corpus_vi_en_zh` và không trùng. Chunk thuộc relevant_docs, mỗi doc_id tối đa 1 chunk.
+- Verbatim: hoặc cặp (doc_id, text) đã có trong P1 (đã qua native), hoặc text là substring của `doc_text` canonical (S25 đã xác minh). Chưa chạy validator native.
+
+| | P1-vi+10 | P-A3 | P-A3r |
+|---|---:|---:|---:|
+| Chọn doc | pipeline P1 | top-K_q cosine trên 125.605 doc của P1 | RRF(k=60) thứ tự P1 × thứ tự doc-level |
+| Doc khác P1 / query (TB; P10/median/P90) | 0 | 94,5 (57/93/135) | 33,3 (17/31/53) |
+| zh / vi mỗi query | 14,7 / 163,1 | 19,0 / 161,7 | 14,8 / 165,9 |
+| Tỷ lệ zh | 8,25% | 10,51% | 8,22% |
+| Chunk / query | 105,2 | 180,7 | 180,7 |
+| Nguồn chunk p1_row / p1_any / t256 | | 70.498 / 91.186 / 55.182 | 120.858 / 50.433 / 45.575 |
+| ZIP (B) | 80.706.521 (P1-docrank) | 86.264.388 | **109.611.284 > trần, chưa ghi** |
+| Validator | | 0 lỗi | chưa chạy |
+
+Ghi chú bảng: cột P1-vi+10 đếm doc canonical của P1. zh/vi đếm theo `lang` canonical. Mốc ZIP của P1-vi+10 lấy từ P1-docrank (cùng doc, cùng chunk).
+
+**`P-A3.zip` (chưa nộp).** `out/runs/s26-gold-structure/pa3/P-A3.zip`: 86.264.388 B, SHA256 `19391ad99863ff7d658d8770c3c5ac73fbdfd9a605b3a29bf4ece13b2432516c`. JSON 1.015.704.479 B, SHA256 `542c1646399a18f6833a34daefa80ef97560b1e54f018134fa9a4d690f5eae61`. LZMA props `5d00000010`. Validator: 0 lỗi (161.684 cặp P1 + 55.182 substring canonical).
+
+**P-A3r vượt trần.** JSON 1.189.817.052 B, nén còn 109.611.284 B, vượt 7,0 MB so với 102.600.000. Nguyên nhân: RRF giữ nhiều doc của P1 hơn, nên nhiều chunk P1 dài hơn (chunk P1 trung bình 6.487 B, chunk t256 khoảng 1 KB). Chưa chọn cách giảm dung lượng, chờ Vu.
+
+**P-A4.** Nhúng toàn bộ 887.151 doc đang chạy (`full_embed.py`). Tái sử dụng 125.605 vector của pa2. Thứ tự nhúng: zh trước, sau đó vi theo host tamanhhospital, tiemchunglongchau, medlatec, vinmec, hellobacsi, rồi các host còn lại theo tỷ lệ doc nằm trong P1-vi+10 giảm dần. Lưu checkpoint mỗi 5.000 doc vào `out/runs/s26-gold-structure/full/full_emb/`. Khi nhúng xong sẽ dựng P-A4 bằng `pa3_build.py … full_doc_dense.npz P-A4 pa3`, cùng quy tắc chunk.
+
 ## 6. Tái tạo
 
-`pool_ceiling.py` (mục 2); `pool_fingerprint.py`, `pool_fingerprint_cpu.py`, `pool_fingerprint_e5.py`, `pool_fingerprint_zhq.py`, `pool_fingerprint_doclen.py`, `pool_fingerprint_qwen3.py` (mục 3, chạy bằng `.venv` khi cần bitsandbytes/jieba/rank_bm25); `pool_body512_domain.py` (theo domain; tên file giữ chữ body512 nhưng là doc_text nguyên); `translate_zh.py` (Ollama, chia shard `k/3`); `vi_links.py`, `vi_pool_test.py` (mục 4). P-A2: `pa2_texts.py` (map ID P1 → canonical, text), `pa2_embed.py` (nhúng, checkpoint 5.000 doc), `pa2_build.py` (so thứ tự + ZIP). Data và src lấy từ checkout chính qua `R2AI_ROOT`.
+`pool_ceiling.py` (mục 2); `pool_fingerprint.py`, `pool_fingerprint_cpu.py`, `pool_fingerprint_e5.py`, `pool_fingerprint_zhq.py`, `pool_fingerprint_doclen.py`, `pool_fingerprint_qwen3.py` (mục 3, chạy bằng `.venv` khi cần bitsandbytes/jieba/rank_bm25); `pool_body512_domain.py` (theo domain; tên file giữ chữ body512 nhưng là doc_text nguyên); `translate_zh.py` (Ollama, chia shard `k/3`); `vi_links.py`, `vi_pool_test.py` (mục 4). P-A2: `pa2_texts.py` (map ID P1 → canonical, text), `pa2_embed.py` (nhúng, checkpoint 5.000 doc), `pa2_build.py` (so thứ tự + ZIP). P-A3/P-A4: `full_embed.py <out> <pa2_dir>` (nhúng toàn bộ canonical, resume theo khối), `pa3_build.py <out> <scratch> <doc_vectors.npz> <name> {pa3|pa3r}`, `validate_pa3.py <zip>`. Data và src lấy từ checkout chính qua `R2AI_ROOT`.

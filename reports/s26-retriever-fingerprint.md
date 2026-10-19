@@ -273,6 +273,42 @@ Số doc khác nhau giữa từng cặp bản, trung bình mỗi query (doc có 
 - `P-A5-cos.zip` SHA256 `2b9ddac0ee53ea3874588c826015931401c3185cb9b4d6373b3119b024bfaf93`
 - `P-A5-rel.zip` SHA256 `63fdb3d4dca3b2230c5d37cd48da48089478c0ec79a38988c046d3b02439b111`
 
+## 5g. Fingerprint extractor (20/10)
+
+**Câu hỏi.** AUC −min-rank 0,924 còn cách 1 có phải do khác extractor không: BTC nhúng text tách bằng công cụ khác, còn mình dùng text tách bằng extractor của repo?
+
+**Cách làm.**
+- Mẫu zh 2% v1: 29.385 doc (2.413 kept). Dựng lại `doc_text` từ raw HTML `data/raw_zh_sample`: 38.370 bản ghi, giữ bản fetch mới nhất cho mỗi URL còn 35.686, khớp đủ 29.385/29.385 doc.
+- Nhúng BGE-M3 dense với cùng cấu hình như `full_embed.py` (4.096 ký tự đầu, 512 token), rồi đo AUC −min-rank với 1.200 query tiếng Việt như mục 3.
+- Thư viện cài vào venv tạm (scratchpad, `--system-site-packages`); môi trường repo không đổi. Phiên bản: trafilatura 2.2.0, newspaper4k 0.9.6 (kèm jieba), readability-lxml, justext 3.0.2, html2text, bs4 4.15.0.
+- Script: `ext_variants.py` (8 tiến trình, 2.276 s), `ext_fingerprint.py`.
+
+| Hạng | Biến thể | AUC −min-rank | AUC best | Kept khi min-rank = 1 | R-prec | Doc rỗng | Median ký tự |
+|---:|---|---:|---:|---:|---:|---:|---:|
+| 1 | **Extractor hiện tại** (selector theo domain + generic; title + body) | **0,9240** | 0,8325 | 0,548 | 0,493 | 0 | 684 |
+| 2 | trafilatura mặc định + title | 0,9146 | 0,8297 | 0,543 | 0,470 | 0 | 757 |
+| 3 | newspaper4k + title | 0,8938 | 0,8230 | 0,502 | 0,435 | 1.549 | 564 |
+| 4 | trafilatura mặc định (= include_comments False) | 0,8805 | 0,8131 | 0,516 | 0,426 | 0 | 757 |
+| 5 | BeautifulSoup get_text cả trang | 0,8789 | 0,8177 | 0,532 | 0,434 | 0 | 2.605 |
+| 6 | newspaper4k | 0,8739 | 0,8051 | 0,473 | 0,409 | 1.549 | 564 |
+| 7 | html2text | 0,8672 | 0,7869 | 0,537 | 0,441 | 0 | 2.676 |
+| 8 | BeautifulSoup get_text chỉ `<body>` | 0,8668 | 0,7828 | 0,511 | 0,413 | 0 | 2.573 |
+| 9 | trafilatura favor_recall (= include_comments False) | 0,8621 | 0,8054 | 0,468 | 0,393 | 0 | 840 |
+| 10 | readability-lxml | 0,8568 | 0,7911 | 0,457 | 0,402 | 650 | 597 |
+| 11 | jusText (stoplist rỗng, ngưỡng độ dài 10/50 ký tự) | 0,7394 | 0,6910 | 0,498 | 0,422 | 1.656 | 1.118 |
+
+Ghi chú:
+- `include_comments=False` và `True` cho text giống hệt nhau trên cả 29.385 doc (cả mặc định lẫn favor_recall), nên chỉ nhúng một lần.
+- jusText không có stoplist tiếng Trung. Ngưỡng 10/50 ký tự là mình tự chỉnh; với ngưỡng mặc định thì mọi đoạn đều bị coi là boilerplate.
+- Các extractor ngoài không đưa title vào text. Thêm title làm AUC tăng 0,02–0,034 (trafilatura 0,8805 → 0,9146; newspaper4k 0,8739 → 0,8938).
+
+**Kết luận.**
+- Không biến thể nào vượt 0,95, kể cả vượt mốc 0,924, nên **không đề xuất nhúng lại canonical**.
+- Extractor hiện tại, với selector Q&A riêng cho 120ask, ask.39 và cnkang, sát với text BTC nhúng hơn mọi extractor thông dụng đã thử.
+- Có title đứng đầu là yếu tố quan trọng.
+- Phần còn thiếu tới 1 có lẽ đến từ khác biệt nhỏ trong cách lấy title/Q&A hoặc từ bản HTML khác thời điểm crawl, không đến từ việc chọn thư viện.
+- Kiểm tra raw HTML cho vi lẫn zh không cần chạy vì điều kiện >0,95 không đạt.
+
 ## 6. Tái tạo
 
-`pool_ceiling.py` (mục 2); `pool_fingerprint.py`, `pool_fingerprint_cpu.py`, `pool_fingerprint_e5.py`, `pool_fingerprint_zhq.py`, `pool_fingerprint_doclen.py`, `pool_fingerprint_qwen3.py` (mục 3, chạy bằng `.venv` khi cần bitsandbytes/jieba/rank_bm25); `pool_body512_domain.py` (theo domain; tên file giữ chữ body512 nhưng là doc_text nguyên); `translate_zh.py` (Ollama, chia shard `k/3`); `vi_links.py`, `vi_pool_test.py` (mục 4). P-A2: `pa2_texts.py` (map ID P1 → canonical, text), `pa2_embed.py` (nhúng, checkpoint 5.000 doc), `pa2_build.py` (so thứ tự + ZIP). P-A3/P-A4: `full_embed.py <out> <pa2_dir>` (nhúng toàn bộ canonical, resume theo khối), `pa3_build.py <out> <scratch> <doc_vectors.npz> <name> {pa3|pa3r} [nc]`, `validate_pa3.py <zip>`. P-A4: `body_check.py <pa2_dir> [N] [seed]` (dựng lại chunk P1 từ canonical), `pa4_run.sh <name> nc new=body [k=x] [ncx=x]` (`S26_SCRATCH` = thư mục `q_dense.npy`). P-A5: `pa5_run.sh` (`sel=ku|cos|rel tmean=…`). Data và src lấy từ checkout chính qua `R2AI_ROOT`.
+`pool_ceiling.py` (mục 2); `pool_fingerprint.py`, `pool_fingerprint_cpu.py`, `pool_fingerprint_e5.py`, `pool_fingerprint_zhq.py`, `pool_fingerprint_doclen.py`, `pool_fingerprint_qwen3.py` (mục 3, chạy bằng `.venv` khi cần bitsandbytes/jieba/rank_bm25); `pool_body512_domain.py` (theo domain; tên file giữ chữ body512 nhưng là doc_text nguyên); `translate_zh.py` (Ollama, chia shard `k/3`); `vi_links.py`, `vi_pool_test.py` (mục 4). P-A2: `pa2_texts.py` (map ID P1 → canonical, text), `pa2_embed.py` (nhúng, checkpoint 5.000 doc), `pa2_build.py` (so thứ tự + ZIP). P-A3/P-A4: `full_embed.py <out> <pa2_dir>` (nhúng toàn bộ canonical, resume theo khối), `pa3_build.py <out> <scratch> <doc_vectors.npz> <name> {pa3|pa3r} [nc]`, `validate_pa3.py <zip>`. P-A4: `body_check.py <pa2_dir> [N] [seed]` (dựng lại chunk P1 từ canonical), `pa4_run.sh <name> nc new=body [k=x] [ncx=x]` (`S26_SCRATCH` = thư mục `q_dense.npy`). P-A5: `pa5_run.sh` (`sel=ku|cos|rel tmean=…`). Extractor: `ext_variants.py <out> [workers]` (venv có trafilatura/newspaper4k/readability-lxml/justext/html2text/bs4), `ext_fingerprint.py <scratch> <out> <variant[+title],…>`. Data và src lấy từ checkout chính qua `R2AI_ROOT`.

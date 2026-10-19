@@ -10,7 +10,9 @@ when it is in its own alias group, else the first alias. P1 IDs without a canoni
 Chunks: exactly 1 per chosen doc. If P1-vi+10 ships a chunk for that corpus ID (this row first, then any row), that text
 byte for byte; otherwise the canonical chunks_t256 chunk of that doc with the highest dense cosine to the query
 (canonical chunk vectors, BGE-M3 dense CLS, vectors.json alignment); docs with no vector chunk take their first chunk.
-Usage: pa3_build.py <out_dir> <scratch_dir> <doc_vectors.npz> <name> {pa3|pa3r}
+With a 6th argument `nc`, only the first n_c chosen docs (variant order) get a chunk, n_c = len(relevant_chunks) of the
+same P1-vi+10 row, so the chunk count per query equals P1-vi+10 (same text rule, 1 chunk per doc).
+Usage: pa3_build.py <out_dir> <scratch_dir> <doc_vectors.npz> <name> {pa3|pa3r} [nc]
 """
 import hashlib, json, os, sys, time, zipfile
 from pathlib import Path
@@ -22,6 +24,7 @@ from r2ai.compose.base_io import lzma_dictionary  # noqa: E402
 ZP = 'out/runs/reranker-trial/release/P1-vi+10.zip'; CEIL = 102_600_000; DATE_TIME = (2026, 10, 19, 0, 0, 0); RRF_K = 60
 CAN = 'data/canonical-20261018'
 out, S, vec, name, mode = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4], sys.argv[5]
+NC = len(sys.argv) > 6 and sys.argv[6] == 'nc'
 out.mkdir(parents=True, exist_ok=True); zpath = out / f'{name}.zip'
 if zpath.exists():
     raise SystemExit(f'{zpath} exists')
@@ -103,7 +106,7 @@ print(f'docs chosen {time.time() - t0:.0f}s', flush=True)
 need = {}                                               # canonical doc -> list of row indexes needing a t256 chunk
 for k, (r, pk) in enumerate(zip(rows, picked)):
     own = {c['doc_id']: c['chunk_text'] for c in r['relevant_chunks']}
-    for d, cid in pk:
+    for d, cid in (pk[:len(r['relevant_chunks'])] if NC else pk):
         if cid not in own and cid not in gtext:
             need.setdefault(d, []).append(k)
 vrow_all = np.where(ch_has, np.cumsum(ch_has) - 1, -1)
@@ -137,7 +140,7 @@ new_rows, src = [], {'p1_row': 0, 'p1_any': 0, 't256': 0, 'none': 0}
 for k, (r, pk) in enumerate(zip(rows, picked)):
     own = {c['doc_id']: c['chunk_text'] for c in r['relevant_chunks']}
     chunks = []
-    for d, cid in pk:
+    for d, cid in (pk[:len(r['relevant_chunks'])] if NC else pk):
         if cid in own:
             t = own[cid]; src['p1_row'] += 1
         elif cid in gtext:
@@ -156,7 +159,7 @@ with lzma_dictionary(256), zipfile.ZipFile(tmp, 'w', compression=zipfile.ZIP_LZM
     with z.open(info, 'w', force_zip64=True) as f:
         f.write(payload)
 size = tmp.stat().st_size
-rep = {'name': name, 'mode': mode, 'doc_vectors': str(vec), 'n_doc_vectors': len(ids), 'base': ZP, 'queries': len(new_rows),
+rep = {'name': name, 'mode': mode, 'chunks_rule': 'n_c of P1 row' if NC else '1 per chosen doc', 'doc_vectors': str(vec), 'n_doc_vectors': len(ids), 'base': ZP, 'queries': len(new_rows),
        'zip_bytes': size, 'json_bytes': len(payload), 'json_sha256': hashlib.sha256(payload).hexdigest(), 'ceiling': CEIL,
        'docs_total': int(st.K.sum()), 'chunks_total': sum(len(r['relevant_chunks']) for r in new_rows), 'chunk_source': src,
        'new_vs_p1_mean': float(st.new_vs_p1.mean()), 'new_vs_p1_quantiles': st.new_vs_p1.quantile([.1, .5, .9]).to_dict(),

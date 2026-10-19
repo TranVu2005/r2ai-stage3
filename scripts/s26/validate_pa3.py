@@ -6,9 +6,11 @@ relevant_docs, at most 1 chunk per doc_id per row.
 Verbatim: a chunk passes if its (doc_id, chunk_text) pair is shipped by P1-vi+10 (natively validated when P1 passed),
 or if chunk_text is a substring of the canonical doc_text of that ID (its own docs.parquet row, else the owner of its
 alias group; canonical-20261018, S25-verified).
-Usage: validate_pa3.py <zip>
+Extra S15 lot roots (e.g. S27 pharmacity handoff) after the ZIP add their doc_text as verbatim source.
+Usage: validate_pa3.py <zip> [extra_dir ...]
 """
 import hashlib, json, os, sys, zipfile
+from pathlib import Path
 from collections import Counter
 import pandas as pd, pyarrow.parquet as pq, numpy as np
 os.chdir(os.environ.get('R2AI_ROOT', 'D:/GitHub/r2ai-stage3'))  # data/ and src/ of the main checkout
@@ -65,10 +67,15 @@ for r in stream_rows():
         else:
             todo.append((c['doc_id'], c['chunk_text']))
 in_docs = set(pq.read_table(f'{CAN}/docs.parquet', columns=['doc_id'])['doc_id'].to_pylist())
-todo = [(d if d in in_docs else cid2doc.get(d), t) for d, t in todo]   # the ID's own canonical text, else its group owner
+xids = {int(d) for x in sys.argv[2:] for f in Path(x).glob('lots/*/chunks/docs.parquet') for d in pd.read_parquet(f, columns=['doc_id']).doc_id}
+todo = [(d if d in in_docs or d in xids else cid2doc.get(d), t) for d, t in todo]   # own text, else its group owner
 need = sorted({d for d, _ in todo if d is not None})
 txt = dict(zip(*[pq.read_table(f'{CAN}/docs.parquet', columns=['doc_id', 'doc_text'], filters=[('doc_id', 'in', need)])[k].to_pylist()
                  for k in ('doc_id', 'doc_text')]))
+for x in sys.argv[2:]:                                  # extra S15 lots: <dir> holding lots/<lot>/chunks/docs.parquet
+    for f in sorted(Path(x).glob('lots/*/chunks/docs.parquet')):
+        xd = pd.read_parquet(f, columns=['doc_id', 'doc_text'])
+        txt.update(zip(xd.doc_id.astype(int), xd.doc_text)); cid2doc.update({int(d): int(d) for d in xd.doc_id})
 for d, t in todo:
     if d is None or d not in txt:
         err['chunk_no_canonical_doc'] += 1

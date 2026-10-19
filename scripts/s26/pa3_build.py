@@ -20,7 +20,13 @@ next doc, so every row keeps its target chunk count when enough carriers exist.
 `new=body`: a chosen doc without a P1 chunk gets its whole body rebuilt from canonical (body_check.py rule, 99.0% byte
 match with P1's own chunks on 200 samples) instead of a t256 chunk; if the ZIP reaches the ceiling, every such body is
 cut to its first N chars (verbatim prefix), N the largest found by bisection that fits (reported as body_cut_chars).
+`extra=<dir>[,<dir>...]`: add S15 handoff lots (e.g. S27 pharmacity) to the doc pool. Each <dir> holds
+lots/<lot>/chunks/{docs,chunks_t256}.parquet; vectors are read from <vectors_root>/<lot>/dense_doc_level.npz with
+`extravec=<vectors_root>` (same encoder/settings as full_embed.py). Extra docs are vi, own corpus ID, body = their body
+chunk span (same rule as canonical). The report adds extra_chosen / extra_queries / extra_selection_rate.
+`dry`: stop after the doc choice and stats (no chunk texts, no ZIP).
 Usage: pa3_build.py <out_dir> <scratch_dir> <doc_vectors.npz> <name> {pa3|pa3r} [nc] [k=x] [ncx=x] [ref=zip] [new=body]
+                    [extra=dir extravec=dir] [dry]
 """
 import hashlib, json, os, sys, time, zipfile
 from pathlib import Path
@@ -32,7 +38,7 @@ from r2ai.compose.base_io import lzma_dictionary  # noqa: E402
 ZP = 'out/runs/reranker-trial/release/P1-vi+10.zip'; CEIL = 102_600_000; DATE_TIME = (2026, 10, 19, 0, 0, 0); RRF_K = 60
 CAN = 'data/canonical-20261018'
 out, S, vec, name, mode = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4], sys.argv[5]
-NC = 'nc' in sys.argv[6:]
+NC, DRY = 'nc' in sys.argv[6:], 'dry' in sys.argv[6:]
 OPT = dict(a.split('=', 1) for a in sys.argv[6:] if '=' in a)
 KX, NCX = float(OPT.get('k', 1)), float(OPT.get('ncx', 1))
 NEW = OPT.get('new', 't256'); assert NEW in ('t256', 'body')
@@ -93,6 +99,26 @@ def corpus_id(d, row_ids):
 
 
 E = np.load(vec); ids = E['doc_id'].astype(np.int64); Dh = E['dense']
+extra_text, extra_spans = {}, {}                        # extra doc -> doc_text / {field: (start, end)}
+if OPT.get('extra'):
+    xi, xd = [ids], [Dh]
+    for root in OPT['extra'].split(','):
+        for lot in sorted((Path(root) / 'lots').iterdir()):
+            xdoc = pd.read_parquet(lot / 'chunks' / 'docs.parquet', columns=['doc_id', 'doc_text'])
+            xch = pd.read_parquet(lot / 'chunks' / 'chunks_t256.parquet', columns=['doc_id', 'field', 'char_start', 'char_end'])
+            XV = np.load(Path(OPT['extravec']) / lot.name / 'dense_doc_level.npz')
+            assert sorted(XV['doc_id'].tolist()) == sorted(xdoc.doc_id.tolist()), lot
+            extra_text.update(zip(xdoc.doc_id.astype(int), xdoc.doc_text))
+            for (d, f), g in xch.groupby(['doc_id', 'field']):
+                extra_spans.setdefault(int(d), {})[f] = (int(g.char_start.min()), int(g.char_end.max()))
+            xi.append(XV['doc_id'].astype(np.int64)); xd.append(XV['dense'])
+    clash = set(extra_text) & (set(ids.tolist()) | set(cid2doc))
+    assert not clash, f'extra doc IDs already in canonical: {sorted(clash)[:5]}'
+    ids, Dh = np.concatenate(xi), np.concatenate(xd)
+    for d in extra_text:                                # own group, vi, chunk source = its own spans
+        grp[d] = [d]; cid2doc[d] = d
+    doc_lang = pd.concat([doc_lang, pd.Series('vi', index=list(extra_text))])
+    print(f'extra docs {len(extra_text)}', flush=True)
 pos = {int(d): i for i, d in enumerate(ids)}
 Q = np.load(S / 'q_dense.npy').astype(np.float32); qpos = {int(q): i for i, q in enumerate(np.load(S / 'q_ids.npy'))}
 M = 3 * max(round(len(r['relevant_docs']) * KX) for r in rows)      # per query: doc-level top-M (index, score), blockwise fp32
@@ -145,6 +171,20 @@ def carriers(r, pk):
     return [x for x in pk if x[1] in own or x[1] in gtext or cdoc(x[0]) in grp][:n]
 
 
+xstat = {}
+if extra_text:
+    xc = [sum(d in extra_text for d, _ in pk) for pk in picked]
+    xs = {d for pk in picked for d, _ in pk if d in extra_text}
+    xstat = {'extra_docs': len(extra_text), 'extra_chosen': int(sum(xc)), 'extra_queries': int(sum(c > 0 for c in xc)),
+             'extra_distinct_chosen': len(xs), 'extra_selection_rate': len(xs) / len(extra_text),
+             'extra_chunked': int(sum(sum(d in extra_text for d, _ in carriers(r, pk)) for r, pk in zip(rows, picked)))}
+    print(json.dumps(xstat), flush=True)
+if DRY:
+    pd.DataFrame(stats).to_parquet(out / f'{name}.query_stats.parquet', index=False)
+    (out / f'{name}.dry.json').write_text(json.dumps(xstat, indent=1), encoding='utf-8')
+    raise SystemExit(0)
+
+
 need = {}                                               # canonical doc -> list of row indexes needing a t256 chunk
 for k, (r, pk) in enumerate(zip(rows, picked)):
     own = {c['doc_id']: c['chunk_text'] for c in r['relevant_chunks']}
@@ -185,10 +225,11 @@ else:                                                   # whole body rebuilt fro
     # alias doc whose group owner is absent from docs.parquet the owner's offsets index the alias text (verified)
     tdocs = {d for r, pk in zip(rows, picked) for d, cid in carriers(r, pk)
              if cid not in gtext and cid not in {c['doc_id'] for c in r['relevant_chunks']}}
-    bt = pq.read_table(f'{CAN}/docs.parquet', columns=['doc_id', 'lang', 'doc_text'], filters=[('doc_id', 'in', sorted(tdocs))])
-    spans = load_spans({cdoc(d) for d in tdocs})
+    bt = pq.read_table(f'{CAN}/docs.parquet', columns=['doc_id', 'lang', 'doc_text'], filters=[('doc_id', 'in', sorted(tdocs - set(extra_text)))])
+    spans = load_spans({cdoc(d) for d in tdocs - set(extra_text)})
     btext = {cdoc(int(d)): body_span(t, lg, spans.get(cdoc(int(d)), {})) for d, lg, t in
              zip(bt['doc_id'].to_pylist(), bt['lang'].to_pylist(), bt['doc_text'].to_pylist())}; del bt
+    btext.update({d: body_span(extra_text[d], 'vi', extra_spans.get(d, {})) for d in tdocs & set(extra_text)})
     print(f'canonical bodies {len(btext)} {time.time() - t0:.0f}s', flush=True)
 
 new_rows, src = [], {'p1_row': 0, 'p1_any': 0, 't256': 0, 'body': 0, 'none': 0}
@@ -263,7 +304,7 @@ if size >= CEIL and NEW == 'body' and src['body']:
         N, payload, size = best
         if tries[-1][0] != N:                               # leave the chosen N in tmp
             payload, size = build(N)
-rep = {'name': name, 'mode': mode, 'new_doc_chunk': NEW, 'body_cut_chars': N, 'size_tries': tries, 'chunks_rule': 'n_c of P1 row' if NC else '1 per chosen doc', 'doc_vectors': str(vec), 'n_doc_vectors': len(ids), 'base': ZP, 'queries': len(new_rows),
+rep = {**xstat, 'name': name, 'mode': mode, 'new_doc_chunk': NEW, 'body_cut_chars': N, 'size_tries': tries, 'chunks_rule': 'n_c of P1 row' if NC else '1 per chosen doc', 'doc_vectors': str(vec), 'n_doc_vectors': len(ids), 'base': ZP, 'queries': len(new_rows),
        'zip_bytes': size, 'json_bytes': len(payload), 'json_sha256': hashlib.sha256(payload).hexdigest(), 'ceiling': CEIL,
        'docs_total': int(st.K.sum()), 'chunks_total': sum(len(r['relevant_chunks']) for r in new_rows),
        'new_body_chars_mean': float(np.mean([len(c['chunk_text']) for r in new_rows for c in r['relevant_chunks'] if c.get('_new')] or [0])), 'chunk_source': src,

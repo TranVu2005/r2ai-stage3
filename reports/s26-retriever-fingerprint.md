@@ -202,6 +202,31 @@ Ghi chú bảng:
 - `P-A4-K110.zip` SHA256 `24b6b8bf60cbe4ec22c835a6a084003f5b17d4ba506621b1170a4c0185864b2b`
 - `P-A4-nc120.zip` SHA256 `d2fac345f6ef8d034ca104ab17862125e85681b2a28ba6e16085d73dfa51526f`
 
+## 5e. Gộp S27 pharmacity vào pool doc-level (chuẩn bị, chờ điểm P-A4)
+
+Theo Vu: bản tiếp theo dựng trên bản P-A4 tốt nhất (sau khi có điểm) và gộp 612 doc pharmacity S27 (lô 1: 146, lô 2: 466) vào pool doc-level.
+
+**Kiểm tương thích.**
+- Cả 612 ID đều có trong `links_corpus_vi_en_zh` và không trùng doc canonical nào.
+- Vector doc-level (`out/runs/s27-pharmacity/vectors/handoff/<lot>/dense_doc_level.npz`) dùng cùng encoder và cùng cấu hình như `full_embed.py`: BGE-M3 CLS L2 fp16, `doc_text` 4.096 ký tự đầu, max_len 512.
+- `doc_text` có cấu trúc title + `
+
+` + body. Span của các chunk `body` là đuôi của `doc_text` ở cả 612 doc, nên chunk = nguyên body theo cùng quy tắc với canonical.
+- Validator nhận thêm thư mục handoff làm nguồn verbatim.
+
+**Chạy thử (`dry`, không ghi ZIP) trên cấu hình P-A4** (top-K_q trên 887.763 doc, n_c chunk):
+
+| | Giá trị |
+|---|---:|
+| Lượt doc pharmacity lọt top-K_q (tổng) | 233 |
+| Query có ≥1 doc pharmacity | 184 / 1.200 |
+| Doc pharmacity khác nhau được chọn | 146 |
+| Selection rate (146 / 612) | **23,9%** |
+| Lượt doc pharmacity nhận chunk (nằm trong n_c đầu) | 134 |
+| Doc mới so với P-A3-nc / query | 69,86 (P-A4: 69,76) |
+
+Số liệu trên dùng K_q ×1,0. Khi có điểm, bản thật sẽ dựng với hệ số K/n_c của bản P-A4 tốt nhất nên số có thể lệch nhẹ. Lệnh: `pa3_build.py … <name> pa3 nc new=body [k=x] [ncx=x] extra=out/runs/s27-pharmacity/handoff/cc-s27-pharmacity extravec=out/runs/s27-pharmacity/vectors/handoff`; validate: `validate_pa3.py <zip> out/runs/s27-pharmacity/handoff/cc-s27-pharmacity`. Hồi quy P-A3-nc sau khi sửa: JSON `72e06b20…18e6`.
+
 ## 6. Tái tạo
 
 `pool_ceiling.py` (mục 2); `pool_fingerprint.py`, `pool_fingerprint_cpu.py`, `pool_fingerprint_e5.py`, `pool_fingerprint_zhq.py`, `pool_fingerprint_doclen.py`, `pool_fingerprint_qwen3.py` (mục 3, chạy bằng `.venv` khi cần bitsandbytes/jieba/rank_bm25); `pool_body512_domain.py` (theo domain; tên file giữ chữ body512 nhưng là doc_text nguyên); `translate_zh.py` (Ollama, chia shard `k/3`); `vi_links.py`, `vi_pool_test.py` (mục 4). P-A2: `pa2_texts.py` (map ID P1 → canonical, text), `pa2_embed.py` (nhúng, checkpoint 5.000 doc), `pa2_build.py` (so thứ tự + ZIP). P-A3/P-A4: `full_embed.py <out> <pa2_dir>` (nhúng toàn bộ canonical, resume theo khối), `pa3_build.py <out> <scratch> <doc_vectors.npz> <name> {pa3|pa3r} [nc]`, `validate_pa3.py <zip>`. P-A4: `body_check.py <pa2_dir> [N] [seed]` (dựng lại chunk P1 từ canonical), `pa4_run.sh <name> nc new=body [k=x] [ncx=x]` (`S26_SCRATCH` = thư mục `q_dense.npy`). Data và src lấy từ checkout chính qua `R2AI_ROOT`.

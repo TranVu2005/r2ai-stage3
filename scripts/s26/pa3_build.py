@@ -26,7 +26,10 @@ lots/<lot>/chunks/{docs,chunks_t256}.parquet; vectors are read from <vectors_roo
 chunk span (same rule as canonical). The report adds extra_chosen / extra_queries / extra_selection_rate.
 `dry`: stop after the doc choice and stats (no chunk texts, no ZIP).
 Usage: pa3_build.py <out_dir> <scratch_dir> <doc_vectors.npz> <name> {pa3|pa3r} [nc] [k=x] [ncx=x] [ref=zip] [new=body]
-                    [extra=dir extravec=dir] [dry]
+                    [extra=dir extravec=dir] [dry] [sel=ku|cos|rel tmean=x]
+`sel` (mode pa3 only) replaces per-query K_q by: ku = round(tmean) docs for every query; cos = docs with cosine >= theta,
+one global theta; rel = docs with cosine >= cos(top-1) - delta, one global delta. theta/delta are bisected so the mean
+number of docs per query is as close to tmean as the integer counts allow (reported as sel_param / sel_mean).
 """
 import hashlib, json, os, sys, time, zipfile
 from pathlib import Path
@@ -42,6 +45,7 @@ NC, DRY = 'nc' in sys.argv[6:], 'dry' in sys.argv[6:]
 OPT = dict(a.split('=', 1) for a in sys.argv[6:] if '=' in a)
 KX, NCX = float(OPT.get('k', 1)), float(OPT.get('ncx', 1))
 NEW = OPT.get('new', 't256'); assert NEW in ('t256', 'body')
+SEL, TMEAN = OPT.get('sel', 'k'), float(OPT.get('tmean', 0)); assert SEL in ('k', 'ku', 'cos', 'rel')
 REF = Path(OPT.get('ref', 'out/runs/s26-gold-structure/pa3/P-A3-nc.zip'))
 out.mkdir(parents=True, exist_ok=True); zpath = out / f'{name}.zip'
 if zpath.exists():
@@ -122,6 +126,8 @@ if OPT.get('extra'):
 pos = {int(d): i for i, d in enumerate(ids)}
 Q = np.load(S / 'q_dense.npy').astype(np.float32); qpos = {int(q): i for i, q in enumerate(np.load(S / 'q_ids.npy'))}
 M = 3 * max(round(len(r['relevant_docs']) * KX) for r in rows)      # per query: doc-level top-M (index, score), blockwise fp32
+if SEL in ('cos', 'rel'):
+    M = max(M, int(OPT.get('m', 4000)))
 top_i = np.zeros((len(Q), 0), np.int64); top_s = np.zeros((len(Q), 0), np.float32)
 for b in range(0, len(ids), 50_000):
     sc = Q @ Dh[b:b + 50_000].astype(np.float32).T
@@ -131,6 +137,23 @@ for b in range(0, len(ids), 50_000):
     top_i, top_s = np.take_along_axis(top_i, keep, 1), np.take_along_axis(top_s, keep, 1)
 del Dh, E
 print(f'loaded {len(rows)} rows, {len(ids)} doc vectors, top-{M} done {time.time() - t0:.0f}s', flush=True)
+selk, sel_param = {}, None                              # query row index -> number of docs (sel modes)
+if SEL == 'ku':
+    selk = {qpos[r['id']]: round(TMEAN) for r in rows}
+elif SEL in ('cos', 'rel'):
+    def counts(x):
+        thr = x if SEL == 'cos' else top_s[:, :1] - x
+        return (top_s >= thr).sum(1)
+    lo, hi = (float(top_s.min()), float(top_s.max())) if SEL == 'cos' else (0.0, float((top_s[:, :1] - top_s).max()))
+    for _ in range(60):                                 # counts fall with theta, rise with delta
+        mid = (lo + hi) / 2; mm = counts(mid).mean()
+        if (mm > TMEAN) == (SEL == 'cos'):
+            lo = mid
+        else:
+            hi = mid
+    sel_param = min((abs(counts(x).mean() - TMEAN), x) for x in (lo, hi))[1]; cnt = counts(sel_param)
+    selk = {qi: int(c) for qi, c in enumerate(cnt)}
+    print(f'sel {SEL} param {sel_param:.6f} mean {cnt.mean():.4f} saturated(M={M}) {(cnt >= M).sum()} zero {(cnt == 0).sum()}', flush=True)
 
 picked = []                                             # per row: list of (canonical doc, corpus ID)
 stats = []
@@ -141,6 +164,8 @@ for r in rows:
         d = cid2doc.get(cid)
         if d is not None and d not in row_ids:
             row_ids[d] = cid; order_p1.append(d)
+    if SEL != 'k':
+        K = selk[qi]
     if mode == 'pa3':
         chosen = [int(ids[i]) for i in top_i[qi, :K]]
     else:                                               # RRF over P1 order and doc-level order (doc-level top 3*max K)
@@ -304,7 +329,7 @@ if size >= CEIL and NEW == 'body' and src['body']:
         N, payload, size = best
         if tries[-1][0] != N:                               # leave the chosen N in tmp
             payload, size = build(N)
-rep = {**xstat, 'name': name, 'mode': mode, 'new_doc_chunk': NEW, 'body_cut_chars': N, 'size_tries': tries, 'chunks_rule': 'n_c of P1 row' if NC else '1 per chosen doc', 'doc_vectors': str(vec), 'n_doc_vectors': len(ids), 'base': ZP, 'queries': len(new_rows),
+rep = {**xstat, 'sel': SEL, 'sel_tmean': TMEAN or None, 'sel_param': sel_param, 'docs_per_query_quantiles': st.K.quantile([0, .1, .5, .9, 1]).to_dict(), 'name': name, 'mode': mode, 'new_doc_chunk': NEW, 'body_cut_chars': N, 'size_tries': tries, 'chunks_rule': 'n_c of P1 row' if NC else '1 per chosen doc', 'doc_vectors': str(vec), 'n_doc_vectors': len(ids), 'base': ZP, 'queries': len(new_rows),
        'zip_bytes': size, 'json_bytes': len(payload), 'json_sha256': hashlib.sha256(payload).hexdigest(), 'ceiling': CEIL,
        'docs_total': int(st.K.sum()), 'chunks_total': sum(len(r['relevant_chunks']) for r in new_rows),
        'new_body_chars_mean': float(np.mean([len(c['chunk_text']) for r in new_rows for c in r['relevant_chunks'] if c.get('_new')] or [0])), 'chunk_source': src,

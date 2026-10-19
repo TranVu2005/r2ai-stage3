@@ -1,8 +1,8 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-20 01:58 (UTC+7)
+- Cập nhật: 2026-10-20 02:46 (UTC+7)
 - Model thực hiện: Claude Opus 5.5
-- Commit HEAD đã kiểm trước cập nhật này: `97ecabc52dd0c57d062092322f41dcf5d6f4a5f3`, nhánh `feat/s26-gold-structure` (tách từ `feat/s24-recovery`)
+- Commit HEAD đã kiểm trước cập nhật này: `2f96d55998f0ee3b5f18ab3b97959454259959ff`, nhánh `feat/s26-gold-structure` (tách từ `feat/s24-recovery`)
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - **Best mới đã đo: R1m 0,2673** (Qwen3-Reranker-0,6B + RRF trên phía zh, D16; người dùng cung cấp 15/10). **R1m chưa tích hợp vào repo này**: chờ phía vi (S15, sáng 16/10) rồi tích hợp một lần, kèm pin model Qwen3 (revision `e61197ed…`) và cache điểm. Trong repo, best tái tạo được vẫn là **C1 0,2655**. **C3 (S6-f + zh đợt 3) đã vào `main` local theo S14b: replay JSON `6cf9284d…3436` và ZIP `1c2472d1…1af9` khớp, chưa có điểm LB.** Chi tiết mục 5 (S14b).
 - **S14 (14/10, nhánh `feat/integrate`, chưa push): tái tạo C1 bằng một lệnh.** Best đã đo: **C1 Final 0,2655** (người dùng cung cấp) = base S6-f-K150 + doc zh đợt 2 (τ_doc tuyệt đối −0,87255859375, trần 30) + chunk zh ZL (τ 0,96, ≤ 3 doc/query, mỗi ID v2 một chunk, chỉ doc đã chọn) + LZMA dict 256 MiB; ZIP 82.047.434 B, ZIP SHA256 `e7c84e2c37c996fe3d046bf22a4d25b2fd9e8e1c2568d928fa45797108720c13`, JSON `83375428b79957b1580299f97b05299bb292957826bd4cb8bdc602a83b8dd5f3`. `python -m r2ai.compose replay --manifest configs/best-c1.yaml` (pin đủ input trong `configs/best-c1.yaml`, thiếu pin thì dừng) dựng lại **JSON SHA và ZIP SHA đều khớp**, validator native 0 lỗi / 1.200 query / 126.208 chunk. Replay S6-f JSON `d0da38b1…dca1` khớp; A1-115 JSON `4ffbba8b…2c82` khớp (ZIP khác 8 byte do mtime, gate là JSON); VS-append JSON và ZIP khớp. `submission-best.yaml` vẫn mặc định A1-115. Chi tiết mục 5 (S14) và `submissions/LOG.md`.
@@ -263,6 +263,8 @@ Cả hai: doc/query 136,48, 0 doc thêm do bảo vệ, chunk CC/query 9,34 (h1) 
 
 ## 6. Lệch so với `R2AI_STAGE3_CONTEXT.md`
 
+Cập nhật 2026-10-20 02:46 (UTC+7), Claude Opus 5.5 (S26 P-A5): LB Vu báo P-A4 0,3747, K90 0,3750 (tốt nhất, Doc 0,3811 / Chunk 0,3689), K110 0,3738. Dựng trên nền K90 (chưa nộp, validator 0 lỗi): P-A5-Ku (163 doc/query) 70.968.154 B, khác K90 18,3 doc/query; P-A5-cos (θ 0,640) 44.579.326 B, doc/query P10/median/P90 2/53,5/433, 73 query rỗng; P-A5-rel (δ 0,0790) 46.840.671 B, 11/82/406. Ngưỡng chung làm số doc/query lệch mạnh và số chunk giảm còn khoảng 61–64%. Report mục 5f.
+
 Cập nhật 2026-10-20 01:58 (UTC+7), Claude Opus 5.5 (S26 P-A4 + S27 pharmacity, chuẩn bị): `pa3_build.py` nhận `extra=`/`extravec=` để gộp lô S15 vào pool doc-level, `dry` để chỉ đo. Chạy thử trên cấu hình P-A4 với 612 doc pharmacity: 233 lượt lọt top-K_q, 184 query có ≥1 doc, 146 doc khác nhau (selection rate 23,9%), 134 lượt nhận chunk. Chưa dựng ZIP, chờ điểm P-A4. Hồi quy P-A3-nc giữ JSON `72e06b20…18e6`. Report mục 5e.
 
 Cập nhật 2026-10-19 23:20 (UTC+7), Claude Opus 5.5 (S26 P-A4): LB Vu báo P-A3-nc 0,3205 (Doc 0,3332 / Chunk 0,3078), P-A3r-nc 0,3191, P-A3 0,3130. Nhúng xong 887.151 doc (761.546 mới, 19.102 s). P-A4 = top-K_q doc-level trên 887k, n_c chunk như P1; doc ngoài P1 nhận nguyên body dựng lại từ canonical (khớp byte chunk P1 198/200 mẫu). Bốn ZIP dưới trần, không cắt N, validator 0 lỗi, chưa nộp: P-A4 71.055.364 B, K90 70.962.833 B, K110 71.139.849 B, nc120 84.113.963 B. zh tăng lên 22,5% doc; 4 query xét nghiệm bị doc thin chiếm top-K. Bản P-A4 đầu (lỗi alias) đã thay. Chi tiết `reports/s26-retriever-fingerprint.md` mục 5d.
@@ -493,6 +495,7 @@ Cập nhật 2026-10-17 20:25 (UTC+7), GPT-6 (Codex, S24 recovery): D21 bỏ qua
 
 | Thời gian (UTC+7) | Ai | Thay đổi |
 |---|---|---|
+| 2026-10-20 02:46 | Claude Opus 5.5 | S26 P-A5: Ku/cos/rel trên nền K90, ZIP 70,97/44,58/46,84 MB, validator 0 lỗi, chưa nộp; cos có 73 query rỗng. |
 | 2026-10-20 01:58 | Claude Opus 5.5 | S26/S27: tuỳ chọn gộp pharmacity vào pool doc-level; chạy thử trên P-A4: 146/612 doc được chọn (23,9%), 184 query; chưa dựng ZIP, chờ điểm P-A4. |
 | 2026-10-19 23:20 | Claude Opus 5.5 | S26 P-A4: nhúng 887k xong; 4 ZIP P-A4/K90/K110/nc120 (body canonical cho doc mới, alias lấy chunk của doc sở hữu nhóm), 70,96–84,11 MB, validator 0 lỗi, chưa nộp; hồi quy P-A3-nc giữ JSON `72e06b20…18e6`. |
 | 2026-10-19 18:49 | Claude Opus 5.5 | S26 P-A3 n_c: dựng lại P-A3/P-A3r với số chunk = n_c P1 (1 chunk/doc, theo thứ tự biến thể): P-A3-nc 55.402.549 B, P-A3r-nc 71.799.786 B, validator 0 lỗi, chưa nộp. |

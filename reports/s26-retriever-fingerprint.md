@@ -227,6 +227,52 @@ Theo Vu: bản tiếp theo dựng trên bản P-A4 tốt nhất (sau khi có đi
 
 Số liệu trên dùng K_q ×1,0. Khi có điểm, bản thật sẽ dựng với hệ số K/n_c của bản P-A4 tốt nhất nên số có thể lệch nhẹ. Lệnh: `pa3_build.py … <name> pa3 nc new=body [k=x] [ncx=x] extra=out/runs/s27-pharmacity/handoff/cc-s27-pharmacity extravec=out/runs/s27-pharmacity/vectors/handoff`; validate: `validate_pa3.py <zip> out/runs/s27-pharmacity/handoff/cc-s27-pharmacity`. Hồi quy P-A3-nc sau khi sửa: JSON `72e06b20…18e6`.
 
+## 5f. P-A5: cách chọn số doc mỗi query, trên nền K90 (20/10, chưa nộp)
+
+**LB (Vu báo):** P-A4 0,3747; **K90 0,3750** (Doc 0,3811 / Chunk 0,3689), tốt nhất; K110 0,3738. K90 được chọn làm nền. Bản nc120 do Vu nộp tiếp.
+
+**Cấu hình.** Cả ba bản đều xếp theo doc-level trên 887.151 doc và dùng chunk như P-A4: n_c của P1, nguyên body canonical cho doc mới, doc thin vẫn giữ trong relevant_docs. Không gộp pharmacity. Mục tiêu trung bình doc/query là 162,6225, bằng trung bình K90 (tổng 195.147). Lệnh: `pa3_build.py … pa3 nc new=body sel={ku|cos|rel} tmean=162.6225` (`pa5_run.sh`).
+- **P-A5-Ku:** 163 doc cho mọi query.
+- **P-A5-cos:** chọn doc có cosine ≥ θ, một θ chung cho mọi query. θ = **0,6400**.
+- **P-A5-rel:** chọn doc có cosine ≥ cos(top-1) − δ, một δ chung. δ = **0,07902**.
+- θ và δ tìm bằng bisection trên top-4.000 doc mỗi query; không query nào chạm trần 4.000.
+
+| | K90 (nền) | P-A5-Ku | P-A5-cos | P-A5-rel |
+|---|---:|---:|---:|---:|
+| Doc / query: min / P10 / median / P90 / max | — | 163 / 163 / 163 / 163 / 163 | 0 / 2 / 53,5 / 433 / 3.610 | 1 / 11 / 82 / 406 / 2.224 |
+| Query có 0 doc | 0 | 0 | **73** | 0 |
+| Doc có trong bản này nhưng không có trong K90 / query | 0 | 18,3 | 78,4 | 75,5 |
+| Doc có trong K90 nhưng không có trong bản này / query | 0 | 17,9 | 78,4 | 75,5 |
+| vi / zh mỗi query | 127,0 / 35,6 | 126,2 / 36,8 | 123,2 / 39,4 | 115,6 / 47,1 |
+| Tỷ lệ zh | 21,9% | 22,6% | 24,2% | 28,9% |
+| Chunk (mục tiêu) | 126.133 (126.228) | 126.133 (126.228) | 76.462 (76.602) | 80.757 (80.918) |
+| Lượt doc thin (không chunk) | 1.659 | 2.429 | 1.019 | 9.163 |
+| ZIP (B) | 70.962.833 | **70.968.154** | **44.579.326** | **46.840.671** |
+| Validator | 0 lỗi | 0 lỗi | 0 lỗi | 0 lỗi |
+
+Số doc khác nhau giữa từng cặp bản, trung bình mỗi query (doc có ở hàng nhưng không có ở cột):
+
+| | K90 | Ku | cos | rel |
+|---|---:|---:|---:|---:|
+| K90 | 0 | 17,9 | 78,4 | 75,5 |
+| Ku | 18,3 | 0 | 87,6 | 73,9 |
+| cos | 78,4 | 87,2 | 0 | 102,3 |
+| rel | 75,5 | 73,5 | 102,3 | 0 |
+
+**Đọc kết quả.**
+- Với θ hoặc δ chung, số doc mỗi query rất lệch: một nửa số query nhận dưới 54 (cos) hoặc dưới 82 (rel) doc, trong khi một số query nhận hàng nghìn doc.
+- Số chunk giảm còn khoảng 61–64% của K90, vì nhiều query có ít doc hơn n_c.
+- P-A5-cos có 73 query với relevant_docs rỗng. Validator chỉ cảnh báo trường hợp này, không coi là lỗi; điểm của các query đó chắc chắn bằng 0.
+- P-A5-rel làm tỷ lệ zh tăng lên 28,9% và số lượt doc thin lên 9.163, vì các query có top-1 thấp kéo theo nhiều doc ngắn.
+- P-A5-Ku chỉ khác K90 khoảng 18 doc mỗi query.
+
+**Đính chính đơn vị đếm "doc mới".** Cột "doc mới so với mốc" trong `*.build.json` đếm doc alias khác với doc sở hữu nhóm, nên hơi cao. Ở mục 5d, đếm lại với cùng ánh xạ ở cả hai phía cho kết quả: P-A4 69,6 (thay vì 69,8), K90 60,3 (thay vì 60,4), K110 79,2 (thay vì 79,4), nc120 69,6. Mục này đã dùng cách đếm đúng.
+
+**ZIP (chưa nộp), `out/runs/s26-gold-structure/pa5/`, LZMA props `5d00000010`:**
+- `P-A5-Ku.zip` SHA256 `3895980fd46f57c0716e5c2008c511c59e704438d3d9497c5c480c800f8284fb`
+- `P-A5-cos.zip` SHA256 `2b9ddac0ee53ea3874588c826015931401c3185cb9b4d6373b3119b024bfaf93`
+- `P-A5-rel.zip` SHA256 `63fdb3d4dca3b2230c5d37cd48da48089478c0ec79a38988c046d3b02439b111`
+
 ## 6. Tái tạo
 
-`pool_ceiling.py` (mục 2); `pool_fingerprint.py`, `pool_fingerprint_cpu.py`, `pool_fingerprint_e5.py`, `pool_fingerprint_zhq.py`, `pool_fingerprint_doclen.py`, `pool_fingerprint_qwen3.py` (mục 3, chạy bằng `.venv` khi cần bitsandbytes/jieba/rank_bm25); `pool_body512_domain.py` (theo domain; tên file giữ chữ body512 nhưng là doc_text nguyên); `translate_zh.py` (Ollama, chia shard `k/3`); `vi_links.py`, `vi_pool_test.py` (mục 4). P-A2: `pa2_texts.py` (map ID P1 → canonical, text), `pa2_embed.py` (nhúng, checkpoint 5.000 doc), `pa2_build.py` (so thứ tự + ZIP). P-A3/P-A4: `full_embed.py <out> <pa2_dir>` (nhúng toàn bộ canonical, resume theo khối), `pa3_build.py <out> <scratch> <doc_vectors.npz> <name> {pa3|pa3r} [nc]`, `validate_pa3.py <zip>`. P-A4: `body_check.py <pa2_dir> [N] [seed]` (dựng lại chunk P1 từ canonical), `pa4_run.sh <name> nc new=body [k=x] [ncx=x]` (`S26_SCRATCH` = thư mục `q_dense.npy`). Data và src lấy từ checkout chính qua `R2AI_ROOT`.
+`pool_ceiling.py` (mục 2); `pool_fingerprint.py`, `pool_fingerprint_cpu.py`, `pool_fingerprint_e5.py`, `pool_fingerprint_zhq.py`, `pool_fingerprint_doclen.py`, `pool_fingerprint_qwen3.py` (mục 3, chạy bằng `.venv` khi cần bitsandbytes/jieba/rank_bm25); `pool_body512_domain.py` (theo domain; tên file giữ chữ body512 nhưng là doc_text nguyên); `translate_zh.py` (Ollama, chia shard `k/3`); `vi_links.py`, `vi_pool_test.py` (mục 4). P-A2: `pa2_texts.py` (map ID P1 → canonical, text), `pa2_embed.py` (nhúng, checkpoint 5.000 doc), `pa2_build.py` (so thứ tự + ZIP). P-A3/P-A4: `full_embed.py <out> <pa2_dir>` (nhúng toàn bộ canonical, resume theo khối), `pa3_build.py <out> <scratch> <doc_vectors.npz> <name> {pa3|pa3r} [nc]`, `validate_pa3.py <zip>`. P-A4: `body_check.py <pa2_dir> [N] [seed]` (dựng lại chunk P1 từ canonical), `pa4_run.sh <name> nc new=body [k=x] [ncx=x]` (`S26_SCRATCH` = thư mục `q_dense.npy`). P-A5: `pa5_run.sh` (`sel=ku|cos|rel tmean=…`). Data và src lấy từ checkout chính qua `R2AI_ROOT`.

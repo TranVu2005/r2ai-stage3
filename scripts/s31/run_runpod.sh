@@ -61,8 +61,8 @@ import sys
 from pathlib import Path
 from huggingface_hub import snapshot_download
 hf_id, revision, gate = sys.argv[1], sys.argv[2] or None, sys.argv[3]
-snapshot_download("Qwen/Qwen3-Reranker-0.6B", revision=gate)
-print(Path(snapshot_download(hf_id, revision=revision)).name)
+snapshot_download(repo_id="Qwen/Qwen3-Reranker-0.6B", revision=gate)
+print(Path(snapshot_download(repo_id=hf_id, revision=revision)).name)
 PYEOF
 )
 echo "$REVISION" > "$OUT/$MODEL.revision"

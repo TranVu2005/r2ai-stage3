@@ -1,8 +1,8 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-20 19:55 (UTC+7)
+- Cập nhật: 2026-10-20 20:21 (UTC+7)
 - Model thực hiện: Claude Opus 5.5
-- Commit HEAD đã kiểm trước cập nhật này: `ebfd6003209c02db142de9be4167a1aa24540c12`, nhánh `feat/s31-strong-judge`
+- Commit HEAD đã kiểm trước cập nhật này: `03cf3b4e1606ed8378bcbb684cd69a332469296a`, nhánh `feat/s31-strong-judge`
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - **Best mới đã đo: R1m 0,2673** (Qwen3-Reranker-0,6B + RRF trên phía zh, D16; người dùng cung cấp 15/10). **R1m chưa tích hợp vào repo này**: chờ phía vi (S15, sáng 16/10) rồi tích hợp một lần, kèm pin model Qwen3 (revision `e61197ed…`) và cache điểm. Trong repo, best tái tạo được vẫn là **C1 0,2655**. **C3 (S6-f + zh đợt 3) đã vào `main` local theo S14b: replay JSON `6cf9284d…3436` và ZIP `1c2472d1…1af9` khớp, chưa có điểm LB.** Chi tiết mục 5 (S14b).
 - **S14 (14/10, nhánh `feat/integrate`, chưa push): tái tạo C1 bằng một lệnh.** Best đã đo: **C1 Final 0,2655** (người dùng cung cấp) = base S6-f-K150 + doc zh đợt 2 (τ_doc tuyệt đối −0,87255859375, trần 30) + chunk zh ZL (τ 0,96, ≤ 3 doc/query, mỗi ID v2 một chunk, chỉ doc đã chọn) + LZMA dict 256 MiB; ZIP 82.047.434 B, ZIP SHA256 `e7c84e2c37c996fe3d046bf22a4d25b2fd9e8e1c2568d928fa45797108720c13`, JSON `83375428b79957b1580299f97b05299bb292957826bd4cb8bdc602a83b8dd5f3`. `python -m r2ai.compose replay --manifest configs/best-c1.yaml` (pin đủ input trong `configs/best-c1.yaml`, thiếu pin thì dừng) dựng lại **JSON SHA và ZIP SHA đều khớp**, validator native 0 lỗi / 1.200 query / 126.208 chunk. Replay S6-f JSON `d0da38b1…dca1` khớp; A1-115 JSON `4ffbba8b…2c82` khớp (ZIP khác 8 byte do mtime, gate là JSON); VS-append JSON và ZIP khớp. `submission-best.yaml` vẫn mặc định A1-115. Chi tiết mục 5 (S14) và `submissions/LOG.md`.
@@ -509,6 +509,7 @@ Cập nhật 2026-10-17 20:25 (UTC+7), GPT-6 (Codex, S24 recovery): D21 bỏ qua
 
 | Thời gian (UTC+7) | Ai | Thay đổi |
 |---|---|---|
+| 2026-10-20 20:21 | Claude Opus 5.5 | S31 fix: notebook Kaggle và `run_runpod.sh` gọi `snapshot_download(repo_id=..., revision=...)` (huggingface_hub mới: `revision` keyword-only, lỗi TypeError Vu báo); `judge_score.py` không gọi snapshot_download. |
 | 2026-10-20 19:55 | Claude Opus 5.5 | S31: `--subset pool13/tail`, `status`, notebook phiên 1 = pool13; `run_runpod.sh` cho 8B (hf vs vLLM gate); report sửa private: chi phí GPU một lần, chờ BTC xác nhận. |
 | 2026-10-20 19:45 | Claude Opus 5.5 | S31 Pha 1: pool 2,0× 433.732 cặp / 22 shard / 299,4 MB; script chấm resumable + notebook Kaggle; hồi quy 0.6B Spearman 0,9996 so S29; 4B/8B chưa chạy, Pha 3 chờ builder S29. |
 | 2026-10-20 18:27 | GPT-6 (Codex) | S29: full 281.924 cặp Qwen 10,937/s trong 7h09m, không OOM; Q-filter/Q-RRF dựng CPU. Doc-ID sym-diff TB 79,665/44,70 mỗi query, vi/zh 76,86/23,14% và 77,40/22,60%; S26 validator 0 lỗi cả hai; chưa submit, không có LB score. |

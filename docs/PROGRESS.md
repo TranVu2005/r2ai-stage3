@@ -1,8 +1,8 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-20 10:41 (UTC+7)
+- Cập nhật: 2026-10-20 12:57 (UTC+7)
 - Model thực hiện: Claude Opus 5.5
-- Commit HEAD đã kiểm trước cập nhật này: `d777a6e98a962074a4017e25e5bd61244f1b3870`, nhánh `feat/s26-gold-structure` (tách từ `feat/s24-recovery`)
+- Commit HEAD đã kiểm trước cập nhật này: `5989334683ed37a7d60632f07e51fa54ee2bc055`, nhánh `feat/s26-gold-structure` (tách từ `feat/s24-recovery`)
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - **Best mới đã đo: R1m 0,2673** (Qwen3-Reranker-0,6B + RRF trên phía zh, D16; người dùng cung cấp 15/10). **R1m chưa tích hợp vào repo này**: chờ phía vi (S15, sáng 16/10) rồi tích hợp một lần, kèm pin model Qwen3 (revision `e61197ed…`) và cache điểm. Trong repo, best tái tạo được vẫn là **C1 0,2655**. **C3 (S6-f + zh đợt 3) đã vào `main` local theo S14b: replay JSON `6cf9284d…3436` và ZIP `1c2472d1…1af9` khớp, chưa có điểm LB.** Chi tiết mục 5 (S14b).
 - **S14 (14/10, nhánh `feat/integrate`, chưa push): tái tạo C1 bằng một lệnh.** Best đã đo: **C1 Final 0,2655** (người dùng cung cấp) = base S6-f-K150 + doc zh đợt 2 (τ_doc tuyệt đối −0,87255859375, trần 30) + chunk zh ZL (τ 0,96, ≤ 3 doc/query, mỗi ID v2 một chunk, chỉ doc đã chọn) + LZMA dict 256 MiB; ZIP 82.047.434 B, ZIP SHA256 `e7c84e2c37c996fe3d046bf22a4d25b2fd9e8e1c2568d928fa45797108720c13`, JSON `83375428b79957b1580299f97b05299bb292957826bd4cb8bdc602a83b8dd5f3`. `python -m r2ai.compose replay --manifest configs/best-c1.yaml` (pin đủ input trong `configs/best-c1.yaml`, thiếu pin thì dừng) dựng lại **JSON SHA và ZIP SHA đều khớp**, validator native 0 lỗi / 1.200 query / 126.208 chunk. Replay S6-f JSON `d0da38b1…dca1` khớp; A1-115 JSON `4ffbba8b…2c82` khớp (ZIP khác 8 byte do mtime, gate là JSON); VS-append JSON và ZIP khớp. `submission-best.yaml` vẫn mặc định A1-115. Chi tiết mục 5 (S14) và `submissions/LOG.md`.
@@ -503,6 +503,7 @@ Cập nhật 2026-10-17 20:25 (UTC+7), GPT-6 (Codex, S24 recovery): D21 bỏ qua
 
 | Thời gian (UTC+7) | Ai | Thay đổi |
 |---|---|---|
+| 2026-10-20 12:57 | Claude Opus 5.5 | S26: bảng n_c đủ Chunk P/R (Vu cung cấp): precision biên 12,9% / 9,8% / 7,7% (cách của Vu), 14,1% / 11,3% / 9,4% (theo số chunk thật), ngưỡng F2/5 ≈ 7,4–7,6% ⇒ chốt n_c ×1,4. |
 | 2026-10-20 10:41 | Claude Opus 5.5 | S26: nền mới K90-ph-nc140 97.094.588 B (SHA `089a59f1…a8b5`), validator 0 lỗi, chưa nộp; đóng hướng extractor (fp32 và cách nối title không đổi AUC); bảng n_c trong report. |
 | 2026-10-20 07:46 | Claude Opus 5.5 | S26 K90-nc120/140/160: 84,03/97,09/102,34 MB; nc160 cắt body doc mới N = 5.652 (10.044 chunk); validator 0 lỗi, chưa nộp. |
 | 2026-10-20 06:53 | Claude Opus 5.5 | S26/S27 P-A4-K90-ph: K90 + pharmacity, selection 135/612 (22,1%), 165 query; ZIP 70,99 MB, validator 0 lỗi, chưa nộp. |

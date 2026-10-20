@@ -392,22 +392,22 @@ Ghi chú:
 
 ## 5i. Chốt n_c ×1,4 và bản nền mới K90-ph-nc140 (20/10, chưa nộp)
 
-**LB (Vu báo):** K90-nc140 **0,3817** (Chunk F2 0,3823); K90-nc160 0,3819 (đã cắt N). Chunk bão hoà ở khoảng n_c ×1,4–1,5. Chốt n_c ×1,4.
+**LB (Vu báo):** K90-nc140 **0,3817** (Chunk F2 0,3823); K90-nc160 Final 0,3819, Chunk F2 0,3819 (đã cắt N). Chunk bão hoà ở khoảng n_c ×1,4–1,5. Chốt n_c ×1,4.
 
-**Bảng n_c.**
+**Bảng n_c** (Chunk P/R do Vu cung cấp từ LB). Chunk không phụ thuộc K, nên hàng ×1,2 (nộp trên doc P-A4, K ×1,0) vẫn so được với các hàng trên doc K90.
 
-| n_c × | Bản đã nộp | Doc | Chunk / query | Final | Chunk F2 | Chunk P / R | Ngưỡng hoà vốn (Chunk F2 / 5) | Precision biên của phần chunk thêm |
-|---:|---|---|---:|---:|---:|---:|---:|---:|
-| 1,0 | P-A4-K90 | K90 | 105,1 | 0,3750 | 0,3689 | chưa có | 7,4% | — |
-| 1,2 | P-A4-nc120 | P-A4 (K ×1,0) | 126,1 | 0,3797 | 0,3788 | 0,2523 / 0,5041 | 7,6% | **12,9%** (Vu tính, so với P-A4) |
-| 1,4 | K90-nc140 | K90 | 146,3 | 0,3817 | 0,3823 | chưa có | 7,6% | > ngưỡng (Chunk F2 tăng) |
-| 1,6 | K90-nc160 (cắt N = 5.652) | K90 | 158,8 | 0,3819 | chưa rõ | chưa có | 7,6% | ≈ ngưỡng (gần như không tăng) |
+| n_c × | Bản đã nộp | Chunk / query | Final | Chunk F2 | Chunk P | Chunk R | Ngưỡng hoà vốn (F2 bản trước / 5) | Precision biên, cách của Vu | Precision biên, theo số chunk thật |
+|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1,0 | P-A4-K90 | 105,1 | 0,3750 | 0,3689 | 0,2746 | 0,4649 | — | — | — |
+| 1,2 | P-A4-nc120 | 126,1 | 0,3797 | 0,3788 | 0,2523 | 0,5041 | 7,4% | **12,9%** | 14,1% |
+| 1,4 | K90-nc140 | 146,3 | 0,3817 | 0,3823 | 0,2331 | 0,5320 | 7,6% | **9,8%** | 11,3% |
+| 1,6 | K90-nc160 (cắt N = 5.652) | 158,8 | 0,3819 | 0,3819 | 0,2222 | 0,5452 | 7,6% | **7,7%** (Vu ước ≈7,6%) | 9,4% |
 
-Ghi chú:
-- Ngưỡng hoà vốn: với F_β, thêm chunk làm F tăng khi và chỉ khi precision của phần thêm lớn hơn F/(1+β²). Với β = 2, ngưỡng = Chunk F2/5; ở n_c ×1,2 ra 0,3788/5 = 7,6%, khớp số Vu đưa.
-- Precision biên chính xác cần Chunk P của hai bản liền kề: (P₂·N₂ − P₁·N₁)/(N₂ − N₁), với N là số chunk trung bình mỗi query. Chỉ hàng ×1,2 tính đủ được. Các hàng còn lại chỉ suy được dấu, dựa trên việc Chunk F2 có tăng hay không.
-- Hàng ×1,2 nộp trên doc P-A4 (K ×1,0), không phải trên doc K90.
-- "0,3819" của nc160 ghi theo lời Vu ("0,3819 chunk"); chưa rõ đó là Final hay Chunk F2.
+Cách tính:
+- **Ngưỡng hoà vốn:** với F_β, thêm chunk làm F tăng khi và chỉ khi precision của phần thêm lớn hơn F/(1+β²) = F2/5 (β = 2).
+- **Cách của Vu:** P_biên ≈ P_trước × (ΔR/R) / (ΔN/N), với N ∝ R/P (số chunk suy ra từ P/R, coi gold cố định).
+- **Theo số chunk thật:** (P₂·N₂ − P₁·N₁)/(N₂ − N₁), với N là số chunk trung bình thật mỗi query trong ZIP (105,1 / 126,1 / 146,3 / 158,8). Vì P và R là trung bình macro theo query, hai cách lệch nhau 1,2–1,7 điểm. Số chunk thật tăng nhanh hơn N suy ra từ R/P (+20,0% so với +18,0%; +16,0% so với +14,2%; +8,5% so với +7,5%), có thể vì query nhiều chunk có precision thấp hơn.
+- Theo cả hai cách, bước 1,4 → 1,6 chỉ còn sát hoặc hơi trên ngưỡng, Chunk F2 gần như đứng yên (0,3823 → 0,3819). Vì vậy chốt **n_c ×1,4**.
 
 **Bản nền chuẩn mới: `K90-ph-nc140`** (`out/runs/s26-gold-structure/base/K90-ph-nc140.zip`, chưa nộp).
 - Doc: K90 (top-K_q ×0,9 doc-level trên 887.151 doc canonical + 612 doc pharmacity), trùng doc của P-A4-K90-ph.

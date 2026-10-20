@@ -329,7 +329,8 @@ if size >= CEIL and NEW == 'body' and src['body']:
         N, payload, size = best
         if tries[-1][0] != N:                               # leave the chosen N in tmp
             payload, size = build(N)
-rep = {**xstat, 'sel': SEL, 'sel_tmean': TMEAN or None, 'sel_param': sel_param, 'docs_per_query_quantiles': st.K.quantile([0, .1, .5, .9, 1]).to_dict(), 'name': name, 'mode': mode, 'new_doc_chunk': NEW, 'body_cut_chars': N, 'size_tries': tries, 'chunks_rule': 'n_c of P1 row' if NC else '1 per chosen doc', 'doc_vectors': str(vec), 'n_doc_vectors': len(ids), 'base': ZP, 'queries': len(new_rows),
+cut_n = [len(c['chunk_text']) for r in new_rows for c in r['relevant_chunks'] if c.get('_new') and N and len(c['chunk_text']) > N]
+rep = {**xstat, 'body_cut_chunks': len(cut_n), 'body_cut_chars_removed': int(sum(x - N for x in cut_n)) if cut_n else 0, 'sel': SEL, 'sel_tmean': TMEAN or None, 'sel_param': sel_param, 'docs_per_query_quantiles': st.K.quantile([0, .1, .5, .9, 1]).to_dict(), 'name': name, 'mode': mode, 'new_doc_chunk': NEW, 'body_cut_chars': N, 'size_tries': tries, 'chunks_rule': 'n_c of P1 row' if NC else '1 per chosen doc', 'doc_vectors': str(vec), 'n_doc_vectors': len(ids), 'base': ZP, 'queries': len(new_rows),
        'zip_bytes': size, 'json_bytes': len(payload), 'json_sha256': hashlib.sha256(payload).hexdigest(), 'ceiling': CEIL,
        'docs_total': int(st.K.sum()), 'chunks_total': sum(len(r['relevant_chunks']) for r in new_rows),
        'new_body_chars_mean': float(np.mean([len(c['chunk_text']) for r in new_rows for c in r['relevant_chunks'] if c.get('_new')] or [0])), 'chunk_source': src,

@@ -325,6 +325,37 @@ Ghi chú:
 - Phần còn thiếu tới 1 có lẽ đến từ khác biệt nhỏ trong cách lấy title/Q&A hoặc từ bản HTML khác thời điểm crawl, không đến từ việc chọn thư viện.
 - Kiểm tra raw HTML cho vi lẫn zh không cần chạy vì điều kiện >0,95 không đạt.
 
+## 5h. K90 với nhiều chunk hơn: nc120 / nc140 / nc160 (20/10, chưa nộp)
+
+**LB (Vu báo):** P-A4-nc120 **0,3797** (Chunk F2 0,3788; P 0,2523 / R 0,5041). Precision biên của phần chunk thêm khoảng 12,9%, trên ngưỡng hoà vốn khoảng 7,6%, nên tăng n_c tiếp.
+
+**Cấu hình.**
+- Doc giữ đúng K90: relevant_docs trùng K90 ở cả 1.200/1.200 query.
+- Số chunk mỗi query = min(round(n_c × hệ số), K_q). Chunk dồn cho doc đứng đầu, theo quy tắc như P-A4 (chunk P1 nếu có, không thì nguyên body canonical).
+- Lệnh: `k90nc_run.sh <name> <hệ số>`.
+- Khi vượt trần, chỉ cắt **body của doc mới** về N ký tự đầu; chunk P1 giữ nguyên byte. Một ngưỡng N chung chỉ cắt các body dài hơn N, tức là body dài nhất bị cắt trước, body ngắn không bị đụng.
+
+| | K90 (nền) | K90-nc120 | K90-nc140 | K90-nc160 |
+|---|---:|---:|---:|---:|
+| Chunk (mục tiêu) | 126.133 (126.228) | 151.332 (151.479) | 175.552 (175.906) | 190.526 (191.680) |
+| Chunk / query | 105,1 | 126,1 | 146,3 | 158,8 |
+| Nguồn chunk P1 cùng query / P1 query khác / body | 46.294 / 25.186 / 54.653 | 50.166 / 31.600 / 69.566 | 53.227 / 37.913 / 84.412 | 54.846 / 41.769 / 93.911 |
+| ZIP chưa cắt (B) | 70.962.833 | 84.026.805 | 97.087.414 | 104.945.988 (> trần) |
+| Cắt N | không | không | không | **N = 5.652 ký tự** |
+| Chunk bị cắt | 0 | 0 | 0 | **10.044** / 93.911 body (bỏ 13.931.972 ký tự) |
+| **ZIP (B)** | 70.962.833 | **84.026.805** | **97.087.414** | **102.338.122** |
+| Validator | 0 lỗi | 0 lỗi | 0 lỗi | 0 lỗi |
+
+Ghi chú:
+- Chunk thực tế thấp hơn mục tiêu vì doc thin không mang chunk được.
+- nc160 bằng khoảng 97,6% K_q, nên đã gần chạm trần K_q (162,6 doc/query).
+- Dò N trên nc160: chưa cắt 104.945.988 B, N = 5.384 cho 101.746.775 B, N = 5.652 cho 102.338.122 B (cách trần 0,26%, chọn).
+
+**ZIP (chưa nộp), `out/runs/s26-gold-structure/pa6/`, LZMA props `5d00000010`:**
+- `K90-nc120.zip` SHA256 `2ca3dc58b3ac6c1af9e85ee5cf94e6d9588b5d200c02adcff9b1e6b6d8f9da25`
+- `K90-nc140.zip` SHA256 `b01988bf90ca64f8f4fe485b2456725296d13d70b7b43233147d50fe5820e09d`
+- `K90-nc160.zip` SHA256 `3d3f9fd636a32aeb3bc87c5abfcf67570371b62ebe638300cafaa7d25194d9b5`
+
 ## 6. Tái tạo
 
-`pool_ceiling.py` (mục 2); `pool_fingerprint.py`, `pool_fingerprint_cpu.py`, `pool_fingerprint_e5.py`, `pool_fingerprint_zhq.py`, `pool_fingerprint_doclen.py`, `pool_fingerprint_qwen3.py` (mục 3, chạy bằng `.venv` khi cần bitsandbytes/jieba/rank_bm25); `pool_body512_domain.py` (theo domain; tên file giữ chữ body512 nhưng là doc_text nguyên); `translate_zh.py` (Ollama, chia shard `k/3`); `vi_links.py`, `vi_pool_test.py` (mục 4). P-A2: `pa2_texts.py` (map ID P1 → canonical, text), `pa2_embed.py` (nhúng, checkpoint 5.000 doc), `pa2_build.py` (so thứ tự + ZIP). P-A3/P-A4: `full_embed.py <out> <pa2_dir>` (nhúng toàn bộ canonical, resume theo khối), `pa3_build.py <out> <scratch> <doc_vectors.npz> <name> {pa3|pa3r} [nc]`, `validate_pa3.py <zip>`. P-A4: `body_check.py <pa2_dir> [N] [seed]` (dựng lại chunk P1 từ canonical), `pa4_run.sh <name> nc new=body [k=x] [ncx=x]` (`S26_SCRATCH` = thư mục `q_dense.npy`). P-A5: `pa5_run.sh` (`sel=ku|cos|rel tmean=…`). Extractor: `ext_variants.py <out> [workers]` (venv có trafilatura/newspaper4k/readability-lxml/justext/html2text/bs4), `ext_fingerprint.py <scratch> <out> <variant[+title],…>`. Data và src lấy từ checkout chính qua `R2AI_ROOT`.
+`pool_ceiling.py` (mục 2); `pool_fingerprint.py`, `pool_fingerprint_cpu.py`, `pool_fingerprint_e5.py`, `pool_fingerprint_zhq.py`, `pool_fingerprint_doclen.py`, `pool_fingerprint_qwen3.py` (mục 3, chạy bằng `.venv` khi cần bitsandbytes/jieba/rank_bm25); `pool_body512_domain.py` (theo domain; tên file giữ chữ body512 nhưng là doc_text nguyên); `translate_zh.py` (Ollama, chia shard `k/3`); `vi_links.py`, `vi_pool_test.py` (mục 4). P-A2: `pa2_texts.py` (map ID P1 → canonical, text), `pa2_embed.py` (nhúng, checkpoint 5.000 doc), `pa2_build.py` (so thứ tự + ZIP). P-A3/P-A4: `full_embed.py <out> <pa2_dir>` (nhúng toàn bộ canonical, resume theo khối), `pa3_build.py <out> <scratch> <doc_vectors.npz> <name> {pa3|pa3r} [nc]`, `validate_pa3.py <zip>`. P-A4: `body_check.py <pa2_dir> [N] [seed]` (dựng lại chunk P1 từ canonical), `pa4_run.sh <name> nc new=body [k=x] [ncx=x]` (`S26_SCRATCH` = thư mục `q_dense.npy`). P-A5: `pa5_run.sh` (`sel=ku|cos|rel tmean=…`). K90-nc: `k90nc_run.sh <name> <ncx>`. Extractor: `ext_variants.py <out> [workers]` (venv có trafilatura/newspaper4k/readability-lxml/justext/html2text/bs4), `ext_fingerprint.py <scratch> <out> <variant[+title],…>`. Data và src lấy từ checkout chính qua `R2AI_ROOT`.

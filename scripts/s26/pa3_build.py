@@ -26,7 +26,7 @@ lots/<lot>/chunks/{docs,chunks_t256}.parquet; vectors are read from <vectors_roo
 chunk span (same rule as canonical). The report adds extra_chosen / extra_queries / extra_selection_rate.
 `dry`: stop after the doc choice and stats (no chunk texts, no ZIP).
 Usage: pa3_build.py <out_dir> <scratch_dir> <doc_vectors.npz> <name> {pa3|pa3r} [nc] [k=x] [ncx=x] [ref=zip] [new=body]
-                    [extra=dir extravec=dir] [dry] [sel=ku|cos|rel tmean=x]
+                    [extra=dir extravec=dir] [dry] [sel=ku|cos|rel tmean=x] [compact]
 `sel` (mode pa3 only) replaces per-query K_q by: ku = round(tmean) docs for every query; cos = docs with cosine >= theta,
 one global theta; rel = docs with cosine >= cos(top-1) - delta, one global delta. theta/delta are bisected so the mean
 number of docs per query is as close to tmean as the integer counts allow (reported as sel_param / sel_mean).
@@ -42,6 +42,7 @@ ZP = 'out/runs/reranker-trial/release/P1-vi+10.zip'; CEIL = 102_600_000; DATE_TI
 CAN = 'data/canonical-20261018'
 out, S, vec, name, mode = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4], sys.argv[5]
 NC, DRY = 'nc' in sys.argv[6:], 'dry' in sys.argv[6:]
+SEP = (',', ':') if 'compact' in sys.argv[6:] else None   # compact: no spaces after , and : inside a row
 OPT = dict(a.split('=', 1) for a in sys.argv[6:] if '=' in a)
 KX, NCX = float(OPT.get('k', 1)), float(OPT.get('ncx', 1))
 NEW = OPT.get('new', 't256'); assert NEW in ('t256', 'body')
@@ -284,7 +285,7 @@ def build(N):
     def row(r):
         return {**r, 'relevant_chunks': [{'doc_id': c['doc_id'], 'chunk_text': c['chunk_text'][:N] if c.get('_new') and N else c['chunk_text']}
                                          for c in r['relevant_chunks']]}
-    payload = ('[\n' + ',\n'.join(json.dumps(row(r), ensure_ascii=False) for r in new_rows) + '\n]\n').encode('utf-8')
+    payload = ('[\n' + ',\n'.join(json.dumps(row(r), ensure_ascii=False, separators=SEP) for r in new_rows) + '\n]\n').encode('utf-8')
     with lzma_dictionary(256), zipfile.ZipFile(tmp, 'w', compression=zipfile.ZIP_LZMA) as z:
         info = zipfile.ZipInfo(f'{name}.json', date_time=DATE_TIME); info.compress_type = zipfile.ZIP_LZMA
         with z.open(info, 'w', force_zip64=True) as f:

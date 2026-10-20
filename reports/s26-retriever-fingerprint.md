@@ -325,6 +325,40 @@ Ghi chú:
 - Phần còn thiếu tới 1 có lẽ đến từ khác biệt nhỏ trong cách lấy title/Q&A hoặc từ bản HTML khác thời điểm crawl, không đến từ việc chọn thư viện.
 - Kiểm tra raw HTML cho vi lẫn zh không cần chạy vì điều kiện >0,95 không đạt.
 
+**Hai kiểm tra cuối (20/10) — đóng hướng extractor.**
+
+*1. Mười doc kept có min-rank tệ nhất (extractor hiện tại, 29.385 doc).* Phân vị min-rank của doc kept: median 4, P90 13, P99 44,9, tối đa 1.848. Với mỗi doc, liệt kê query có hạng tốt nhất:
+
+| min-rank | cos | Domain | Doc (tiêu đề, mở đầu) | Query gần nhất | Khớp chủ đề? |
+|---:|---:|---|---|---|---|
+| 1.848 | 0,432 | zhongyibaodian | 上海信谊万象药业: trang thông tin công ty (địa chỉ, điện thoại) | Q22 khi nào công dân, doanh nghiệp được tiêm chủng | **Không** |
+| 951 | 0,462 | a-hospital | 浙江仙琚制药: trang thông tin công ty dược | Q233 thuốc hormon tuyến giáp ảnh hưởng sinh sản | **Không** (chỉ trùng ngành dược) |
+| 194 | 0,551 | a-hospital | 大豆方: bài thuốc đậu nành, 2 dòng cách nấu | Q873 điều trị viêm mũi dị ứng | **Không** |
+| 110 | 0,542 | a-hospital | 恶性肿瘤: trang mục lục sách, chỉ có link chương | Q1126 thoái hoá cơ tuỷ do mất đoạn gen | **Không** |
+| 105 | 0,560 | jb39 | 后壁穿孔性溃疡: loét thủng mặt sau tá tràng | Q418 HPV có chữa hết không | Không (query gần nhất lệch chủ đề) |
+| 87 | 0,570 | 120ask | Hỏi sản phẩm Amway sau mổ tuyến giáp, mặt phù | Q289 thuốc bổ trợ đào thải HPV (AHCC) | Yếu (cùng chủ đề thực phẩm chức năng) |
+| 76 | 0,565 | cnkang | 骨质增生: gai xương do thiếu canxi | Q173 mất cảm giác bắp đùi | Yếu |
+| 75 | 0,575 | 120ask | Chóng mặt, nhìn mờ | Q1128 mờ mắt do máu tụ chèn dây thần kinh | Một phần |
+| 74 | 0,563 | 120ask | Hôi miệng từ năm 15 tuổi, miệng đắng | Q1156 hôi miệng lâu năm do đâu | **Có** |
+| 73 | 0,570 | jbk.39 | Kháng thể Toxoplasma huyết thanh, lưu ý trước khi lấy máu | Q1190 xét nghiệm CA 19-9 | Một phần (cùng loại xét nghiệm máu) |
+
+Đánh giá:
+- 4 doc tệ nhất (2 trang công ty dược, 1 bài thuốc 2 dòng, 1 trang mục lục) không khớp chủ đề với query nào trong 1.200 query. Chúng chiếm 4/2.413 = 0,17% số doc kept.
+- 6 doc còn lại khớp một phần hoặc khớp hẳn (hôi miệng). Hạng 73–105 trong mẫu 2% nghĩa là chúng nằm sâu trong pool đầy đủ, phù hợp với việc BTC lấy pool sâu cho mỗi query.
+- **Giả thuyết được ghi nhận:** BTC có thể đã dùng thêm query ngoài tập test (ví dụ query của tập private hoặc query sinh thêm), hoặc lấp một phần rất nhỏ (≤0,2%) không theo query. Phần lệch nằm ở đuôi rất mỏng nên không ảnh hưởng kết luận chính.
+
+*2. Hai biến thể encode trên mẫu con 5.000 doc* (đủ 2.413 kept + 2.587 dropped, RandomState 42; `ext_encode_check.py`):
+
+| Biến thể | AUC −min-rank | AUC best | Kept khi min-rank = 1 |
+|---|---:|---:|---:|
+| Mốc: fp16, doc_text = title + "\n\n" + body | 0,9029 | 0,8165 | 0,894 |
+| fp32 (doc và 1.200 query nhúng lại bằng fp32) | 0,9032 | 0,8165 | 0,896 |
+| fp16, doc_text = title + "\n" + body (11/5.000 doc không có tiền tố title nên giữ nguyên) | 0,9029 | 0,8165 | 0,894 |
+
+Cả hai chỉ lệch tối đa ±0,0003 so với mốc: độ chính xác số và cách nối title không giải thích được khoảng cách 0,924 → 1. Lần chạy fp32 đầu tiên quá chậm vì VRAM 6 GB tràn sang bộ nhớ chia sẻ; đã chạy lại với batch nhỏ hơn 4 lần.
+
+**Đóng hướng extractor.** Không nhúng lại canonical. GPU chuyển cho S29.
+
 ## 5h. K90 với nhiều chunk hơn: nc120 / nc140 / nc160 (20/10, chưa nộp)
 
 **LB (Vu báo):** P-A4-nc120 **0,3797** (Chunk F2 0,3788; P 0,2523 / R 0,5041). Precision biên của phần chunk thêm khoảng 12,9%, trên ngưỡng hoà vốn khoảng 7,6%, nên tăng n_c tiếp.
@@ -356,6 +390,36 @@ Ghi chú:
 - `K90-nc140.zip` SHA256 `b01988bf90ca64f8f4fe485b2456725296d13d70b7b43233147d50fe5820e09d`
 - `K90-nc160.zip` SHA256 `3d3f9fd636a32aeb3bc87c5abfcf67570371b62ebe638300cafaa7d25194d9b5`
 
+## 5i. Chốt n_c ×1,4 và bản nền mới K90-ph-nc140 (20/10, chưa nộp)
+
+**LB (Vu báo):** K90-nc140 **0,3817** (Chunk F2 0,3823); K90-nc160 0,3819 (đã cắt N). Chunk bão hoà ở khoảng n_c ×1,4–1,5. Chốt n_c ×1,4.
+
+**Bảng n_c.**
+
+| n_c × | Bản đã nộp | Doc | Chunk / query | Final | Chunk F2 | Chunk P / R | Ngưỡng hoà vốn (Chunk F2 / 5) | Precision biên của phần chunk thêm |
+|---:|---|---|---:|---:|---:|---:|---:|---:|
+| 1,0 | P-A4-K90 | K90 | 105,1 | 0,3750 | 0,3689 | chưa có | 7,4% | — |
+| 1,2 | P-A4-nc120 | P-A4 (K ×1,0) | 126,1 | 0,3797 | 0,3788 | 0,2523 / 0,5041 | 7,6% | **12,9%** (Vu tính, so với P-A4) |
+| 1,4 | K90-nc140 | K90 | 146,3 | 0,3817 | 0,3823 | chưa có | 7,6% | > ngưỡng (Chunk F2 tăng) |
+| 1,6 | K90-nc160 (cắt N = 5.652) | K90 | 158,8 | 0,3819 | chưa rõ | chưa có | 7,6% | ≈ ngưỡng (gần như không tăng) |
+
+Ghi chú:
+- Ngưỡng hoà vốn: với F_β, thêm chunk làm F tăng khi và chỉ khi precision của phần thêm lớn hơn F/(1+β²). Với β = 2, ngưỡng = Chunk F2/5; ở n_c ×1,2 ra 0,3788/5 = 7,6%, khớp số Vu đưa.
+- Precision biên chính xác cần Chunk P của hai bản liền kề: (P₂·N₂ − P₁·N₁)/(N₂ − N₁), với N là số chunk trung bình mỗi query. Chỉ hàng ×1,2 tính đủ được. Các hàng còn lại chỉ suy được dấu, dựa trên việc Chunk F2 có tăng hay không.
+- Hàng ×1,2 nộp trên doc P-A4 (K ×1,0), không phải trên doc K90.
+- "0,3819" của nc160 ghi theo lời Vu ("0,3819 chunk"); chưa rõ đó là Final hay Chunk F2.
+
+**Bản nền chuẩn mới: `K90-ph-nc140`** (`out/runs/s26-gold-structure/base/K90-ph-nc140.zip`, chưa nộp).
+- Doc: K90 (top-K_q ×0,9 doc-level trên 887.151 doc canonical + 612 doc pharmacity), trùng doc của P-A4-K90-ph.
+- Chunk: n_c ×1,4 (≤ K_q), dồn cho doc đứng đầu. Chunk P1 giữ nguyên byte; doc mới nhận nguyên body canonical hoặc pharmacity. Không cắt N.
+- JSON gọn: `ensure_ascii=False`, separator `(',', ':')`, mỗi query một dòng (layout native). JSON 863.559.756 B, nhỏ hơn bản separator mặc định 607.208 B.
+- 175.552 chunk (mục tiêu 175.906), 146,3 chunk/query. Nguồn chunk: P1 cùng query 53.204, P1 query khác 37.852, body 84.496.
+- Pharmacity: 204 lượt lọt top-K_q, 165 query, 135 doc khác nhau (22,1%), 184 lượt nhận chunk.
+- **ZIP 97.094.588 B, SHA256 `089a59f1029155094c21ab6faf44417ee245fae56a68e0dacebf52f9a913a8b5`**; JSON SHA256 `c09a147b15144073c90de3b86ad0ca469db892d835ab4524b309ba151d725282`; LZMA props `5d00000010`.
+- Validator: 0 lỗi, kể cả kiểm layout native (`r2ai.eval.validate.check_format`); 91.056 cặp P1 + 84.496 substring.
+- Lệnh: `pa3_build.py <out> <scratch> full_doc_dense.npz K90-ph-nc140 pa3 nc new=body k=0.9 ncx=1.4 compact extra=<pharmacity handoff> extravec=<pharmacity vectors>`.
+- Từ giờ mọi biến thể vế doc (rel, Kfit, Qwen) dựng trên nền này: giữ `nc new=body ncx=1.4 compact extra=… extravec=…`, chỉ đổi phần chọn doc.
+
 ## 6. Tái tạo
 
-`pool_ceiling.py` (mục 2); `pool_fingerprint.py`, `pool_fingerprint_cpu.py`, `pool_fingerprint_e5.py`, `pool_fingerprint_zhq.py`, `pool_fingerprint_doclen.py`, `pool_fingerprint_qwen3.py` (mục 3, chạy bằng `.venv` khi cần bitsandbytes/jieba/rank_bm25); `pool_body512_domain.py` (theo domain; tên file giữ chữ body512 nhưng là doc_text nguyên); `translate_zh.py` (Ollama, chia shard `k/3`); `vi_links.py`, `vi_pool_test.py` (mục 4). P-A2: `pa2_texts.py` (map ID P1 → canonical, text), `pa2_embed.py` (nhúng, checkpoint 5.000 doc), `pa2_build.py` (so thứ tự + ZIP). P-A3/P-A4: `full_embed.py <out> <pa2_dir>` (nhúng toàn bộ canonical, resume theo khối), `pa3_build.py <out> <scratch> <doc_vectors.npz> <name> {pa3|pa3r} [nc]`, `validate_pa3.py <zip>`. P-A4: `body_check.py <pa2_dir> [N] [seed]` (dựng lại chunk P1 từ canonical), `pa4_run.sh <name> nc new=body [k=x] [ncx=x]` (`S26_SCRATCH` = thư mục `q_dense.npy`). P-A5: `pa5_run.sh` (`sel=ku|cos|rel tmean=…`). K90-nc: `k90nc_run.sh <name> <ncx>`. Extractor: `ext_variants.py <out> [workers]` (venv có trafilatura/newspaper4k/readability-lxml/justext/html2text/bs4), `ext_fingerprint.py <scratch> <out> <variant[+title],…>`. Data và src lấy từ checkout chính qua `R2AI_ROOT`.
+`pool_ceiling.py` (mục 2); `pool_fingerprint.py`, `pool_fingerprint_cpu.py`, `pool_fingerprint_e5.py`, `pool_fingerprint_zhq.py`, `pool_fingerprint_doclen.py`, `pool_fingerprint_qwen3.py` (mục 3, chạy bằng `.venv` khi cần bitsandbytes/jieba/rank_bm25); `pool_body512_domain.py` (theo domain; tên file giữ chữ body512 nhưng là doc_text nguyên); `translate_zh.py` (Ollama, chia shard `k/3`); `vi_links.py`, `vi_pool_test.py` (mục 4). P-A2: `pa2_texts.py` (map ID P1 → canonical, text), `pa2_embed.py` (nhúng, checkpoint 5.000 doc), `pa2_build.py` (so thứ tự + ZIP). P-A3/P-A4: `full_embed.py <out> <pa2_dir>` (nhúng toàn bộ canonical, resume theo khối), `pa3_build.py <out> <scratch> <doc_vectors.npz> <name> {pa3|pa3r} [nc]`, `validate_pa3.py <zip>`. P-A4: `body_check.py <pa2_dir> [N] [seed]` (dựng lại chunk P1 từ canonical), `pa4_run.sh <name> nc new=body [k=x] [ncx=x]` (`S26_SCRATCH` = thư mục `q_dense.npy`). P-A5: `pa5_run.sh` (`sel=ku|cos|rel tmean=…`). K90-nc: `k90nc_run.sh <name> <ncx>`. Extractor: `ext_variants.py <out> [workers]` (venv có trafilatura/newspaper4k/readability-lxml/justext/html2text/bs4), `ext_fingerprint.py <scratch> <out> <variant[+title],…>`, `ext_encode_check.py <scratch> <out>` (fp32 và title+"\n"+body trên mẫu con 5.000). Data và src lấy từ checkout chính qua `R2AI_ROOT`.

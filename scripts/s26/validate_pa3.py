@@ -25,6 +25,8 @@ cp = compression_profile(zp)
 err['not_dict256'] += cp['dictionary_bytes'] != 256 << 20
 err['zip_over_ceiling'] += os.path.getsize(zp) >= CEIL
 head = z.open(names[0]).read(2); err['not_json_list'] += head != b'[\n'
+from r2ai.eval.validate import check_format  # noqa: E402  (native layout: '[' line, one object per line, ']' line)
+err['native_layout'] += len(check_format(z.read(names[0]).decode('utf-8'), 1200)) > 0
 
 
 def stream_rows():                                      # one row per line (compose format), parsed lazily

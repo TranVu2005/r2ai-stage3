@@ -10,8 +10,8 @@ strings and the yes/no read-out are identical to S29 (Qwen3-Reranker-0.6B), so t
 Examples::
 
     python judge_score.py pilot  --pool POOL --out OUT --model qwen3-reranker-4b --pairs 1000
-    python judge_score.py score  --pool POOL --out OUT --model qwen3-reranker-4b --worker 0 --workers 2
-    python judge_score.py collect --pool POOL --out OUT --model qwen3-reranker-4b
+    python judge_score.py score  --pool POOL --out OUT --model qwen3-reranker-4b --subset pool13 --worker 0 --workers 2
+    python judge_score.py collect --pool POOL --out OUT --model qwen3-reranker-4b --subset pool13
 """
 from __future__ import annotations
 
@@ -145,21 +145,40 @@ def pool_shards(pool: Path) -> list[Path]:
     return shards
 
 
-def plan_parts(shards: Sequence[Path], part_pairs: int) -> list[dict[str, Any]]:
-    """Deterministic parts: consecutive ``part_pairs`` rows of each shard, in file order."""
+SUBSETS = ("all", "pool13", "tail")
+
+
+def subset_positions(shard: Path, subset: str) -> np.ndarray:
+    """Row positions of a shard in ``subset``: all rows, in_pool13 rows (1.3x), or the 1.3x-2.0x tail."""
+    if subset == "all":
+        return np.arange(pq.ParquetFile(shard).metadata.num_rows)
+    if subset not in SUBSETS:
+        raise ValueError(f"Unknown subset {subset!r}")
+    mask = pq.read_table(shard, columns=["in_pool13"]).column("in_pool13").to_numpy(zero_copy_only=False)
+    return np.flatnonzero(mask if subset == "pool13" else ~mask)
+
+
+def plan_parts(shards: Sequence[Path], part_pairs: int, subset: str = "all") -> list[dict[str, Any]]:
+    """Deterministic parts: consecutive ``part_pairs`` subset rows of each shard, in file order."""
     if part_pairs <= 0:
         raise ValueError("part_pairs must be positive")
     parts = []
     for shard in shards:
-        rows = pq.ParquetFile(shard).metadata.num_rows
-        for index, begin in enumerate(range(0, rows, part_pairs)):
-            parts.append({"shard": shard.name, "path": shard, "part": index, "begin": begin,
-                          "end": min(begin + part_pairs, rows)})
+        positions = subset_positions(shard, subset)
+        for index, begin in enumerate(range(0, len(positions), part_pairs)):
+            parts.append({"shard": shard.name, "path": shard, "subset": subset, "part": index,
+                          "positions": positions[begin : begin + part_pairs]})
     return parts
 
 
 def part_name(part: dict[str, Any]) -> str:
-    return f"{Path(part['shard']).stem}.part-{int(part['part']):04d}.parquet"
+    """``all`` keeps the original name; subsets get their own part files."""
+    infix = "" if part.get("subset", "all") == "all" else f".{part['subset']}"
+    return f"{Path(part['shard']).stem}{infix}.part-{int(part['part']):04d}.parquet"
+
+
+def part_pairs_count(parts: Iterable[dict[str, Any]]) -> int:
+    return int(sum(len(part["positions"]) for part in parts))
 
 
 def worker_parts(parts: Sequence[dict[str, Any]], worker: int, workers: int) -> list[dict[str, Any]]:
@@ -438,11 +457,10 @@ def run_score(args: argparse.Namespace) -> dict[str, Any]:
     parts_dir.mkdir(parents=True, exist_ok=True)
     log = Logger(out / f"score-w{args.worker}.log")
     _seed_from([Path(p) for p in args.resume_from], parts_dir, args.model, log)
-    parts = worker_parts(plan_parts(pool_shards(pool), args.part_pairs), args.worker, args.workers)
+    parts = worker_parts(plan_parts(pool_shards(pool), args.part_pairs, args.subset), args.worker, args.workers)
     todo = [part for part in parts if not (parts_dir / part_name(part)).exists()]
-    total_pairs_worker = sum(p["end"] - p["begin"] for p in parts)
-    log("plan", worker=args.worker, workers=args.workers, parts=len(parts), todo=len(todo),
-        pairs_worker=total_pairs_worker, pairs_todo=sum(p["end"] - p["begin"] for p in todo))
+    log("plan", subset=args.subset, worker=args.worker, workers=args.workers, parts=len(parts), todo=len(todo),
+        pairs_worker=part_pairs_count(parts), pairs_todo=part_pairs_count(todo))
     if not todo:
         return {"status": "nothing_to_do", "worker": args.worker}
     lock = out / f"score-w{args.worker}.lock"
@@ -462,27 +480,27 @@ def run_score(args: argparse.Namespace) -> dict[str, Any]:
             if shard not in cache:
                 cache.clear()
                 cache[shard] = pd.read_parquet(part["path"])
-            frame = cache[shard].iloc[part["begin"] : part["end"]]
+            frame = cache[shard].iloc[part["positions"]]
             result, stats = score_frame(scorer, frame, args.max_batch_tokens, args.max_batch_size, log)
             target = parts_dir / part_name(part)
             meta = {**stats, "model": args.model, "backend": args.backend, "dtype": scorer.dtype_name,
                     "revision": scorer.resolved_revision, "gpu": gpu_info().get("name"), "shard": shard,
-                    "part": part["part"], "begin": part["begin"], "end": part["end"], "utc": _now(),
+                    "subset": args.subset, "part": part["part"], "rows": len(part["positions"]), "utc": _now(),
                     "schema": SCHEMA_VERSION}
             _atomic_parquet(target, result)
             _atomic_json(target.with_suffix(".json"), meta)
             done_pairs += stats["pairs"]
             done_seconds += stats["seconds"]
             rate = done_pairs / done_seconds if done_seconds else 0.0
-            left = sum(p["end"] - p["begin"] for p in todo) - done_pairs
+            left = part_pairs_count(todo) - done_pairs
             log("part done", part=target.name, pairs=stats["pairs"], seconds=stats["seconds"],
                 rate=round(rate, 3), eta_worker_s=round(left / rate) if rate else None,
                 oom_retries=stats["oom_retries"], doc_over_limit=stats["doc_over_token_limit"])
-        report = {"status": "stopped" if done_pairs < sum(p["end"] - p["begin"] for p in todo) else "worker_complete",
-                  "worker": args.worker, "pairs_scored": done_pairs, "seconds_scoring": round(done_seconds, 1),
+        report = {"status": "stopped" if done_pairs < part_pairs_count(todo) else "worker_complete",
+                  "subset": args.subset, "worker": args.worker, "pairs_scored": done_pairs, "seconds_scoring": round(done_seconds, 1),
                   "seconds_model_load": round(load_seconds, 1), "pairs_per_second": done_pairs / done_seconds if done_seconds else None,
                   "gpu": gpu_info(), "model": args.model, "backend": args.backend, "dtype": scorer.dtype_name}
-        _atomic_json(out / f"worker-{args.worker}-report.json", report)
+        _atomic_json(out / f"worker-{args.worker}-{args.subset}-report.json", report)
         return report
     finally:
         try:
@@ -544,32 +562,56 @@ def run_pilot(args: argparse.Namespace) -> dict[str, Any]:
     return report
 
 
+def run_status(args: argparse.Namespace) -> dict[str, Any]:
+    parts_dir = _model_dir(Path(args.out), args.model) / "parts"
+    parts = plan_parts(pool_shards(Path(args.pool)), args.part_pairs, args.subset)
+    done = [p for p in parts if (parts_dir / part_name(p)).exists()]
+    report = {"model": args.model, "subset": args.subset, "parts_done": len(done), "parts_total": len(parts),
+              "pairs_done": part_pairs_count(done), "pairs_total": part_pairs_count(parts),
+              "complete": len(done) == len(parts)}
+    print(json.dumps(report), flush=True)
+    return report
+
+
 def run_collect(args: argparse.Namespace) -> dict[str, Any]:
+    """Merge every finished part (any subset naming) and keep the pairs of ``--subset``.
+
+    Each part is checked against the pool shards (pair_id -> query_id/doc_id); a pair
+    scored in two part files keeps the first file in name order and is counted.
+    """
     pool = Path(args.pool)
     out = _model_dir(Path(args.out), args.model)
     parts_dir = out / "parts"
     _seed_from([Path(p) for p in args.resume_from], parts_dir, args.model, Logger(out / "collect.log"))
-    parts = plan_parts(pool_shards(pool), args.part_pairs)
-    missing = [part_name(p) for p in parts if not (parts_dir / part_name(p)).exists()]
-    if missing:
-        raise FileNotFoundError(f"{len(missing)} parts missing, e.g. {missing[:5]}")
+    shards = pool_shards(pool)
+    keys = pd.concat([pd.read_parquet(s, columns=["pair_id", "query_id", "doc_id", "in_pool13"]) for s in shards],
+                     ignore_index=True).set_index("pair_id")
+    wanted = keys.index if args.subset == "all" else keys.index[keys.in_pool13 == (args.subset == "pool13")]
     frames, metas = [], []
-    for part in parts:
-        target = parts_dir / part_name(part)
+    for target in sorted(parts_dir.glob("pool-*.part-*.parquet")):
         frame = pd.read_parquet(target)
-        source = pd.read_parquet(part["path"], columns=["pair_id", "query_id", "doc_id"]).iloc[part["begin"] : part["end"]]
-        if not (frame.pair_id.to_numpy() == source.pair_id.to_numpy()).all():
-            raise ValueError(f"{target.name}: pair_id order differs from its pool shard")
+        ref = keys.reindex(frame.pair_id.to_numpy())
+        if ref.query_id.isna().any() or not (
+            (ref.query_id.to_numpy() == frame.query_id.to_numpy()).all()
+            and (ref.doc_id.to_numpy() == frame.doc_id.to_numpy()).all()
+        ):
+            raise ValueError(f"{target.name}: pair_id/query_id/doc_id differ from the pool shards")
         frames.append(frame)
         meta_path = target.with_suffix(".json")
         if meta_path.exists():
             metas.append(json.loads(meta_path.read_text(encoding="utf-8")))
-    scores = pd.concat(frames, ignore_index=True).sort_values("pair_id", kind="stable")
-    if scores.pair_id.duplicated().any():
-        raise ValueError("Duplicate pair_id across parts")
+    if not frames:
+        raise FileNotFoundError(f"No parts under {parts_dir}")
+    merged = pd.concat(frames, ignore_index=True)
+    duplicates = int(merged.pair_id.duplicated().sum())
+    merged = merged.drop_duplicates("pair_id", keep="first").set_index("pair_id")
+    missing = wanted.difference(merged.index)
+    if len(missing):
+        raise FileNotFoundError(f"{len(missing)} pairs of subset {args.subset} have no score yet")
+    scores = merged.loc[wanted].reset_index().sort_values("pair_id", kind="stable")
     if not np.isfinite(scores.score).all():
         raise ValueError("Non-finite scores")
-    target = out / "scores.parquet"
+    target = out / f"scores-{args.subset}.parquet"
     _atomic_parquet(target, scores)
     gpus: dict[str, float] = {}
     for meta in metas:
@@ -577,10 +619,12 @@ def run_collect(args: argparse.Namespace) -> dict[str, Any]:
     report = {
         "status": "collected",
         "model": args.model,
+        "subset": args.subset,
         "pairs": len(scores),
-        "parts": len(parts),
-        "scoring_gpu_seconds_by_gpu": {k: round(v, 1) for k, v in gpus.items()},
-        "scoring_gpu_seconds_total": round(sum(gpus.values()), 1),
+        "part_files_read": len(frames),
+        "duplicate_pairs_dropped": duplicates,
+        "scoring_gpu_seconds_by_gpu_all_parts": {k: round(v, 1) for k, v in gpus.items()},
+        "scoring_gpu_seconds_total_all_parts": round(sum(gpus.values()), 1),
         "dtypes": sorted({str(m.get("dtype")) for m in metas}),
         "backends": sorted({str(m.get("backend")) for m in metas}),
         "revisions": sorted({str(m.get("revision")) for m in metas}),
@@ -589,7 +633,7 @@ def run_collect(args: argparse.Namespace) -> dict[str, Any]:
         "scores_sha256": _sha256(target),
         "utc": _now(),
     }
-    _atomic_json(out / "collect-report.json", report)
+    _atomic_json(out / f"collect-{args.subset}-report.json", report)
     print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
     return report
 
@@ -604,6 +648,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--model", required=True, choices=sorted(MODELS))
         p.add_argument("--part-pairs", type=int, default=DEFAULT_PART_PAIRS)
         p.add_argument("--resume-from", action="append", default=[], help="read-only earlier output root(s)")
+        p.add_argument("--subset", choices=SUBSETS, default="all",
+                       help="all pairs, pool13 (in_pool13: the 1.3x pool) or tail (1.3x-2.0x)")
         if model_args:
             p.add_argument("--model-path", default=None, help="local snapshot dir instead of the HF id")
             p.add_argument("--revision", default=None, help="HF revision (commit) to pin")
@@ -626,8 +672,10 @@ def build_parser() -> argparse.ArgumentParser:
     score.add_argument("--worker", type=int, default=0)
     score.add_argument("--workers", type=int, default=1)
     score.add_argument("--max-seconds", type=float, default=0.0, help="stop starting new parts after this many seconds")
-    collect = sub.add_parser("collect", help="verify all parts and write OUT/<model>/scores.parquet")
+    collect = sub.add_parser("collect", help="verify parts and write OUT/<model>/scores-<subset>.parquet")
     common(collect, model_args=False)
+    status = sub.add_parser("status", help="print finished/total parts for --subset")
+    common(status, model_args=False)
     return parser
 
 
@@ -639,6 +687,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(run_score(args), ensure_ascii=False, indent=2), flush=True)
     elif args.command == "collect":
         run_collect(args)
+    elif args.command == "status":
+        run_status(args)
     return 0
 
 

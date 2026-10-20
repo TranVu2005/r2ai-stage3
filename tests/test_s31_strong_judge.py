@@ -116,7 +116,7 @@ def _write_pool(tmp_path, n_pairs=7):
             "doc_id": np.arange(100, 100 + n_pairs),
             "cosine_rank": [1, 2, 3, 4] + list(range(1, n_pairs - 3)),
             "cosine_score": np.linspace(0.9, 0.1, n_pairs),
-            "in_pool13": [True] * n_pairs,
+            "in_pool13": [i % 3 != 2 for i in range(n_pairs)],
             "lang": ["vi", "zh"] * (n_pairs // 2) + ["vi"] * (n_pairs % 2),
             "query_text": ["q"] * n_pairs,
             "doc_text": ["d" * (i + 1) for i in range(n_pairs)],
@@ -142,7 +142,7 @@ def test_score_resume_and_collect(tmp_path, monkeypatch):
     again = js.run_score(parser.parse_args(["score", *base, "--worker", "1", "--workers", "2"]))
     assert again["status"] == "nothing_to_do"
     collected = js.run_collect(parser.parse_args(["collect", *base]))
-    scores = pd.read_parquet(out / "qwen3-reranker-4b" / "scores.parquet")
+    scores = pd.read_parquet(out / "qwen3-reranker-4b" / "scores-all.parquet")
     assert collected["pairs"] == 7 and scores.pair_id.tolist() == list(range(7))
     frame = pd.concat([pd.read_parquet(p) for p in sorted((pool / "shards").glob("*.parquet"))])
     lengths = np.array([len(js.build_prompt_ids(CharTokenizer(), q, d, l, [], [])) for q, d, l in zip(frame.query_text, frame.doc_text, frame.lang)])
@@ -192,3 +192,26 @@ def test_select_rrf_three_sources_and_diff_stats():
     frame = pd.DataFrame({"query_id": [1, 1, 1, 2, 2, 2], "a": [1, 2, 3, 1, 2, 3], "b": [1, 2, 3, 3, 2, 1]})
     corr = judge_correlations(frame, ["a", "b"])["a~b"]
     assert corr["spearman_per_query_mean"] == 0.0
+
+
+def test_subset_pool13_then_tail_collects_each_and_all(tmp_path, monkeypatch):
+    pool = _write_pool(tmp_path, n_pairs=9)
+    out = tmp_path / "out"
+    monkeypatch.setattr(js, "make_scorer", lambda args, log: FakeScorer())
+    parser = js.build_parser()
+    base = ["--pool", str(pool), "--out", str(out), "--model", "qwen3-reranker-4b", "--part-pairs", "2"]
+    js.run_score(parser.parse_args(["score", *base, "--subset", "pool13"]))
+    status = js.run_status(parser.parse_args(["status", *base, "--subset", "pool13"]))
+    assert status["complete"] and status["pairs_total"] == 6
+    assert not js.run_status(parser.parse_args(["status", *base, "--subset", "tail"]))["complete"]
+    pool13 = js.run_collect(parser.parse_args(["collect", *base, "--subset", "pool13"]))
+    assert pool13["pairs"] == 6
+    with pytest.raises(FileNotFoundError):
+        js.run_collect(parser.parse_args(["collect", *base, "--subset", "all"]))
+    js.run_score(parser.parse_args(["score", *base, "--subset", "tail"]))
+    full = js.run_collect(parser.parse_args(["collect", *base, "--subset", "all"]))
+    assert full["pairs"] == 9 and full["duplicate_pairs_dropped"] == 0
+    scores = pd.read_parquet(out / "qwen3-reranker-4b" / "scores-all.parquet")
+    assert scores.pair_id.tolist() == list(range(9))
+    names = sorted(p.name for p in (out / "qwen3-reranker-4b" / "parts").glob("*.parquet"))
+    assert any(".pool13.part-" in n for n in names) and any(".tail.part-" in n for n in names)

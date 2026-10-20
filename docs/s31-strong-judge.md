@@ -38,19 +38,20 @@ Cổng ≥ 0,99 qua cả hai. Δ còn lại do padding theo lô khác S29 (S29 l
 
 ## Pha 2: chạy GPU (Vu chọn nền tảng)
 
-Thứ tự chung: **pool13 trước** (đủ cho J4-rrf, J4-rrf3), phần đuôi chấm ở phiên sau (chỉ cần cho J*-rrf-pool20).
+**Quyết định 21/10 (Vu):** LB 0.6B: QRRF-nc140-ph 0,3940 (tốt nhất), QRRF-pool16 0,3931, QRRF-wq0.65 0,3933 — pool rộng và trọng số không giúp. **Chỉ chấm pool13 (1,3×, 281.924 cặp); không chấm phần đuôi 1,3×–2,0× cho 4B.** Cờ `--subset tail` vẫn còn trong script nhưng không dùng.
 
 ### Kaggle 2×T4 (mặc định, 4B)
 
 Notebook `notebooks/s31-kaggle-judge.ipynb` (fp16, Internet bật, không dùng token/secret nào):
 
 1. Upload thư mục `out/runs/s31-strong-judge/pool/` thành một Kaggle dataset riêng tư (đã có sẵn `judge_score.py`, `run_runpod.sh`, `manifest.json`, `s29_qwen06_scores.parquet`, `shards/`).
-2. Phiên 1 (mặc định `SUBSET = "pool13"`): tải model công khai → cổng 0.6B fp16 so S29 (dừng nếu Spearman < 0,99) → pilot 4B 1.000 cặp (tốc độ, ETA) → 2 worker (mỗi T4 một tiến trình) dừng trước 12h → `collect --subset pool13` nếu đủ part.
-3. Phiên sau: thêm output phiên trước làm input, ghi vào `RESUME`; đặt `REVISION` = commit in ra ở phiên 1; còn thiếu pool13 thì giữ `SUBSET = "pool13"`, xong rồi thì `SUBSET = "tail"`, `RUN_GATE = RUN_PILOT = False`. Khi đủ cả hai, notebook gộp thêm `scores-all.parquet`.
+2. `SUBSET = "pool13"` cố định (notebook dừng nếu đổi). `SESSION = 1`: tải model công khai → cổng 0.6B fp16 so S29 (dừng nếu Spearman < 0,99) → pilot 4B 1.000 cặp (tốc độ, ETA) → 2 worker (mỗi T4 một tiến trình) dừng trước 12h.
+3. **Phiên 2 (mặc định hiện tại `SESSION = 2`)**: thêm output phiên 1 làm input rồi Save & Run All. Notebook tự tìm mọi `/kaggle/input/**/qwen3-reranker-4b/parts`, chép part đã xong, lấy commit model từ metadata part (dừng nếu các part khác commit), bỏ qua cổng/pilot, chỉ chấm các part pool13 còn thiếu, rồi `collect --subset pool13` khi đủ 150/150 part. Chưa đủ thì thêm output phiên 2 làm input và chạy lại.
+4. Tải về `/kaggle/working/s31/qwen3-reranker-4b/scores-pool13.parquet` + `collect-pool13-report.json`, đặt vào `out/runs/s31-strong-judge/gpu/qwen3-reranker-4b/`.
 
 ### RunPod Linux 24 GB (8B): `scripts/s31/run_runpod.sh`
 
-Script tự làm: venv + `vllm==0.11.0` (đổi bằng `VLLM_VERSION`) → tải 0.6B và 8B (pin commit vào `$OUT/qwen3-reranker-8b.revision`) → cổng 0.6B so S29 → pilot 8B 1.000 cặp bằng hf và vllm, Spearman(hf, vllm) ≥ 0,99 thì chấm bằng vLLM, ngược lại hf (`backend-choice.json`) → `score --subset pool13` + collect → `score --subset tail` + collect tail/all → nén `/workspace/s31-qwen3-reranker-8b-results.tar.gz`. Chạy lại sau khi mất kết nối: bỏ qua bước đã xong, part đã có giữ nguyên.
+Mặc định `SUBSETS=pool13` (theo quyết định 21/10; phần đuôi chỉ khi đặt `SUBSETS="pool13 tail"`). Script tự làm: venv + `vllm==0.11.0` (đổi bằng `VLLM_VERSION`) → tải 0.6B và 8B (pin commit vào `$OUT/qwen3-reranker-8b.revision`) → cổng 0.6B so S29 → pilot 8B 1.000 cặp bằng hf và vllm, Spearman(hf, vllm) ≥ 0,99 thì chấm bằng vLLM, ngược lại hf (`backend-choice.json`) → `score --subset pool13` + collect → `score --subset tail` + collect tail/all → nén `/workspace/s31-qwen3-reranker-8b-results.tar.gz`. Chạy lại sau khi mất kết nối: bỏ qua bước đã xong, part đã có giữ nguyên.
 
 Các bước Vu gõ:
 
@@ -102,15 +103,28 @@ Số đo duy nhất: 0.6B trên RTX 3050 laptop 12,0 cặp/s ⇒ pool 2,0× ≈ 
 | 8B bf16 | RunPod RTX 4090 24 GB | ~70 TFLOPS → ~9 cặp/s | ~13 h | ~9 h | ~5–9 USD ở 0,4–0,7 USD/h (giá tham khảo, cần kiểm lại) |
 | 14B AWQ | vLLM, T4/24 GB | chưa ước tính; backend vLLM chưa chạy thử | – | – | – |
 
-Phần đuôi (151.808 cặp) tốn thêm ~54% thời gian của pool13. Theo luật đã ghi, mỗi lần nộp gồm đủ 1.200 query và hệ thống tự tách public/private, nên điểm judge chấm một lần dùng cho cả hai giai đoạn: **chi phí GPU dự kiến chỉ một lần — chờ BTC xác nhận**.
+Theo quyết định 21/10 chỉ cần cột pool13 (phần đuôi 151.808 cặp, +54% thời gian, không chấm). Theo luật đã ghi, mỗi lần nộp gồm đủ 1.200 query và hệ thống tự tách public/private, nên điểm judge chấm một lần dùng cho cả hai giai đoạn: **chi phí GPU dự kiến chỉ một lần — chờ BTC xác nhận**.
 
-## Pha 3: dựng bản (chờ builder S29)
+## Pha 3: dựng bản (`src/r2ai/s31/build.py`)
 
-Theo Vu (20/10): chờ S29 push builder (`chunk_multiplier`, weighted RRF), merge `feat/s29-qwen-judge` vào nhánh này trước Pha 3; kiểm hồi quy sau merge: dựng lại Q-rrf (n_c P1) phải ra đúng JSON SHA `6b21fbb5…9afc` của bản S29 đã nộp.
+Builder S29 `e451fe7` (nc140, weighted RRF, JSON gọn) đã merge vào nhánh này ngày 20/10. `python -m r2ai.s31.build --variant ...` đọc `pool_index.parquet` (chỉ `in_pool13`), điểm 0.6B S29 (`s29_qwen06_scores.parquet`) và điểm judge (`--scores .../scores-pool13.parquet`), chọn `len(relevant_docs)` của K90-ph/query bằng RRF k=60 (`select_rrf`, trùng từng bit với `select_qrrf` S29 khi 2 nguồn), rồi gọi `r2ai.s29.build._build_variant` với n_c ×1,4, nguyên body, Pharmacity, JSON gọn. Mỗi bản có thêm `<tên>.s31.json`: nguồn rank, SHA file điểm, số doc khác Q-rrf, tương quan judge (vì `build.json` của builder S29 luôn ghi tên model 0.6B).
 
-Đã có sẵn và có test (`src/r2ai/s31/select.py`):
+Theo quyết định 21/10 chỉ dựng trên pool 1,3×:
 
-- `select_rrf(rows, keep, rank_keys, k=60)`: RRF nhiều nguồn; với `(cosine_rank, qwen_rank)` cho kết quả và điểm trùng từng bit với `select_qrrf` của S29 (test trên 300 doc có điểm hoà).
-- `doc_set_diff`, `judge_correlations`: số doc khác Q-rrf TB/query, Spearman toàn cục và theo query giữa các judge.
+| Bản | Nguồn RRF (k=60) | Cần |
+|---|---|---|
+| `J4-rrf` | cosine + 4B | `scores-pool13.parquet` của 4B |
+| `J4-rrf3` | cosine + 0.6B + 4B | như trên |
+| `Jcheck-q06-rrf` | cosine + 0.6B | không cần GPU; cổng hồi quy |
 
-Các bản (doc = số doc K90-ph/query, chunk nc140, JSON gọn): **J4-rrf (pool 1,3×) dựng ngay khi có `scores-pool13.parquet` của 4B, không chờ phần đuôi**; J4-rrf3 (cosine + 0.6B + 4B, pool 1,3×) cũng chỉ cần pool13; J4-rrf-pool20 (pool 2,0×) dựng khi có `scores-all.parquet`; J8-* tương tự nếu có điểm 8B. J4-rrf3-pool20 chỉ làm khi J4-rrf-pool20 thắng J4-rrf trên LB (cần chấm thêm 0.6B cho phần 1,3×–2,0×).
+```bash
+python -m r2ai.s31.build --judge qwen3-reranker-4b --scores out/runs/s31-strong-judge/gpu/qwen3-reranker-4b/scores-pool13.parquet --variant J4-rrf --variant J4-rrf3
+```
+
+Output `out/runs/s31-strong-judge/build/`. J8-* tương tự với `--judge qwen3-reranker-8b`. Không dựng bản pool20.
+
+### Hồi quy sau merge (20/10, đo)
+
+- **Q-rrf (n_c P1) dựng lại bằng builder S29 đã merge: JSON SHA `99be0252…153a` ≠ `6b21fbb5…9afc` của bản đã nộp.** Nguyên nhân: `e451fe7` đổi `json.dumps` sang `separators=(",", ":")` cho mọi bản, kể cả Q-rrf (JSON 629.390.612 B so với 630.093.327 B). Parse cả hai: 1.200/1.200 dòng **giống hệt** (doc, chunk, thứ tự). Cổng SHA theo đúng chữ không đạt; nội dung khớp. Không sửa code S29.
+- **`Jcheck-q06-rrf` qua đường S31: JSON SHA `da6cf34b…3fa7` = đúng `QRRF-nc140-ph` (LB 0,3940)**; 1.200/1.200 query cùng tập doc với Q-rrf. ZIP 97.666.826 B (hơn 2 B do tên member JSON dài hơn 1 ký tự). Build CPU 1.196,6 s.
+- Tương quan trên pool13: Spearman(cosine, 0.6B) toàn cục 0,419, TB theo query 0,367 (p10 0,176).

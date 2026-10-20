@@ -30,6 +30,7 @@ from r2ai.s29.qwen_judge import (
     _sha256,
     select_qfilter,
     select_qrrf,
+    select_weighted_qrrf,
 )
 
 
@@ -58,6 +59,37 @@ def _load_spans(chunks_path: Path, doc_ids: set[int]) -> dict[int, dict[str, tup
     return result
 
 
+def _chunk_target(n_c: int, selected_docs: int, multiplier: float = 1.0) -> int:
+    if n_c < 0 or selected_docs < 0:
+        raise ValueError("n_c and selected_docs must be nonnegative")
+    if not np.isfinite(multiplier) or multiplier < 0:
+        raise ValueError("chunk multiplier must be finite and nonnegative")
+    return min(round(n_c * multiplier), selected_docs)
+
+
+def _resolve_variant_options(
+    variant: str,
+    chunk_multiplier: float | None,
+    whole_body: bool | None,
+) -> tuple[float, bool]:
+    is_qrrf = variant.startswith("QRRF-")
+    resolved_multiplier = chunk_multiplier
+    if resolved_multiplier is None:
+        resolved_multiplier = 1.4 if is_qrrf else 1.0
+    resolved_whole_body = whole_body
+    if resolved_whole_body is None:
+        resolved_whole_body = is_qrrf
+    return float(resolved_multiplier), bool(resolved_whole_body)
+
+
+def _validate_candidate_pool_sha(prepare_report: dict[str, Any], candidate_digest: str) -> None:
+    prepared_candidate_digest = prepare_report.get("candidate_pool_sha256")
+    if not prepared_candidate_digest:
+        raise ValueError("Prepare report is missing candidate_pool_sha256")
+    if prepared_candidate_digest != candidate_digest:
+        raise ValueError("Prepare report belongs to a different candidate pool SHA256")
+
+
 def _load_extra_docs(inputs: dict[str, Path]) -> tuple[dict[int, str], dict[int, dict[str, tuple[int, int]]]]:
     texts: dict[int, str] = {}
     spans: dict[int, dict[str, tuple[int, int]]] = {}
@@ -76,15 +108,15 @@ def _load_extra_docs(inputs: dict[str, Path]) -> tuple[dict[int, str], dict[int,
     return texts, spans
 
 
-def _preflight_outputs(out: Path) -> None:
+def _preflight_outputs(out: Path, variants: tuple[str, ...]) -> None:
     targets = [out]
-    for name in ("Q-filter", "Q-rrf"):
+    for name in variants:
         targets.extend(
             [
                 out / f"{name}.zip",
                 out / f"{name}.{os.getpid()}.zip.tmp",
                 out / f"{name}.query_stats.parquet",
-                out / f"{name}.query_stats.parquet.tmp",
+                out / f"{name}.query_stats.parquet.{os.getpid()}.tmp",
                 out / f"{name}.build.json",
                 out / f"{name}.build.json.tmp",
             ]
@@ -265,8 +297,9 @@ def _carriers(
     all_p1_texts: dict[int, str],
     groups: dict[int, list[int]],
     physical: dict[int, int],
+    chunk_multiplier: float = 1.0,
 ) -> list[tuple[int, int]]:
-    count = min(round(len(row["relevant_chunks"]) * 1.0), len(picked))
+    count = _chunk_target(len(row["relevant_chunks"]), len(picked), chunk_multiplier)
     return [
         selected
         for selected in picked
@@ -304,7 +337,13 @@ def _build_variant(
     extra_spans: dict[int, dict[str, tuple[int, int]]],
     chosen: dict[int, list[dict[str, Any]]],
     candidate_pool_sha256: str,
+    candidate_pool_multiplier: float,
     score_rows_sha256: str,
+    rrf_k: int | None,
+    qwen_weight: float | None,
+    chunk_multiplier: float,
+    whole_body: bool,
+    mean_doc_id_symdiff_vs_primary: float | None,
 ) -> dict[str, Any]:
     started = time.monotonic()
     inputs = _inputs()
@@ -325,7 +364,9 @@ def _build_variant(
             for result in chosen[qid]
         ]
         picked_by_q[qid] = picked
-        for doc_id, corpus_id in _carriers(row, picked, row_own, all_p1_texts, groups, physical):
+        for doc_id, corpus_id in _carriers(
+            row, picked, row_own, all_p1_texts, groups, physical, chunk_multiplier
+        ):
             if corpus_id not in row_own and corpus_id not in all_p1_texts:
                 if doc_id not in extra_texts:
                     need_body.add(doc_id)
@@ -362,6 +403,10 @@ def _build_variant(
                 and existing_report.get("baseline_k90_ph_zip_sha256") == _sha256(inputs["baseline"])
                 and existing_report.get("p1_zip_sha256") == _sha256(inputs["p1"])
                 and existing_report.get("model_revision") == MODEL_REVISION
+                and existing_report.get("rrf_k") == rrf_k
+                and existing_report.get("qwen_weight") == qwen_weight
+                and existing_report.get("chunk_multiplier") == chunk_multiplier
+                and existing_report.get("whole_body") == whole_body
                 and existing_report.get("zip_sha256") == _sha256(target)
                 and existing_report.get("query_stats_sha256") == _sha256(stat_path)
             ):
@@ -392,7 +437,9 @@ def _build_variant(
                     qid = int(row["id"])
                     picked = picked_by_q[qid]
                     own = {int(chunk["doc_id"]): chunk["chunk_text"] for chunk in row["relevant_chunks"]}
-                    carriers = _carriers(row, picked, own, all_p1_texts, groups, physical)
+                    carriers = _carriers(
+                        row, picked, own, all_p1_texts, groups, physical, chunk_multiplier
+                    )
                     output_chunks = []
                     for doc_id, corpus_id in carriers:
                         if corpus_id in own:
@@ -425,7 +472,9 @@ def _build_variant(
                         "relevant_docs": [int(corpus_id) for _, corpus_id in picked],
                         "relevant_chunks": output_chunks,
                     }
-                    serialized = json.dumps(result, ensure_ascii=False).encode("utf-8")
+                    serialized = json.dumps(
+                        result, ensure_ascii=False, separators=(",", ":")
+                    ).encode("utf-8")
                     prefix = b"" if index == 0 else b",\n"
                     stream.write(prefix + serialized)
                     json_hash.update(prefix)
@@ -482,6 +531,11 @@ def _build_variant(
 
     built = write_bundle(None)
     size_tries = [{"body_cut_chars": None, "zip_bytes": built["zip_bytes"]}]
+    if built["zip_bytes"] >= 102_600_000 and whole_body:
+        raise ValueError(
+            f"{name} ZIP exceeds 102,600,000-byte ceiling with whole-body chunks: "
+            f"{built['zip_bytes']}; left at {temp}"
+        )
     if built["zip_bytes"] >= 102_600_000 and built["body_segments"]:
         body_segments = built["body_segments"]
         nb_full = sum(len(text.encode("utf-8")) for text in body_segments)
@@ -557,10 +611,14 @@ def _build_variant(
         "model_revision": MODEL_REVISION,
         "instructions": INSTRUCTIONS,
         "document_token_limit": DOC_TOKEN_LIMIT,
-        "pool_rule": "round(1.3 * len(P1 relevant_docs))",
+        "pool_multiplier": candidate_pool_multiplier,
+        "pool_rule": f"round({candidate_pool_multiplier:g} * len(P1 relevant_docs))",
         "keep_rule": "exact len(relevant_docs) from K90-ph ZIP per query",
-        "rrf_k": RRF_K if name == "Q-rrf" else None,
-        "chunks_rule": "n_c of P1 row; S26 K90-ph whole-body behavior",
+        "rrf_k": rrf_k,
+        "qwen_weight": qwen_weight,
+        "chunks_rule": "round(n_c of P1 row * chunk_multiplier), S26 selected-doc carrier order",
+        "chunk_multiplier": chunk_multiplier,
+        "whole_body": whole_body,
         "queries": len(rows),
         "docs_total": total_docs,
         "chunks_total": chunks_total,
@@ -570,6 +628,7 @@ def _build_variant(
         "mean_changed_docs_symmetric_difference_vs_k90_ph": float(
             stat_frame.changed_symmetric_vs_k90_ph.mean()
         ),
+        "mean_doc_id_symmetric_difference_vs_QRRF_nc140_ph": mean_doc_id_symdiff_vs_primary,
         "mean_replacements_vs_k90_ph": float(stat_frame.changed_in_vs_k90_ph.mean()),
         "mean_added_vs_k90_ph": float(stat_frame.changed_in_vs_k90_ph.mean()),
         "mean_removed_vs_k90_ph": float(stat_frame.changed_out_vs_k90_ph.mean()),
@@ -608,11 +667,30 @@ def _build_variant(
 _first_chunk_by_id: dict[int, str] = {}
 
 
-def build(out: Path, variants: tuple[str, ...] = ("Q-filter", "Q-rrf")) -> list[dict[str, Any]]:
-    if not variants or set(variants) - {"Q-filter", "Q-rrf"}:
+_VARIANTS: dict[str, tuple[str, int | None, float | None]] = {
+    "Q-filter": ("filter", None, None),
+    "Q-rrf": ("rrf_legacy", RRF_K, None),
+    "QRRF-nc140-ph": ("rrf", 60, 0.5),
+    "QRRF-k20": ("rrf", 20, 0.5),
+    "QRRF-k200": ("rrf", 200, 0.5),
+    "QRRF-wq0.65": ("rrf", 60, 0.65),
+    "QRRF-wq0.35": ("rrf", 60, 0.35),
+    "QRRF-pool16": ("rrf", 60, 0.5),
+}
+
+
+def build(
+    out: Path,
+    variants: tuple[str, ...] = ("Q-filter", "Q-rrf"),
+    chunk_multiplier: float | None = None,
+    whole_body: bool | None = None,
+) -> list[dict[str, Any]]:
+    if not variants or set(variants) - set(_VARIANTS):
         raise ValueError(f"Unsupported S29 build variants: {variants}")
+    if chunk_multiplier is not None and (not np.isfinite(chunk_multiplier) or chunk_multiplier < 0):
+        raise ValueError("chunk_multiplier must be finite and nonnegative")
     inputs = _inputs()
-    _preflight_outputs(out)
+    _preflight_outputs(out, variants)
     for key in ("p1", "baseline", "baseline_build", "canonical", "extra_docs"):
         paths.require_inputs(inputs[key])
     p1_rows = _load_submission(inputs["p1"], with_chunks=True)
@@ -643,9 +721,22 @@ def build(out: Path, variants: tuple[str, ...] = ("Q-filter", "Q-rrf")) -> list[
 
     candidate_path = out / "candidate_pool.parquet"
     score_db = out / "qwen_scores.sqlite"
-    for path in (candidate_path, score_db):
+    prepare_path = out / "prepare.json"
+    for path in (candidate_path, score_db, prepare_path):
         paths.require_inputs(path)
+    prepare_report = json.loads(prepare_path.read_text(encoding="utf-8"))
+    candidate_digest = _sha256(candidate_path)
+    _validate_candidate_pool_sha(prepare_report, candidate_digest)
+    pool_multiplier = float(prepare_report.get("pool_multiplier", 1.3))
+    if "QRRF-pool16" in variants and not np.isclose(pool_multiplier, 1.6):
+        raise ValueError(f"QRRF-pool16 requires a 1.6x pool, got {pool_multiplier}")
+    if any(name.startswith("QRRF-") and name != "QRRF-pool16" for name in variants) and not np.isclose(
+        pool_multiplier, 1.3
+    ):
+        raise ValueError(f"Requested CPU sweeps require a 1.3x score pool, got {pool_multiplier}")
     candidate = pd.read_parquet(candidate_path)
+    if int(prepare_report.get("pool_pairs", -1)) != len(candidate):
+        raise ValueError("Prepare report pair count differs from the candidate pool")
     if candidate.duplicated(["query_id", "doc_id"]).any():
         raise ValueError("Candidate pool has duplicate query/document pairs")
     scores = _read_full_scores(
@@ -654,26 +745,46 @@ def build(out: Path, variants: tuple[str, ...] = ("Q-filter", "Q-rrf")) -> list[
         candidate_path,
     )
     score_digest = _score_rows_sha256(scores)
-    candidate_digest = _sha256(candidate_path)
     if set(scores) != set(p1_by_id):
         raise ValueError("Qwen score query IDs do not match the P1/K90-ph inputs")
     chosen_by_variant: dict[str, dict[int, list[dict[str, Any]]]] = {name: {} for name in variants}
     candidate_counts = candidate.groupby("query_id").size().to_dict()
+    variant_settings = {name: _VARIANTS[name] for name in variants}
     for row in p1_rows:
         qid = int(row["id"])
         options = scores[qid]
         keep = len(baseline[qid]["relevant_docs"])
         if len(options) != int(candidate_counts.get(qid, 0)):
             raise ValueError(f"Score count differs from candidate pool for query {qid}")
-        if "Q-filter" in variants:
-            chosen_by_variant["Q-filter"][qid] = select_qfilter(options, keep)
-        if "Q-rrf" in variants:
-            chosen_by_variant["Q-rrf"][qid] = select_qrrf(options, keep, RRF_K)
+        for name, (mode, rrf_k, qwen_weight) in variant_settings.items():
+            if mode == "filter":
+                chosen_by_variant[name][qid] = select_qfilter(options, keep)
+            elif mode == "rrf_legacy":
+                chosen_by_variant[name][qid] = select_qrrf(options, keep, int(rrf_k))
+            else:
+                chosen_by_variant[name][qid] = select_weighted_qrrf(
+                    options, keep, int(rrf_k), float(qwen_weight)
+                )
+
+    primary = chosen_by_variant.get("QRRF-nc140-ph")
+    difference_means: dict[str, float | None] = {}
+    for name, selected_by_q in chosen_by_variant.items():
+        if primary is None:
+            difference_means[name] = None
+            continue
+        differences = []
+        for qid, chosen in selected_by_q.items():
+            selected_ids = {int(row["doc_id"]) for row in chosen}
+            primary_ids = {int(row["doc_id"]) for row in primary[qid]}
+            differences.append(len(selected_ids.symmetric_difference(primary_ids)))
+        difference_means[name] = float(np.mean(differences))
 
     summaries = []
     for name in variants:
-        summaries.append(
-            _build_variant(
+        variant_chunk_multiplier, variant_whole_body = _resolve_variant_options(
+            name, chunk_multiplier, whole_body
+        )
+        summary = _build_variant(
                 out,
                 name,
                 p1_rows,
@@ -690,7 +801,14 @@ def build(out: Path, variants: tuple[str, ...] = ("Q-filter", "Q-rrf")) -> list[
                 extra_spans,
                 chosen_by_variant[name],
                 candidate_digest,
+                pool_multiplier,
                 score_digest,
+                variant_settings[name][1],
+                variant_settings[name][2],
+                variant_chunk_multiplier,
+                variant_whole_body,
+                difference_means[name],
             )
-        )
+        summaries.append(summary)
+        print(json.dumps(summary, ensure_ascii=False), flush=True)
     return summaries

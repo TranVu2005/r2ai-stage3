@@ -12,7 +12,8 @@
 #   4. pilot $MODEL on the same 1,000 pairs with hf and with vllm;
 #      Spearman(hf, vllm) >= 0.99 -> score with vllm, else with hf
 #   5. score --subset pool13, collect pool13 (enough for J8-rrf / J8-rrf3)
-#   6. score --subset tail, collect tail and all (for J8-rrf-pool20)
+#   6. only with SUBSETS="pool13 tail": score the 1.3x-2.0x tail, collect tail and all
+#      (default skips it: the wider pool did not help on LB, decision 21/10)
 #   7. tar the results for download
 #
 # Usage on the pod (see docs/s31-strong-judge.md for the full steps):
@@ -29,7 +30,7 @@ VLLM_VERSION=${VLLM_VERSION:-0.11.0}
 VENV=${VENV:-/workspace/venv-s31}
 PILOT_PAIRS=${PILOT_PAIRS:-1000}
 HF_BATCH_TOKENS=${HF_BATCH_TOKENS:-8192}
-SUBSETS=${SUBSETS:-"pool13 tail"}
+SUBSETS=${SUBSETS:-pool13}
 export HF_HOME=${HF_HOME:-/workspace/hf}
 export TOKENIZERS_PARALLELISM=false
 
@@ -121,7 +122,7 @@ else
   BATCH=(--backend hf --dtype bfloat16 --max-batch-tokens "$HF_BATCH_TOKENS")
 fi
 
-# 5-6. pool13 first, then the tail
+# 5-6. pool13 (and the tail only if SUBSETS lists it)
 for SUBSET in $SUBSETS; do
   log "scoring subset $SUBSET"
   "$PY" "$SCRIPT" score --pool "$POOL" --out "$OUT" --model "$MODEL" --revision "$REVISION" --subset "$SUBSET" "${BATCH[@]}"

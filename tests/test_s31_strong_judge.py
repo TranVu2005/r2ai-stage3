@@ -215,3 +215,42 @@ def test_subset_pool13_then_tail_collects_each_and_all(tmp_path, monkeypatch):
     assert scores.pair_id.tolist() == list(range(9))
     names = sorted(p.name for p in (out / "qwen3-reranker-4b" / "parts").glob("*.parquet"))
     assert any(".pool13.part-" in n for n in names) and any(".tail.part-" in n for n in names)
+
+
+def test_build_variant_rank_keys():
+    from r2ai.s31.build import variant_rank_keys
+
+    assert variant_rank_keys("J4-rrf", "J4") == ("cosine_rank", "judge_rank")
+    assert variant_rank_keys("J4-rrf3", "J4") == ("cosine_rank", "q06_rank", "judge_rank")
+    assert variant_rank_keys("Jcheck-q06-rrf", None) == ("cosine_rank", "q06_rank")
+    with pytest.raises(ValueError):
+        variant_rank_keys("J4-rrf-pool20", "J4")
+
+
+def test_build_load_candidates_joins_pool13_and_checks_alignment(tmp_path):
+    from r2ai.s31.build import load_candidates, rank_candidates
+
+    pool = tmp_path / "pool"
+    pool.mkdir()
+    index = pd.DataFrame({"pair_id": [0, 1, 2, 3], "query_id": [1, 1, 1, 2], "doc_id": [10, 11, 12, 20],
+                          "cosine_rank": [1, 2, 3, 1], "cosine_score": [0.9, 0.8, 0.7, 0.5],
+                          "in_pool13": [True, True, False, True]})
+    index.to_parquet(pool / "pool_index.parquet", index=False)
+    pd.DataFrame({"pair_id": [0, 1, 3], "query_id": [1, 1, 2], "doc_id": [10, 11, 20],
+                  "qwen_score": [0.1, 0.9, 0.5]}).to_parquet(pool / "s29_qwen06_scores.parquet", index=False)
+    judge = tmp_path / "scores-pool13.parquet"
+    pd.DataFrame({"pair_id": [0, 1, 3], "query_id": [1, 1, 2], "doc_id": [10, 11, 20],
+                  "score": [0.7, 0.2, 0.4]}).to_parquet(judge, index=False)
+    frame = load_candidates(pool, judge)
+    assert frame.pair_id.tolist() == [0, 1, 3]
+    ranked = rank_candidates(frame)
+    assert [(r["doc_id"], r["q06_rank"], r["judge_rank"]) for r in ranked[1]] == [(10, 2, 1), (11, 1, 2)]
+    bad = tmp_path / "bad.parquet"
+    pd.DataFrame({"pair_id": [0, 1, 3], "query_id": [1, 1, 2], "doc_id": [10, 99, 20],
+                  "score": [0.7, 0.2, 0.4]}).to_parquet(bad, index=False)
+    with pytest.raises(ValueError):
+        load_candidates(pool, bad)
+    short = tmp_path / "short.parquet"
+    pd.DataFrame({"pair_id": [0], "query_id": [1], "doc_id": [10], "score": [0.7]}).to_parquet(short, index=False)
+    with pytest.raises(ValueError):
+        load_candidates(pool, short)

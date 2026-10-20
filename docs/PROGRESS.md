@@ -1,6 +1,6 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-20 11:05 (UTC+7)
+- Cập nhật: 2026-10-20 11:58 (UTC+7)
 - Model thực hiện: GPT-6 (Codex)
 - Commit HEAD đã kiểm trước cập nhật này: `d777a6e98a962074a4017e25e5bd61244f1b3870`, nhánh `feat/s29-qwen-judge`
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
@@ -263,7 +263,7 @@ Cả hai: doc/query 136,48, 0 doc thêm do bảo vệ, chunk CC/query 9,34 (h1) 
 
 ## 6. Lệch so với `R2AI_STAGE3_CONTEXT.md`
 
-Cập nhật 2026-10-20 11:04 (UTC+7), GPT-6 (Codex), HEAD kiểm trước cập nhật `d777a6e98a962074a4017e25e5bd61244f1b3870`, nhánh `feat/s29-qwen-judge`. S29 Qwen judge: pool cosine top `round(1,3 × K_q)` trên 1.200 query (281.924 cặp, trung bình 234,9367 doc/query); `K_q` = số doc P1, số giữ lại đọc đúng từ K90-ph (trung bình 162,6225 doc/query). Query vector nạp nguyên S26 fp16 (`q_dense` SHA `0da5df8a…d72b`, `q_ids` SHA `8e31f025…75d`); cache vector SHA `eed0e104…edca`, pool SHA `708482f7…5222`. Dùng Qwen3-Reranker-0.6B revision `e61197ed45024b0ed8a2d74b80b4d909f1255473`, doc_text đầu 512 token, instruction tiếng Anh riêng vi/zh; n_c P1, chưa dùng chunk khi chấm. Pilot 200 cặp: 19,053 s tính cả truncate doc, 10,497 cặp/s, ETA toàn pool 26.858 s (≈7h27m), batch 8, không OOM; VRAM trống 5.827 MiB trước nạp, 4.594 MiB sau nạp. Full đang chạy PID 19596; lúc ghi nhận đã checkpoint 6.000/281.924 cặp (6.200 gồm pilot), log rate 11,510/s, ETA còn 23.955 s (≈6h39m), batch 8; VRAM trống 3.568 MiB. Log/checkpoint/report ở `out/runs/s29-qwen-judge/`; n_c P1 trung bình 105,1108. Build kiểm tra đầy đủ metadata SQLite và hash stats để phục hồi; khi ZIP chạm trần, fallback cắt body theo quy tắc S26. 6 test S29 qua, `py_compile` và `git diff --check` sạch. Q-filter/Q-RRF và validator chưa dựng; chưa nộp, chưa có điểm LB.
+Cập nhật 2026-10-20 11:58 (UTC+7), GPT-6 (Codex), HEAD kiểm trước cập nhật `32db7cd7c0f36fd8dfbe8c6a0f6f342f5d38b699`, nhánh `feat/s29-qwen-judge`. S29 Qwen judge: pool cosine top `round(1,3 × K_q)` trên 1.200 query (281.924 cặp, TB 234,9367 doc/query); `K_q` = số doc P1, số giữ lại đọc trực tiếp từ K90-ph (TB 162,6225 doc/query). Query vector nạp nguyên S26 fp16 (`q_dense` SHA `0da5df8a…d72b`, `q_ids` SHA `8e31f025…75d`); cache SHA `eed0e104…edca`, pool SHA `708482f7…5222`. Dùng Qwen3-Reranker-0.6B revision `e61197ed45024b0ed8a2d74b80b4d909f1255473`, doc_text đầu 512 token, instruction tiếng Anh riêng vi/zh; n_c P1, không chunk khi chấm. Pilot 200 cặp: 19,053 s gồm truncate, 10,497 cặp/s, ETA toàn pool 26.858 s (≈7h27m), batch 8, không OOM; VRAM trước nạp 5.827 MiB, sau nạp 4.594 MiB. Full PID 19596; checkpoint 42.000/281.924 cặp full (42.200 gồm pilot), 11,296/s, ETA 21.222 s (≈5h54m), batch 8; VRAM hiện trống 2.305 MiB (gate trước nạp đạt). Log/checkpoint tại `out/runs/s29-qwen-judge/`; n_c P1 trung bình 105,1108. Build có kiểm tra metadata SQLite/hash sidecar, fallback body theo S26 khi ZIP chạm trần, và sửa phục hồi khi build dở. 6 test S29 qua, compile và diff-check sạch. Q-filter/Q-RRF và validator chưa dựng; chưa nộp, chưa có điểm LB.
 
 Cập nhật 2026-10-20 07:46 (UTC+7), Claude Opus 5.5 (S26 K90-nc): LB Vu báo P-A4-nc120 0,3797 (Chunk F2 0,3788, P 0,2523 / R 0,5041). Trên doc K90 (trùng 1.200/1.200): K90-nc120 84.026.805 B (126,1 chunk/query), K90-nc140 97.087.414 B (146,3), K90-nc160 102.338.122 B (158,8; body doc mới cắt N = 5.652 ký tự, 10.044 chunk bị cắt, chunk P1 giữ nguyên). Validator 0 lỗi, chưa nộp. Report mục 5h.
 
@@ -503,7 +503,7 @@ Cập nhật 2026-10-17 20:25 (UTC+7), GPT-6 (Codex, S24 recovery): D21 bỏ qua
 
 | Thời gian (UTC+7) | Ai | Thay đổi |
 |---|---|---|
-| 2026-10-20 11:05 | GPT-6 (Codex) | S29: full PID 19596, 6.400/281.924 cặp (6.600 gồm pilot), 11,47/s, ETA 6h40m; review fixes gồm metadata/hash sidecar, body fallback S26, OOM cleanup và JSON SHA; 6 test qua; chưa dựng/đo LB. |
+| 2026-10-20 11:58 | GPT-6 (Codex) | S29: pilot 200 cặp 10,50/s; full PID 19596, 42.000/281.924 cặp (42.200 gồm pilot), 11,30/s, ETA 5h54m; VRAM hiện trống 2.305 MiB; implementation đã commit/push, 6 test qua; chờ full score rồi build/validator. |
 | 2026-10-20 07:46 | Claude Opus 5.5 | S26 K90-nc120/140/160: 84,03/97,09/102,34 MB; nc160 cắt body doc mới N = 5.652 (10.044 chunk); validator 0 lỗi, chưa nộp. |
 | 2026-10-20 06:53 | Claude Opus 5.5 | S26/S27 P-A4-K90-ph: K90 + pharmacity, selection 135/612 (22,1%), 165 query; ZIP 70,99 MB, validator 0 lỗi, chưa nộp. |
 | 2026-10-20 04:42 | Claude Opus 5.5 | S26 fingerprint extractor: 11 biến thể trên mẫu zh, extractor hiện tại cao nhất (0,9240), không biến thể nào >0,95, không nhúng lại. |

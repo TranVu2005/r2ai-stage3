@@ -123,6 +123,19 @@ python -m r2ai.s31.build --judge qwen3-reranker-4b --scores out/runs/s31-strong-
 
 Output `out/runs/s31-strong-judge/build/`. J8-* tương tự với `--judge qwen3-reranker-8b`. Không dựng bản pool20.
 
+Chỉ dựng J4-rrf và J4-rrf3 (Vu, 21/10). Không có J4-only-rrf2 riêng: RRF(cosine, 4B) chính là J4-rrf. Không dựng bản chỉ dùng 4B mà không trộn cosine, vì Q-filter (0.6B một mình) đã thua bản trộn.
+
+### Cách đọc kết quả LB
+
+Ba bản cùng pool 1,3×, cùng số doc K90-ph/query, cùng chunk nc140, Pharmacity và RRF k=60; chỉ khác nguồn rank:
+
+| So sánh | Khác nhau | Đọc ra |
+|---|---|---|
+| J4-rrf vs QRRF-nc140-ph (0,3940) | judge 4B thay cho 0.6B (đều trộn với cosine) | đóng góp của 4B so với 0.6B |
+| J4-rrf3 vs J4-rrf | thêm 0.6B làm nguồn thứ ba | đóng góp thêm của 0.6B khi đã có 4B |
+
+`<tên>.s31.json` của mỗi bản ghi số doc khác Q-rrf TB/query; số này đọc kèm chênh LB (chênh nhỏ khi ít doc đổi thì không kết luận được).
+
 ### Hồi quy sau merge (20/10, đo)
 
 - **Q-rrf (n_c P1) dựng lại bằng builder S29 đã merge: JSON SHA `99be0252…153a` ≠ `6b21fbb5…9afc` của bản đã nộp.** Nguyên nhân: `e451fe7` đổi `json.dumps` sang `separators=(",", ":")` cho mọi bản, kể cả Q-rrf (JSON 629.390.612 B so với 630.093.327 B). Parse cả hai: 1.200/1.200 dòng **giống hệt** (doc, chunk, thứ tự). Cổng SHA theo đúng chữ không đạt; nội dung khớp. Không sửa code S29.

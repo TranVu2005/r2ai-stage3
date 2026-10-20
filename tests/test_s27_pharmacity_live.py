@@ -20,7 +20,7 @@ def test_live_pool_includes_only_cc_no_capture_or_unusable_and_never_317850():
 def test_probe_requires_ordinary_http_200_article_result():
     article = {'http_status': 200, 'status': 'ok', 'selector_found': True, 'body_chars': 200}
     assert is_normal_probe_result(article)
-    assert is_normal_probe_result(article | {'status': 'low_title_match'})
+    assert not is_normal_probe_result(article | {'status': 'low_title_match'})
     assert not is_normal_probe_result({'http_status': 403, 'status': 'halted_block'})
     assert not is_normal_probe_result(article | {'status': 'soft404_or_nonarticle'})
     assert not is_normal_probe_result(article | {'http_status': 302, 'status': 'low_title_match'})
@@ -130,6 +130,57 @@ def test_challenge_probe_is_persisted_and_never_retried(monkeypatch, tmp_path):
     second = live.run_live_resume(roots)
     assert second['status'] == 'halted_challenge'
     assert len(calls) == 1
+
+
+def test_authorized_retry_once_obeys_24h_and_persists_single_use_claim(monkeypatch, tmp_path):
+    result = {'http_status': 200, 'status': 'ok', 'selector_found': True, 'body_chars': 200}
+    roots, live, calls = _stub_live_inputs(monkeypatch, tmp_path, fetch_result=result)
+    roots.reports.mkdir(parents=True)
+    report = {
+        'status': 'halted_challenge', 'current_doc_id': 318325,
+        'page_status': 'halted_captcha', 'stopped_at_utc': '2026-10-19T16:43:35Z',
+        'request_in_flight': False, 'request_started': True,
+    }
+    (roots.reports / 'live_resume.json').write_text(json.dumps(report), encoding='utf-8')
+
+    early = live.run_live_resume(roots, now=datetime(2026, 10, 20, 16, 43, 34, tzinfo=timezone.utc),
+                                 authorized_retry_once=True)
+    assert early['status'] == 'waiting_for_retry_cooldown'
+    assert calls == []
+    assert not (roots.reports / 'authorized_retry_once.json').exists()
+
+    retried = live.run_live_resume(roots, now=datetime(2026, 10, 20, 16, 43, 36, tzinfo=timezone.utc),
+                                   authorized_retry_once=True)
+    assert retried['status'] == 'complete'
+    assert retried['authorized_retry_once']['probe_doc_id'] == 1
+    assert retried['processed'] == 1
+    assert len(calls) == 1
+    assert calls[0]['min_request_interval'] == 15.0
+    assert calls[0]['jitter_s'] == 2.0
+    assert (roots.reports / 'authorized_retry_once.json').exists()
+
+    again = live.run_live_resume(roots, now=datetime(2026, 10, 20, 16, 44, tzinfo=timezone.utc),
+                                 authorized_retry_once=True)
+    assert again['no_new_requests'] is True
+    assert len(calls) == 1
+
+
+def test_saved_challenge_stays_permanently_halted_without_new_authorization(monkeypatch, tmp_path):
+    result = {'http_status': 200, 'status': 'ok', 'selector_found': True, 'body_chars': 200}
+    roots, live, calls = _stub_live_inputs(monkeypatch, tmp_path, fetch_result=result)
+    roots.reports.mkdir(parents=True)
+    saved = {
+        'status': 'halted_challenge', 'current_doc_id': 318325,
+        'page_status': 'halted_captcha', 'stopped_at_utc': '2026-10-19T16:43:35Z',
+        'request_in_flight': False, 'request_started': True,
+    }
+    (roots.reports / 'live_resume.json').write_text(json.dumps(saved), encoding='utf-8')
+
+    stopped = live.run_live_resume(roots, now=datetime(2026, 10, 20, 17, tzinfo=timezone.utc))
+    assert stopped['status'] == 'halted_challenge'
+    assert stopped['no_new_requests'] is True
+    assert calls == []
+    assert not (roots.reports / 'authorized_retry_once.json').exists()
 
 
 def test_live_challenge_flushes_sub_1000_handoff_remainder(monkeypatch, tmp_path):

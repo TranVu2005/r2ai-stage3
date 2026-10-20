@@ -78,7 +78,11 @@ def main(argv=None) -> int:
     ap.add_argument('--workers', type=int, default=5, help='Common Crawl WARC workers (max 5)')
     ap.add_argument('--lot-id', help='S15 lot identifier for isolated doc-level vector handoff')
     ap.add_argument('--resume-after-block', action='store_true', help='explicitly retry a saved 403/429/CAPTCHA checkpoint')
+    ap.add_argument('--authorized-retry-once', action='store_true',
+                    help='consume the single user-authorized post-challenge retry after its 24-hour cooldown')
     a = ap.parse_args(argv)
+    if a.authorized_retry_once and a.step != 'resume-site':
+        ap.error('--authorized-retry-once is valid only with resume-site')
     roots = Roots()
     if a.step == 'map':
         result = map_batch(roots, a.corpus)
@@ -110,7 +114,7 @@ def main(argv=None) -> int:
     elif a.step == 'cc-status':
         result = cc_backfill_status(roots)
     elif a.step == 'resume-site':
-        result = run_live_resume(roots)
+        result = run_live_resume(roots, authorized_retry_once=a.authorized_retry_once)
     elif a.step == 'live-status':
         result = live_resume_status(roots)
     elif a.step == 'manifest':

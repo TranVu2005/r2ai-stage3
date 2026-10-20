@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -9,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from . import pipeline as P
 
 NEVER_RETRY_DOC_IDS = frozenset({317850})
-LIVE_MIN_INTERVAL_S = 5.0
+LIVE_MIN_INTERVAL_S = 15.0
 LIVE_JITTER_S = 2.0
 
 
@@ -30,6 +31,14 @@ def cooldown_deadline(stop: dict) -> datetime:
     return _utc(stopped_at) + timedelta(hours=3, seconds=1)
 
 
+def authorized_retry_deadline(report: dict) -> datetime:
+    """The explicitly authorized retry waits 24 hours from the most recent halt."""
+    stopped_at = report.get('stopped_at_utc')
+    if not stopped_at:
+        raise ValueError('live resume halt checkpoint has no UTC timestamp')
+    return _utc(stopped_at) + timedelta(hours=24)
+
+
 def eligible_live_ids(targets, pages) -> list[int]:
     """Only CC no-capture/unusable IDs without a prior page result are live eligible."""
     page_ids = set(pages)
@@ -45,7 +54,7 @@ def eligible_live_ids(targets, pages) -> list[int]:
 
 def is_normal_probe_result(result: dict) -> bool:
     return (int(result.get('http_status') or 0) == 200
-            and result.get('status') in ('ok', 'low_title_match')
+            and result.get('status') == 'ok'
             and bool(result.get('selector_found'))
             and int(result.get('body_chars') or 0) >= P.MIN_BODY_CP)
 
@@ -109,6 +118,26 @@ def _save(roots: P.Roots, path, report: dict) -> None:
     P.atomic_json(roots, path, report)
 
 
+def _claim_authorized_retry_once(roots: P.Roots, *, doc_id: int, now: datetime, deadline: datetime) -> bool:
+    """Claim the single retry atomically before any site request can start."""
+    path = roots.guard(roots.reports / 'authorized_retry_once.json')
+    roots.guard(path.parent).mkdir(parents=True, exist_ok=True)
+    payload = {
+        'attempt': 1, 'probe_doc_id': int(doc_id),
+        'claimed_at_utc': _utc(now).isoformat(timespec='seconds').replace('+00:00', 'Z'),
+        'cooldown_deadline_utc': _utc(deadline).isoformat(timespec='seconds').replace('+00:00', 'Z'),
+        'state': 'claimed_before_network',
+    }
+    try:
+        with open(path, 'x', encoding='utf-8', newline='\n') as f:
+            f.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + '\n')
+            f.flush()
+            os.fsync(f.fileno())
+    except FileExistsError:
+        return False
+    return True
+
+
 def _page_for(roots: P.Roots, doc_id: int):
     c = sqlite3.connect(roots.state.resolve().as_uri() + '?mode=ro', uri=True)
     try:
@@ -153,15 +182,33 @@ def _handoff_pending(roots: P.Roots, *, final: bool = False) -> list[dict]:
     return published
 
 
-def run_live_resume(roots: P.Roots, *, now: datetime | None = None) -> dict:
-    """After cooldown, make one durable probe, then crawl eligible CC-missing URLs serially."""
+def run_live_resume(roots: P.Roots, *, now: datetime | None = None,
+                    authorized_retry_once: bool = False) -> dict:
+    """Resume after cooldown; a halted run needs an explicit, single-use 24-hour retry authorization."""
     roots.preflight()
     status = live_resume_status(roots, now=now)
     report, report_path = _load_report(roots)
     if status['status'] != 'cooldown_elapsed':
         return status | {'status': 'waiting_for_cooldown', 'resume_report': str(report_path)}
-    if report.get('status') in ('halted_challenge', 'halted_block', 'probe_stopped', 'stopped_unknown_request', 'complete'):
-        return report | {'no_new_requests': True}
+    retry_start = False
+    terminal_states = ('halted_challenge', 'halted_block', 'probe_stopped', 'stopped_unknown_request', 'complete')
+    if report.get('status') in terminal_states:
+        if not authorized_retry_once:
+            return report | {'no_new_requests': True}
+        claim_path = roots.guard(roots.reports / 'authorized_retry_once.json')
+        if (report.get('status') != 'halted_challenge'
+                or int(report.get('current_doc_id') or -1) != 318325
+                or report.get('page_status') != 'halted_captcha'
+                or report.get('authorized_retry_once')
+                or claim_path.exists()):
+            return report | {'no_new_requests': True, 'retry_once_denied': True}
+        deadline = authorized_retry_deadline(report)
+        current = _utc(now or datetime.now(timezone.utc))
+        if current < deadline:
+            return report | {'status': 'waiting_for_retry_cooldown',
+                             'retry_once_earliest_utc': deadline.isoformat().replace('+00:00', 'Z'),
+                             'no_new_requests': True}
+        retry_start = True
 
     new_run = not report
     targets, pages, mapping, counts, eligible = _read_inputs(roots)
@@ -177,7 +224,7 @@ def run_live_resume(roots: P.Roots, *, now: datetime | None = None) -> dict:
     report.setdefault('request_log', str(roots.guard(roots.reports / 'live_requests.jsonl')))
 
     # A durable in-flight marker prevents retrying a possibly completed challenge after a crash.
-    current_doc = report.get('current_doc_id')
+    current_doc = None if retry_start else report.get('current_doc_id')
     if report.get('request_in_flight'):
         report.update(status='stopped_unknown_request', stop_reason='request_outcome_unknown_after_interruption',
                       stopped_at_utc=datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z'))
@@ -217,7 +264,30 @@ def run_live_resume(roots: P.Roots, *, now: datetime | None = None) -> dict:
             _save(roots, report_path, report)
             return report | {'no_new_requests': True}
 
-    if new_run:
+    if retry_start:
+        if not eligible:
+            return report | {'no_new_requests': True, 'retry_once_denied': True,
+                             'retry_once_reason': 'no_live_eligible_urls'}
+        probe_id = int(eligible[0])
+        deadline = authorized_retry_deadline(report)
+        current = _utc(now or datetime.now(timezone.utc))
+        if not _claim_authorized_retry_once(roots, doc_id=probe_id, now=current, deadline=deadline):
+            return report | {'no_new_requests': True, 'retry_once_denied': True,
+                             'retry_once_reason': 'single_use_claim_already_exists'}
+        retry_attempt = {
+            'attempt': 1, 'state': 'probe_started', 'probe_doc_id': probe_id,
+            'started_at_utc': current.isoformat(timespec='seconds').replace('+00:00', 'Z'),
+            'cooldown_deadline_utc': deadline.isoformat(timespec='seconds').replace('+00:00', 'Z'),
+            'eligible_live_urls_at_start': len(eligible),
+            'previous_attempt_processed': int(report.get('processed', 0)),
+            'user_agent': P.USER_AGENT, 'proxy': False,
+            'minimum_request_interval_seconds': LIVE_MIN_INTERVAL_S, 'jitter_seconds': LIVE_JITTER_S,
+        }
+        report['authorized_retry_once'] = retry_attempt
+        report.update(status='probe_started', probe_doc_id=probe_id, current_doc_id=probe_id,
+                      request_in_flight=False, request_started=False, processed=0)
+        _save(roots, report_path, report)
+    elif new_run:
         if not eligible:
             report.update(status='complete', completed_at_utc=datetime.now(timezone.utc).isoformat(
                 timespec='seconds').replace('+00:00', 'Z'), processed=0, reason='no_live_eligible_urls')
@@ -267,10 +337,17 @@ def run_live_resume(roots: P.Roots, *, now: datetime | None = None) -> dict:
                 row = mapping[probe_id]
                 try:
                     result = P._fetch_target(roots, connection, row, session, max_hops=1,
+                                             min_request_interval=LIVE_MIN_INTERVAL_S, jitter_s=LIVE_JITTER_S,
+                                             rng=random.SystemRandom(),
                                              request_observer=observe)
                 except Exception as exc:  # challenge/block outcomes are persisted by _fetch_target
                     saved = _page_for(roots, probe_id)
                     halt_status = saved[0] if saved else None
+                    if report.get('authorized_retry_once'):
+                        report['authorized_retry_once']['state'] = (
+                            'halted_challenge' if halt_status == 'halted_captcha' else
+                            'halted_block' if halt_status == 'halted_block' else 'probe_stopped')
+                        report['authorized_retry_once']['probe_error'] = f'{type(exc).__name__}: {exc}'
                     report.update(status=('halted_challenge' if halt_status == 'halted_captcha' else
                                           'halted_block' if halt_status == 'halted_block' else 'probe_stopped'),
                                   probe_error=f'{type(exc).__name__}: {exc}', probe_page_status=halt_status,
@@ -279,11 +356,19 @@ def run_live_resume(roots: P.Roots, *, now: datetime | None = None) -> dict:
                     return report | {'no_new_requests': True}
                 report['probe_result'] = result
                 if not is_normal_probe_result(result):
+                    if report.get('authorized_retry_once'):
+                        report['authorized_retry_once']['state'] = 'probe_stopped'
+                        report['authorized_retry_once']['probe_result'] = result
                     report.update(status='probe_stopped', stop_reason='probe_not_http_200_normal_article',
                                   stopped_at_utc=datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z'))
                     _save(roots, report_path, report)
                     return report | {'no_new_requests': True}
-                report.update(status='crawling', probe_ok_at_utc=datetime.now(timezone.utc).isoformat(
+                probe_processed = int(report.get('processed', 0))
+                if report.get('authorized_retry_once'):
+                    probe_processed += 1
+                    report['authorized_retry_once']['state'] = 'crawling'
+                    report['authorized_retry_once']['probe_result'] = result
+                report.update(status='crawling', processed=probe_processed, probe_ok_at_utc=datetime.now(timezone.utc).isoformat(
                     timespec='seconds').replace('+00:00', 'Z'), current_doc_id=None, request_in_flight=False,
                               request_started=False)
                 _save(roots, report_path, report)
@@ -317,6 +402,9 @@ def run_live_resume(roots: P.Roots, *, now: datetime | None = None) -> dict:
                         report['handoff_flush_error'] = f'{type(handoff_exc).__name__}: {handoff_exc}'
                 report.update(status=state, stop_reason=f'{type(exc).__name__}: {exc}', page_status=page_status,
                               stopped_at_utc=datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z'))
+                if report.get('authorized_retry_once'):
+                    report['authorized_retry_once']['state'] = state
+                    report['authorized_retry_once']['stopped_at_utc'] = report['stopped_at_utc']
                 _save(roots, report_path, report)
                 return report | {'no_new_requests': state in ('halted_challenge', 'halted_block')}
             processed += 1
@@ -327,6 +415,9 @@ def run_live_resume(roots: P.Roots, *, now: datetime | None = None) -> dict:
                 state = 'halted_challenge' if result['status'] == 'halted_captcha' else 'halted_block'
                 report.update(status=state, stopped_at_utc=datetime.now(timezone.utc).isoformat(
                     timespec='seconds').replace('+00:00', 'Z'))
+                if report.get('authorized_retry_once'):
+                    report['authorized_retry_once']['state'] = state
+                    report['authorized_retry_once']['stopped_at_utc'] = report['stopped_at_utc']
                 _save(roots, report_path, report)
                 return report | {'no_new_requests': True}
             lots = _handoff_pending(roots)
@@ -336,6 +427,9 @@ def run_live_resume(roots: P.Roots, *, now: datetime | None = None) -> dict:
         lots = _handoff_pending(roots, final=True)
         if lots:
             report.setdefault('handoff_lots', []).extend(lots)
+        if report.get('authorized_retry_once'):
+            report['authorized_retry_once']['state'] = 'complete'
+            report['authorized_retry_once']['processed'] = processed
         report.update(status='complete', current_doc_id=None, request_in_flight=False,
                       completed_at_utc=datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z'),
                       processed=processed, pending_after_crawl=len(_read_inputs(roots)[-1]),

@@ -50,11 +50,13 @@ CHECKPOINT_PAIRS = 200
 DATE_TIME = (2026, 10, 19, 0, 0, 0)
 
 
-def candidate_pool_size(raw_k: int) -> int:
+def candidate_pool_size(raw_k: int, multiplier: float = 1.3) -> int:
     """S29 uses Python's round, matching the S26 builders' K/n_c rounding."""
     if raw_k < 0:
         raise ValueError("raw_k must be nonnegative")
-    return round(raw_k * 1.3)
+    if not math.isfinite(multiplier) or multiplier <= 0:
+        raise ValueError("multiplier must be finite and positive")
+    return round(raw_k * multiplier)
 
 
 def _validate_pilot_report(
@@ -108,6 +110,87 @@ def select_qrrf(
         )
     )
     return [{**row, "rrf_score": score} for score, row in ranked[:keep]]
+
+
+def select_weighted_qrrf(
+    candidates: Sequence[dict[str, Any]],
+    keep: int,
+    rrf_k: int = RRF_K,
+    qwen_weight: float = 0.5,
+) -> list[dict[str, Any]]:
+    """Select with (1-w)/(k+cosine-rank) + w/(k+Qwen-rank)."""
+    if rrf_k <= 0:
+        raise ValueError("rrf_k must be positive")
+    if not math.isfinite(qwen_weight) or not 0.0 <= qwen_weight <= 1.0:
+        raise ValueError("qwen_weight must be finite and between 0 and 1")
+    if not 0 <= keep <= len(candidates):
+        raise ValueError(f"keep={keep} is outside candidate count {len(candidates)}")
+    cosine_weight = 1.0 - qwen_weight
+    ranked = []
+    for row in candidates:
+        score = cosine_weight / (rrf_k + int(row["cosine_rank"])) + qwen_weight / (
+            rrf_k + int(row["qwen_rank"])
+        )
+        ranked.append((score, row))
+    ranked.sort(
+        key=lambda item: (
+            -item[0],
+            int(item[1]["cosine_rank"]),
+            int(item[1]["qwen_rank"]),
+            int(item[1]["doc_id"]),
+        )
+    )
+    return [{**row, "rrf_score": score} for score, row in ranked[:keep]]
+
+
+def _validate_pool_extension_alignment(
+    source: pd.DataFrame, target: pd.DataFrame
+) -> pd.DataFrame:
+    """Require shared scores to match and dropped source rows to tie at the new cutoff."""
+    keys = ["query_id", "doc_id"]
+    required = set(keys + ["cosine_rank", "cosine_score"])
+    for label, frame in (("source", source), ("target", target)):
+        if not required.issubset(frame.columns):
+            raise ValueError(f"{label} candidate pool lacks required columns {sorted(required)}")
+        if frame.duplicated(keys).any():
+            raise ValueError(f"{label} candidate pool contains duplicate query/document pairs")
+    aligned = source.merge(
+        target,
+        on=keys,
+        how="left",
+        suffixes=("_source", "_target"),
+        validate="one_to_one",
+        indicator=True,
+    )
+    target_boundary = target.groupby("query_id")["cosine_score"].min()
+    aligned["target_boundary_score"] = aligned["query_id"].map(target_boundary)
+    missing = aligned["_merge"].eq("left_only")
+    if missing.any() and not np.allclose(
+        aligned.loc[missing, "cosine_score_source"].to_numpy(dtype=np.float64),
+        aligned.loc[missing, "target_boundary_score"].to_numpy(dtype=np.float64),
+        rtol=0.0,
+        atol=1e-7,
+    ):
+        raise ValueError("missing source pairs are not tied at the expanded cutoff")
+    shared = aligned["_merge"].eq("both")
+    if not np.allclose(
+        aligned.loc[shared, "cosine_score_source"].to_numpy(dtype=np.float64),
+        aligned.loc[shared, "cosine_score_target"].to_numpy(dtype=np.float64),
+        rtol=0.0,
+        atol=1e-7,
+    ):
+        raise ValueError("Expanded candidate pool changed a source cosine score")
+    return aligned
+
+
+def _select_pilot_pairs(
+    pairs: list[dict[str, Any]], done: set[tuple[int, int]], limit: int = CHECKPOINT_PAIRS
+) -> list[dict[str, Any]]:
+    pending = [
+        row for row in pairs if (int(row["query_id"]), int(row["doc_id"])) not in done
+    ]
+    random.Random(42).shuffle(pending)
+    return pending[: min(limit, len(pending))]
 
 
 def truncate_document(tokenizer: Any, text: str, limit: int = DOC_TOKEN_LIMIT) -> tuple[str, int]:
@@ -187,6 +270,30 @@ def _guard_outputs(out: Path) -> None:
         out / "Q-rrf.build.json",
         out / "Q-rrf.build.json.tmp",
     ]
+    for name in (
+        "QRRF-nc140-ph",
+        "QRRF-k20",
+        "QRRF-k200",
+        "QRRF-wq0.65",
+        "QRRF-wq0.35",
+        "QRRF-pool16",
+    ):
+        targets.extend(
+            [
+                out / f"{name}.zip",
+                out / f"{name}.{os.getpid()}.zip.tmp",
+                out / f"{name}.query_stats.parquet",
+                out / f"{name}.query_stats.parquet.{os.getpid()}.tmp",
+                out / f"{name}.build.json",
+                out / f"{name}.build.json.tmp",
+            ]
+        )
+    targets.extend(
+        [
+            out / "seed-report.json",
+            out / "seed-report.json.tmp",
+        ]
+    )
     for target in targets:
         paths.assert_writable(target)
 
@@ -367,7 +474,11 @@ def _load_doc_vectors(inputs: dict[str, Path]) -> tuple[np.ndarray, np.ndarray, 
     return all_ids, np.concatenate(dense), base_count, extra_files
 
 
-def prepare(out: Path, query_vectors_dir: Path) -> dict[str, Any]:
+def prepare(
+    out: Path, query_vectors_dir: Path, pool_multiplier: float = 1.3
+) -> dict[str, Any]:
+    if not math.isfinite(pool_multiplier) or pool_multiplier <= 0:
+        raise ValueError("pool_multiplier must be finite and positive")
     prepare_started = time.monotonic()
     inputs = _inputs()
     for path in inputs.values():
@@ -398,7 +509,9 @@ def prepare(out: Path, query_vectors_dir: Path) -> dict[str, Any]:
     )
     raw_k = {qid: len(p1_by_id[qid]["relevant_docs"]) for qid in query_ids}
     keep_k = {qid: len(baseline_by_id[qid]["relevant_docs"]) for qid in query_ids}
-    pool_k = {qid: candidate_pool_size(raw_k[qid]) for qid in query_ids}
+    pool_k = {
+        qid: candidate_pool_size(raw_k[qid], multiplier=pool_multiplier) for qid in query_ids
+    }
     max_pool = max(pool_k.values())
 
     doc_ids, doc_dense, base_doc_count, extra_files = _load_doc_vectors(inputs)
@@ -472,11 +585,189 @@ def prepare(out: Path, query_vectors_dir: Path) -> dict[str, Any]:
         "query_vectors_source_hashes": query_vector_meta.get("source_hashes"),
         "candidate_pool": str(candidate_path),
         "candidate_pool_sha256": _sha256(candidate_path),
-        "pool_rule": "round(1.3 * len(P1 relevant_docs)); Python round",
+        "pool_multiplier": pool_multiplier,
+        "pool_rule": f"round({pool_multiplier:g} * len(P1 relevant_docs)); Python round",
         "keep_rule": "len(relevant_docs) read from each K90-ph ZIP row",
         "seconds": round(time.monotonic() - prepare_started, 2),
     }
     _atomic_json(out / "prepare.json", report)
+    print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
+    return report
+
+
+def seed_scores(out: Path, source_dir: Path) -> dict[str, Any]:
+    """Seed the expanded-pool checkpoint from a completed smaller-pool run."""
+    target_candidate_path = out / "candidate_pool.parquet"
+    source_candidate_path = source_dir / "candidate_pool.parquet"
+    source_report_path = source_dir / "full-score-report.json"
+    source_db_path = source_dir / "qwen_scores.sqlite"
+    target_db_path = out / "qwen_scores.sqlite"
+    for path in (
+        target_candidate_path,
+        source_candidate_path,
+        source_report_path,
+        source_db_path,
+        out / "prepare.json",
+    ):
+        paths.require_inputs(path)
+    _guard_outputs(out)
+
+    source_report = json.loads(source_report_path.read_text(encoding="utf-8"))
+    if source_report.get("status") != "full_complete":
+        raise ValueError("Source score run is not complete")
+    if source_report.get("model_revision") != MODEL_REVISION:
+        raise ValueError("Source score run uses a different Qwen model revision")
+    source_candidate_sha = _sha256(source_candidate_path)
+    if source_report.get("candidate_pool_sha256") != source_candidate_sha:
+        raise ValueError("Source score report belongs to a different candidate pool SHA256")
+    source_candidate = pd.read_parquet(source_candidate_path)
+    target_candidate = pd.read_parquet(target_candidate_path)
+    aligned = _validate_pool_extension_alignment(source_candidate, target_candidate)
+
+    target_prepare = json.loads((out / "prepare.json").read_text(encoding="utf-8"))
+    target_candidate_sha = _sha256(target_candidate_path)
+    if target_prepare.get("candidate_pool_sha256") != target_candidate_sha:
+        raise ValueError("Expanded-pool prepare report belongs to a different candidate pool")
+    if float(target_prepare.get("pool_multiplier", 0)) <= 1.3:
+        raise ValueError("Target candidate pool must be expanded beyond 1.3x")
+
+    expected_source_meta = {
+        "candidate_sha256": source_candidate_sha,
+        "model_id": MODEL_ID,
+        "model_revision": MODEL_REVISION,
+        "instruction_vi": INSTRUCTIONS["vi"],
+        "instruction_zh": INSTRUCTIONS["zh"],
+        "doc_token_limit": str(DOC_TOKEN_LIMIT),
+    }
+    expected_target_meta = {
+        **expected_source_meta,
+        "candidate_sha256": target_candidate_sha,
+    }
+    with sqlite3.connect(f"file:{source_db_path.as_posix()}?mode=ro", uri=True) as source_conn:
+        source_meta = dict(source_conn.execute("SELECT key, value FROM metadata").fetchall())
+        if source_meta != expected_source_meta:
+            raise ValueError("Source Qwen checkpoint metadata does not match the pinned inputs")
+        source_rows = source_conn.execute(
+            "SELECT query_id, doc_id, cosine_rank, cosine_score, qwen_score FROM scores "
+            "ORDER BY query_id, cosine_rank"
+        ).fetchall()
+    if len(source_rows) != len(source_candidate) or len(source_rows) != int(
+        source_report.get("pairs_checkpointed_total", -1)
+    ):
+        raise ValueError("Source score checkpoint is incomplete for its candidate pool")
+    score_candidates = pd.DataFrame(
+        source_rows,
+        columns=["query_id", "doc_id", "cosine_rank", "cosine_score", "qwen_score"],
+    )
+    score_alignment = source_candidate.merge(
+        score_candidates,
+        on=["query_id", "doc_id"],
+        how="left",
+        suffixes=("_candidate", "_score"),
+        validate="one_to_one",
+        indicator=True,
+    )
+    if (
+        not score_alignment["_merge"].eq("both").all()
+        or not np.array_equal(
+            score_alignment["cosine_rank_candidate"].to_numpy(),
+            score_alignment["cosine_rank_score"].to_numpy(),
+        )
+        or not np.allclose(
+            score_alignment["cosine_score_candidate"].to_numpy(dtype=np.float64),
+            score_alignment["cosine_score_score"].to_numpy(dtype=np.float64),
+            rtol=0.0,
+            atol=1e-7,
+        )
+        or not np.isfinite(score_alignment["qwen_score"].to_numpy(dtype=np.float64)).all()
+    ):
+        raise ValueError("Source Qwen scores do not align exactly with its candidate pool")
+
+    target_scores = target_candidate.merge(
+        score_candidates[["query_id", "doc_id", "qwen_score"]],
+        on=["query_id", "doc_id"],
+        how="left",
+        validate="one_to_one",
+        indicator=True,
+    )
+    target_scores = target_scores[target_scores["_merge"].eq("both")].drop(columns="_merge")
+    if not np.isfinite(target_scores["qwen_score"].to_numpy(dtype=np.float64)).all():
+        raise ValueError("Source Qwen checkpoint contains non-finite scores for shared candidates")
+
+    paths.assert_writable(target_db_path)
+    paths.assert_writable(out / "seed-report.json.tmp")
+    if not target_db_path.exists():
+        with sqlite3.connect(target_db_path) as target_conn:
+            target_conn.execute("PRAGMA journal_mode=WAL")
+            target_conn.execute(
+                "CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+            )
+            target_conn.execute(
+                "CREATE TABLE scores(query_id INTEGER, doc_id INTEGER, cosine_rank INTEGER, "
+                "cosine_score REAL, qwen_score REAL, PRIMARY KEY(query_id, doc_id))"
+            )
+            target_conn.executemany(
+                "INSERT INTO metadata(key, value) VALUES(?,?)", expected_target_meta.items()
+            )
+            target_conn.commit()
+    with sqlite3.connect(target_db_path) as target_conn:
+        target_meta = dict(target_conn.execute("SELECT key, value FROM metadata").fetchall())
+        if target_meta != expected_target_meta:
+            raise ValueError("Expanded-pool checkpoint metadata does not match the target pool")
+        existing = {
+            (int(qid), int(doc_id)): (int(rank), float(cosine), float(qwen))
+            for qid, doc_id, rank, cosine, qwen in target_conn.execute(
+                "SELECT query_id, doc_id, cosine_rank, cosine_score, qwen_score FROM scores"
+            )
+        }
+        source_pairs = []
+        for row in target_scores.itertuples(index=False):
+            qid = int(row.query_id)
+            doc_id = int(row.doc_id)
+            rank = int(row.cosine_rank)
+            cosine = float(row.cosine_score)
+            qwen = float(row.qwen_score)
+            key = (qid, doc_id)
+            actual = (rank, cosine, qwen)
+            if key in existing:
+                prior = existing[key]
+                if prior[0] != actual[0] or not np.isclose(
+                    prior[1], actual[1], rtol=0.0, atol=1e-7
+                ) or not np.isclose(prior[2], actual[2], rtol=0.0, atol=1e-7):
+                    raise ValueError(f"Existing pool16 score differs for query={qid}, doc={doc_id}")
+                continue
+            source_pairs.append((int(qid), int(doc_id), int(rank), float(cosine), float(qwen)))
+        target_conn.executemany(
+            "INSERT INTO scores(query_id, doc_id, cosine_rank, cosine_score, qwen_score) "
+            "VALUES(?,?,?,?,?)",
+            source_pairs,
+        )
+        target_conn.commit()
+        checkpointed = int(target_conn.execute("SELECT COUNT(*) FROM scores").fetchone()[0])
+    report = {
+        "status": "seeded",
+        "source_candidate_pool_sha256": source_candidate_sha,
+        "target_candidate_pool_sha256": target_candidate_sha,
+        "source_pairs": len(source_rows),
+        "source_pairs_aligned_to_target": int(aligned["_merge"].eq("both").sum()),
+        "source_pairs_missing_at_tied_cutoff": int(aligned["_merge"].eq("left_only").sum()),
+        "shared_pairs_with_cosine_rank_change": int(
+            (
+                aligned.loc[aligned["_merge"].eq("both"), "cosine_rank_source"]
+                != aligned.loc[aligned["_merge"].eq("both"), "cosine_rank_target"]
+            ).sum()
+        ),
+        "source_pairs_inserted": len(source_pairs),
+        "pilot_or_prior_pairs_already_present": int(
+            aligned["_merge"].eq("both").sum()
+        ) - len(source_pairs),
+        "target_pool_pairs": len(target_candidate),
+        "target_checkpoint_pairs_after_seed": checkpointed,
+        "target_pairs_remaining": len(target_candidate) - checkpointed,
+        "source_score_report": str(source_report_path),
+        "target_checkpoint": str(target_db_path),
+    }
+    _atomic_json(out / "seed-report.json", report)
     print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
     return report
 
@@ -702,8 +993,7 @@ def score(out: Path, pilot: bool, batch_size: int = DEFAULT_BATCH_SIZE) -> dict[
         }
         pairs = candidates.to_dict("records")
         if pilot:
-            random.Random(42).shuffle(pairs)
-            pairs = pairs[: min(200, len(pairs))]
+            pairs = _select_pilot_pairs(pairs, done)
         else:
             pairs = [row for row in pairs if (int(row["query_id"]), int(row["doc_id"])) not in done]
         if not pairs:
@@ -937,28 +1227,55 @@ def main(argv: Sequence[str] | None = None) -> int:
         required=True,
         help="directory containing exact q_dense.npy/q_ids.npy (for S26 parity)",
     )
+    prepare_parser.add_argument("--pool-multiplier", type=float, default=1.3)
     score_parser = sub.add_parser("score", help="score candidate query/document pairs with Qwen")
     mode = score_parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--pilot", action="store_true", help="score the deterministic 200-pair pilot")
     mode.add_argument("--full", action="store_true", help="score all candidates, resuming the checkpoint")
     score_parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
+    seed_parser = sub.add_parser(
+        "seed-scores", help="seed an expanded pool with verified scores from a smaller pool"
+    )
+    seed_parser.add_argument("--source-dir", type=Path, required=True)
     sub.add_parser("export-scores", help="export the SQLite checkpoint to Parquet")
-    sub.add_parser("build", help="build Q-filter and Q-rrf bundles on CPU")
+    build_parser = sub.add_parser("build", help="build configured S29 bundles on CPU")
+    build_parser.add_argument("--variant", action="append", default=None)
+    build_parser.add_argument("--chunk-multiplier", type=float, default=None)
+    build_parser.add_argument("--whole-body", action="store_true", default=None)
     args = parser.parse_args(argv)
     out = _require_under_runs(args.out or run_dir())
     _guard_outputs(out)
     if args.command == "prepare":
-        prepare(out, query_vectors_dir=args.query_vectors)
+        prepare(
+            out,
+            query_vectors_dir=args.query_vectors,
+            pool_multiplier=args.pool_multiplier,
+        )
     elif args.command == "score":
         if args.batch_size < 1:
             parser.error("--batch-size must be at least 1")
         score(out, pilot=args.pilot, batch_size=args.batch_size)
     elif args.command == "export-scores":
         print(export_scores(out))
+    elif args.command == "seed-scores":
+        seed_scores(out, source_dir=_require_under_runs(args.source_dir))
     elif args.command == "build":
         from r2ai.s29.build import build
 
-        print(json.dumps(build(out), ensure_ascii=False, indent=2), flush=True)
+        variants = tuple(args.variant) if args.variant else ("Q-filter", "Q-rrf")
+        print(
+            json.dumps(
+                build(
+                    out,
+                    variants=variants,
+                    chunk_multiplier=args.chunk_multiplier,
+                    whole_body=args.whole_body,
+                ),
+                ensure_ascii=False,
+                indent=2,
+            ),
+            flush=True,
+        )
     return 0
 
 

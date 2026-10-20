@@ -1,8 +1,8 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-20 07:46 (UTC+7)
-- Model thực hiện: Claude Opus 5.5
-- Commit HEAD đã kiểm trước cập nhật này: `78471452d0783456be5cc252d852eed1ee1b782c`, nhánh `feat/s26-gold-structure` (tách từ `feat/s24-recovery`)
+- Cập nhật: 2026-10-20 11:05 (UTC+7)
+- Model thực hiện: GPT-6 (Codex)
+- Commit HEAD đã kiểm trước cập nhật này: `d777a6e98a962074a4017e25e5bd61244f1b3870`, nhánh `feat/s29-qwen-judge`
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - **Best mới đã đo: R1m 0,2673** (Qwen3-Reranker-0,6B + RRF trên phía zh, D16; người dùng cung cấp 15/10). **R1m chưa tích hợp vào repo này**: chờ phía vi (S15, sáng 16/10) rồi tích hợp một lần, kèm pin model Qwen3 (revision `e61197ed…`) và cache điểm. Trong repo, best tái tạo được vẫn là **C1 0,2655**. **C3 (S6-f + zh đợt 3) đã vào `main` local theo S14b: replay JSON `6cf9284d…3436` và ZIP `1c2472d1…1af9` khớp, chưa có điểm LB.** Chi tiết mục 5 (S14b).
 - **S14 (14/10, nhánh `feat/integrate`, chưa push): tái tạo C1 bằng một lệnh.** Best đã đo: **C1 Final 0,2655** (người dùng cung cấp) = base S6-f-K150 + doc zh đợt 2 (τ_doc tuyệt đối −0,87255859375, trần 30) + chunk zh ZL (τ 0,96, ≤ 3 doc/query, mỗi ID v2 một chunk, chỉ doc đã chọn) + LZMA dict 256 MiB; ZIP 82.047.434 B, ZIP SHA256 `e7c84e2c37c996fe3d046bf22a4d25b2fd9e8e1c2568d928fa45797108720c13`, JSON `83375428b79957b1580299f97b05299bb292957826bd4cb8bdc602a83b8dd5f3`. `python -m r2ai.compose replay --manifest configs/best-c1.yaml` (pin đủ input trong `configs/best-c1.yaml`, thiếu pin thì dừng) dựng lại **JSON SHA và ZIP SHA đều khớp**, validator native 0 lỗi / 1.200 query / 126.208 chunk. Replay S6-f JSON `d0da38b1…dca1` khớp; A1-115 JSON `4ffbba8b…2c82` khớp (ZIP khác 8 byte do mtime, gate là JSON); VS-append JSON và ZIP khớp. `submission-best.yaml` vẫn mặc định A1-115. Chi tiết mục 5 (S14) và `submissions/LOG.md`.
@@ -263,6 +263,8 @@ Cả hai: doc/query 136,48, 0 doc thêm do bảo vệ, chunk CC/query 9,34 (h1) 
 
 ## 6. Lệch so với `R2AI_STAGE3_CONTEXT.md`
 
+Cập nhật 2026-10-20 11:04 (UTC+7), GPT-6 (Codex), HEAD kiểm trước cập nhật `d777a6e98a962074a4017e25e5bd61244f1b3870`, nhánh `feat/s29-qwen-judge`. S29 Qwen judge: pool cosine top `round(1,3 × K_q)` trên 1.200 query (281.924 cặp, trung bình 234,9367 doc/query); `K_q` = số doc P1, số giữ lại đọc đúng từ K90-ph (trung bình 162,6225 doc/query). Query vector nạp nguyên S26 fp16 (`q_dense` SHA `0da5df8a…d72b`, `q_ids` SHA `8e31f025…75d`); cache vector SHA `eed0e104…edca`, pool SHA `708482f7…5222`. Dùng Qwen3-Reranker-0.6B revision `e61197ed45024b0ed8a2d74b80b4d909f1255473`, doc_text đầu 512 token, instruction tiếng Anh riêng vi/zh; n_c P1, chưa dùng chunk khi chấm. Pilot 200 cặp: 19,053 s tính cả truncate doc, 10,497 cặp/s, ETA toàn pool 26.858 s (≈7h27m), batch 8, không OOM; VRAM trống 5.827 MiB trước nạp, 4.594 MiB sau nạp. Full đang chạy PID 19596; lúc ghi nhận đã checkpoint 6.000/281.924 cặp (6.200 gồm pilot), log rate 11,510/s, ETA còn 23.955 s (≈6h39m), batch 8; VRAM trống 3.568 MiB. Log/checkpoint/report ở `out/runs/s29-qwen-judge/`; n_c P1 trung bình 105,1108. Build kiểm tra đầy đủ metadata SQLite và hash stats để phục hồi; khi ZIP chạm trần, fallback cắt body theo quy tắc S26. 6 test S29 qua, `py_compile` và `git diff --check` sạch. Q-filter/Q-RRF và validator chưa dựng; chưa nộp, chưa có điểm LB.
+
 Cập nhật 2026-10-20 07:46 (UTC+7), Claude Opus 5.5 (S26 K90-nc): LB Vu báo P-A4-nc120 0,3797 (Chunk F2 0,3788, P 0,2523 / R 0,5041). Trên doc K90 (trùng 1.200/1.200): K90-nc120 84.026.805 B (126,1 chunk/query), K90-nc140 97.087.414 B (146,3), K90-nc160 102.338.122 B (158,8; body doc mới cắt N = 5.652 ký tự, 10.044 chunk bị cắt, chunk P1 giữ nguyên). Validator 0 lỗi, chưa nộp. Report mục 5h.
 
 Cập nhật 2026-10-20 06:53 (UTC+7), Claude Opus 5.5 (S26/S27 P-A4-K90-ph): K90 + 612 doc pharmacity trong pool doc-level, cùng quy tắc chunk. 204 lượt lọt top-K_q, 165 query có ≥1 doc, 135 doc khác nhau (selection rate 22,1%), 134 lượt nhận chunk; khác K90 0,17 doc/query. ZIP 70.991.673 B SHA `b291124f…9c6e`, validator 0 lỗi, chưa nộp. Report mục 5e.
@@ -501,6 +503,7 @@ Cập nhật 2026-10-17 20:25 (UTC+7), GPT-6 (Codex, S24 recovery): D21 bỏ qua
 
 | Thời gian (UTC+7) | Ai | Thay đổi |
 |---|---|---|
+| 2026-10-20 11:05 | GPT-6 (Codex) | S29: full PID 19596, 6.400/281.924 cặp (6.600 gồm pilot), 11,47/s, ETA 6h40m; review fixes gồm metadata/hash sidecar, body fallback S26, OOM cleanup và JSON SHA; 6 test qua; chưa dựng/đo LB. |
 | 2026-10-20 07:46 | Claude Opus 5.5 | S26 K90-nc120/140/160: 84,03/97,09/102,34 MB; nc160 cắt body doc mới N = 5.652 (10.044 chunk); validator 0 lỗi, chưa nộp. |
 | 2026-10-20 06:53 | Claude Opus 5.5 | S26/S27 P-A4-K90-ph: K90 + pharmacity, selection 135/612 (22,1%), 165 query; ZIP 70,99 MB, validator 0 lỗi, chưa nộp. |
 | 2026-10-20 04:42 | Claude Opus 5.5 | S26 fingerprint extractor: 11 biến thể trên mẫu zh, extractor hiện tại cao nhất (0,9240), không biến thể nào >0,95, không nhúng lại. |

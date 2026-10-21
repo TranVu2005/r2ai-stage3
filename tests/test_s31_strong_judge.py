@@ -314,3 +314,69 @@ def test_thin_chunks_add_carriers_only_when_enabled():
     assert _thin_carrier(7, 7, own, {}, groups, {}, thin)
     assert not _thin_carrier(3, 3, own, {}, groups, {}, thin)
     assert not _thin_carrier(7, 7, own, {}, groups, {}, None)
+
+
+def test_tfree_and_thr_c_variant_names():
+    from r2ai.s31.build import variant_chunk_mode, variant_k_mode, variant_rank_keys
+
+    assert variant_k_mode("K4-tfree-t0.06", "J4") == "tfree:0.06"
+    assert variant_k_mode("K4-tfree-t0.1", "J4") == "tfree:0.1"
+    assert variant_k_mode("K4-thr-C", "J4") == "thr"
+    assert variant_chunk_mode("K4-thr-C", "J4") == "threshold"
+    assert variant_chunk_mode("K4-thr", "J4") is None
+    assert variant_rank_keys("K4-tfree-t0.08", "J4") == ("cosine_rank", "judge_rank")
+
+
+def test_threshold_chunk_selector_exact_total_in_rrf_order():
+    from r2ai.s31.build import threshold_chunk_selector
+
+    score_of = {1: {10: 0.9, 11: 0.2, 12: 0.8}, 2: {20: 0.5, 21: 0.95}}
+    offered = {1: [(10, 10, True), (11, 11, True), (12, 12, True)], 2: [(20, 20, False), (21, 21, True)]}
+    info = {}
+    result = threshold_chunk_selector(score_of, 3, info)(offered)
+    assert result == {1: [(10, 10), (12, 12)], 2: [(21, 21)]}
+    assert info["t_c"] == 0.8 and info["chunks"] == 3 and info["carriers_without_text"] == 1
+
+
+def test_subset_extra_uses_pairs_file(tmp_path):
+    shard = tmp_path / "shards" / "pool-00000.parquet"
+    shard.parent.mkdir()
+    pd.DataFrame({"pair_id": np.arange(6), "in_pool13": [True, True, False, False, False, True]}).to_parquet(shard)
+    pd.DataFrame({"pair_id": [3, 4]}).to_parquet(tmp_path / js.PAIRS_FILE)
+    args = argparse.Namespace(subset="extra", pairs_file=None, pool=str(tmp_path))
+    ids = js.subset_pair_ids(args)
+    parts = js.plan_parts([shard], 1, "extra", ids)
+    assert [p["positions"].tolist() for p in parts] == [[3], [4]]
+    assert js.part_name(parts[0]) == "pool-00000.extra.part-0000.parquet"
+    assert js.subset_pair_ids(argparse.Namespace(subset="tail", pairs_file=None, pool=str(tmp_path))) is None
+    with pytest.raises(ValueError):
+        js.subset_positions(shard, "extra")
+
+
+def test_free_pool_and_keep_use_fixed_constants(monkeypatch):
+    from r2ai.s31 import build as b
+
+    monkeypatch.setattr(b, "P_FREE", 3)
+    monkeypatch.setattr(b, "F_FREE", 1)
+    monkeypatch.setattr(b, "T_FREE", 0.5)
+    rows = [{"doc_id": d, "cosine_rank": r, "judge_score": s} for d, r, s in
+            [(10, 1, 0.1), (11, 2, 0.9), (12, 3, 0.7), (13, 4, 0.99)]]
+    pool = b.free_pool({1: rows, 2: rows[:2]})
+    assert [r["doc_id"] for r in pool[1]] == [10, 11, 12]
+    assert [r["judge_rank"] for r in pool[1]] == [3, 1, 2]
+    keep, report = b.free_keep(pool)
+    assert keep == {1: 2, 2: 1} and report["queries_pool_below_p"] == 1
+    assert b.variant_k_mode("K4-free-p13", "J4") == "free-p13"
+    assert b.variant_chunk_mode("K4-free-p13", "J4") == "threshold-free"
+
+
+def test_pool_extra_needed_pairs_dedup_and_flags(monkeypatch):
+    from r2ai.s31 import pool_extra as pe
+
+    monkeypatch.setattr(pe, "P_FREE", 2)
+    fresh = {1: [(10, 0.9), (11, 0.8), (12, 0.7), (13, 0.6)]}
+    rows = pe.needed_pairs(fresh, {1: 4}, {(1, 10)}, {1: {12, 14}}, {1})
+    got = {r[1]: (r[2], r[4], r[5]) for r in rows}
+    assert got == {11: (2, True, True), 12: (3, False, True), 13: (4, False, True), 14: (0, False, True)}
+    rows = pe.needed_pairs(fresh, {1: 2}, {(1, 10)}, {}, set())
+    assert [(r[1], r[4], r[5]) for r in rows] == [(11, True, False)]

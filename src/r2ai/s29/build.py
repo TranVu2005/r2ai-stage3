@@ -8,7 +8,7 @@ import sqlite3
 import time
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 import pandas as pd
@@ -306,6 +306,18 @@ def _carriers(
     their whole text as the chunk; they count toward the cap like any other doc.
     """
     count = _chunk_target(len(row["relevant_chunks"]), len(picked), chunk_multiplier)
+    return _eligible_carriers(picked, own_texts, all_p1_texts, groups, physical, thin_texts)[:count]
+
+
+def _eligible_carriers(
+    picked: list[tuple[int, int]],
+    own_texts: dict[int, str],
+    all_p1_texts: dict[int, str],
+    groups: dict[int, list[int]],
+    physical: dict[int, int],
+    thin_texts: dict[int, str] | None = None,
+) -> list[tuple[int, int]]:
+    """Selected docs that have a chunk source (P1 text, chunk group, or thin text), in order."""
     return [
         selected
         for selected in picked
@@ -313,7 +325,7 @@ def _carriers(
         or selected[1] in all_p1_texts
         or _canonical_owner(selected[0], groups, physical) in groups
         or (thin_texts is not None and selected[0] in thin_texts)
-    ][:count]
+    ]
 
 
 def _thin_carrier(
@@ -372,7 +384,11 @@ def _build_variant(
     mean_doc_id_symdiff_vs_primary: float | None,
     fixed_k: bool = True,
     thin_texts: dict[int, str] | None = None,
+    chunk_selector: Callable[[dict[int, list[tuple[int, int, bool]]]], dict[int, list[tuple[int, int]]]] | None = None,
 ) -> dict[str, Any]:
+    """``chunk_selector`` replaces the n_c x multiplier carrier rule: it receives, per query,
+    every selected doc with a chunk source as ``(doc_id, corpus_id, has_text)`` in selection
+    order and returns the carriers to write (a subsequence of those with text)."""
     started = time.monotonic()
     inputs = _inputs()
     chunks_path = canonical_path / "chunks_t256.parquet"
@@ -392,9 +408,12 @@ def _build_variant(
             for result in chosen[qid]
         ]
         picked_by_q[qid] = picked
-        for doc_id, corpus_id in _carriers(
-            row, picked, row_own, all_p1_texts, groups, physical, chunk_multiplier, thin_texts
-        ):
+        candidates = (
+            _carriers(row, picked, row_own, all_p1_texts, groups, physical, chunk_multiplier, thin_texts)
+            if chunk_selector is None
+            else _eligible_carriers(picked, row_own, all_p1_texts, groups, physical, thin_texts)
+        )
+        for doc_id, corpus_id in candidates:
             if _thin_carrier(doc_id, corpus_id, row_own, all_p1_texts, groups, physical, thin_texts):
                 continue
             if corpus_id not in row_own and corpus_id not in all_p1_texts:
@@ -415,6 +434,36 @@ def _build_variant(
             body_texts[owner] = _body_span(doc_text, str(lang), spans.get(owner, {}))
     for doc_id in need_body & set(extra_texts):
         body_texts[doc_id] = _body_span(extra_texts[doc_id], "vi", extra_spans.get(doc_id, {}))
+
+    carriers_by_q: dict[int, list[tuple[int, int]]] | None = None
+    if chunk_selector is not None:
+        offered: dict[int, list[tuple[int, int, bool]]] = {}
+        for row in rows:
+            qid = int(row["id"])
+            row_own = {int(chunk["doc_id"]): chunk["chunk_text"] for chunk in row["relevant_chunks"]}
+            items = []
+            for doc_id, corpus_id in _eligible_carriers(
+                picked_by_q[qid], row_own, all_p1_texts, groups, physical, thin_texts
+            ):
+                if corpus_id in row_own or corpus_id in all_p1_texts:
+                    has_text = True
+                elif _thin_carrier(doc_id, corpus_id, row_own, all_p1_texts, groups, physical, thin_texts):
+                    has_text = True
+                elif doc_id in extra_texts:
+                    has_text = bool(body_texts.get(doc_id, "").strip())
+                else:
+                    has_text = bool(body_texts.get(_canonical_owner(doc_id, groups, physical), "").strip())
+                items.append((doc_id, corpus_id, has_text))
+            offered[qid] = items
+        carriers_by_q = chunk_selector(offered)
+        for qid, items in offered.items():
+            allowed = [(d, c) for d, c, has_text in items if has_text]
+            chosen_carriers = carriers_by_q[qid]
+            position = {pair: index for index, pair in enumerate(allowed)}
+            if any(pair not in position for pair in chosen_carriers) or [
+                position[pair] for pair in chosen_carriers
+            ] != sorted(position[pair] for pair in chosen_carriers):
+                raise ValueError(f"chunk_selector returned carriers outside the offered order for query {qid}")
 
     target = out / f"{name}.zip"
     temp = out / f"{name}.{os.getpid()}.zip.tmp"
@@ -469,8 +518,10 @@ def _build_variant(
                     qid = int(row["id"])
                     picked = picked_by_q[qid]
                     own = {int(chunk["doc_id"]): chunk["chunk_text"] for chunk in row["relevant_chunks"]}
-                    carriers = _carriers(
-                        row, picked, own, all_p1_texts, groups, physical, chunk_multiplier, thin_texts
+                    carriers = (
+                        carriers_by_q[qid]
+                        if carriers_by_q is not None
+                        else _carriers(row, picked, own, all_p1_texts, groups, physical, chunk_multiplier, thin_texts)
                     )
                     output_chunks = []
                     thin_chunks = 0
@@ -657,7 +708,8 @@ def _build_variant(
         else "per-query count chosen by the caller (total and rule in its own sidecar)",
         "rrf_k": rrf_k,
         "qwen_weight": qwen_weight,
-        "chunks_rule": "round(n_c of P1 row * chunk_multiplier), S26 selected-doc carrier order",
+        "chunks_rule": "round(n_c of P1 row * chunk_multiplier), S26 selected-doc carrier order"
+        if chunk_selector is None else "caller chunk selector (rule in its own sidecar)",
         "chunk_multiplier": chunk_multiplier,
         "whole_body": whole_body,
         "queries": len(rows),

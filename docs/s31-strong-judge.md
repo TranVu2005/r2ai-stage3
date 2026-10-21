@@ -117,6 +117,7 @@ Theo quyết định 21/10 chỉ dựng trên pool 1,3×:
 | `J4-rrf3` | cosine + 0.6B + 4B | như trên |
 | `Jcheck-q06-rrf` | cosine + 0.6B | không cần GPU; cổng hồi quy |
 | `K4-scale` / `K4-thr` / `K4-mix` | cosine + 4B, K_q' biến thiên, tổng như J4-rrf | điểm 4B (mục LB 21/10) |
+| `K4-tfree-t<t>` / `K4-thr-C` / `K4-free-p13` | cosine + 4B; t cố định / chunk theo ngưỡng / hằng số không K_q | điểm 4B (mục LB 21/10 lượt 2) |
 
 ```bash
 python -m r2ai.s31.build --judge qwen3-reranker-4b --scores out/runs/s31-strong-judge/gpu/qwen3-reranker-4b/scores-pool13.parquet --variant J4-rrf --variant J4-rrf3
@@ -220,3 +221,75 @@ Cờ `--thin-chunks` mặc định tắt. Khi bật: doc `quality == thin` có �
 Do có trần, 1.139 chunk thin đẩy ra 959 chunk body/P1 xếp sau. Kết quả: tổng chunk chỉ +180, số chunk thay đổi ở 53 query, ZIP nhỏ đi 358.981 B vì text thin ngắn hơn body bị đẩy ra. Doc giữ nguyên. Validator S26 báo `ok`.
 
 **Hồi quy** (`out/runs/s31-strong-judge/build-thin-regress/`): dựng lại J4-rrf-ph979 với cờ tắt, sau khi đã có thay đổi builder (`fixed_k`, `thin_texts`). JSON `965331b3…3950` và ZIP `585685f1…e5d4` khớp đúng bản đã nộp.
+
+## LB 21/10 (lượt 2), nền K4-thr: t tự do, chunk theo ngưỡng, K4-free, pool-extra (CPU, chưa nộp)
+
+LB do Vu báo: **K4-thr 0,4122** (Doc 0,4139 / Chunk 0,4104) là nền mới. K4-mix 0,4087, K4-scale 0,4083. J4-rrf-ph979-thin 0,3994 nên bỏ cờ thin (code vẫn giữ, mặc định tắt).
+
+Mọi bản dưới đây dùng pool 1,3× đã gộp Pharmacity 979, điểm 4B, thứ tự RRF(cosine, 4B). Validator S26 báo `ok` cho cả 5 bản. Output nằm ở `out/runs/s31-strong-judge/build-k4b/` và `build-free/`.
+
+### K4-tfree-t{0,06; 0,08; 0,10}: t cố định, không ràng buộc tổng doc
+
+K_q' = kẹp(số doc trong pool có P4B ≥ t) vào [⌈0,5·K_q⌉, ⌊1,3·K_q⌋]. Chunk vẫn theo n_c ×1,4.
+
+| Bản | Tổng doc | Doc/query P10 / P50 / P90 | Chạm sàn | Chạm trần | So với K4-thr: thêm / bớt TB/query | Chunk (P10 / P50 / P90 mỗi query) | ZIP B | ZIP SHA256 |
+|---|---:|---|---:|---:|---:|---|---:|---|
+| K4-thr (t = 0,07752, LB 0,4122) | 195.147 | 66 / 160,5 / 261 | 12,2% | 21,2% | 0 / 0 | 159.744 (64 / 138 / 189) | 90.228.065 | `9aa93425…307c` |
+| K4-tfree-t0.06 | 201.620 | 69 / 168 / 264 | 9,6% | 24,3% | 5,39 / 0 | 162.168 (68 / 141 / 189) | 91.466.498 | `b68c408c2964948196a533fa9d3144f93c1b2aaca991a4f9145b3cf5c5c77d89` |
+| K4-tfree-t0.08 | 194.296 | 66 / 159 / 261 | 12,4% | 20,8% | 0 / 0,71 | 159.406 (64 / 137 / 189) | 90.053.028 | `aa4217d1829af943029322786d980f8c33dfb6c8787021f5bddc5e43e0fd7fab` |
+| K4-tfree-t0.1 | 188.312 | 64 / 151 / 257 | 14,2% | 18,1% | 0 / 5,70 | 156.868 (61 / 134 / 189) | 88.695.686 | `46538130a9ac50b22e34d19e6d3a0351f8c2f5c209356bf95e7a3ac994fdafbd` |
+
+### K4-thr-C: doc giữ nguyên K4-thr, chunk theo ngưỡng
+
+Duyệt doc đã chọn theo thứ tự RRF; mỗi doc có P4B ≥ t_c nhận đúng 1 chunk (nguyên body). t_c được chỉnh để tổng chunk bằng 175.148 (số chunk của J4-rrf-ph979): **t_c = 0,070560**. Có 123 cặp đúng bằng t_c, 60 trong số đó được lấy (hoà tách theo query_id, rồi vị trí RRF). 353 doc không có text nên không nhận chunk.
+
+- Danh sách doc (kể cả thứ tự) giống hệt K4-thr; đã kiểm bằng cách so JSON của hai ZIP.
+- Chunk/query P10 / P50 / P90 = 47 / 140 / 251 (min 4, max 305). Không query nào thiếu chunk.
+- **ZIP 100.471.357 B, dưới trần 102.600.000 B, không phải cắt body (N = 0).** SHA256 `31980453608212846a916b84e306482bc57e3de2f7c040304b8a38a204815a87`.
+
+### K4-free-p13 (bản tạm, vẫn phụ thuộc K_q qua pool13)
+
+Hằng số trong `r2ai.s31.build`:
+- `P_FREE = 211` = round(TB 1,3 × len(K90-ph)).
+- `F_FREE = 86` = trung vị của ⌈0,5 × len(K90-ph)⌉.
+- `T_FREE = 0,07751765647688268` = t của K4-thr.
+
+Pool là cosine top-min(211, pool13). 398 query có pool13 < 211, nên bản này vẫn phụ thuộc K_q; bản đủ 211 cần điểm pool-extra. Chọn doc có P4B ≥ T_FREE theo thứ tự RRF, sàn 86, trần bằng pool. Chunk: doc có P4B ≥ t_c, với t_c chỉnh để tổng chunk = 159.744 (tổng chunk K4-thr, Vu chọn).
+
+Ban đầu đích là 175.148, nhưng không đạt được: chỉ có 170.548 doc có text.
+
+- Doc: tổng 172.131. Doc/query P10 / P50 / P90 = 86 / 145 / 205. Chạm sàn 22,0% query, chạm trần (bằng pool) 2,4%.
+- So với K4-thr TB/query: thêm 4,63, bớt 23,81 (sym-diff 28,44). 175 query giống hệt.
+- Chunk: **t_c (lần 1, bản p13) = 0,027796**. Tổng 159.744, chunk/query P10 / P50 / P90 = 65 / 135 / 203. Không cắt body.
+- ZIP 91.749.446 B, SHA256 `cfd278a34d8381454b4dd9b1cd565beb737f4c9f4c08efaecec54d5c613a4731`.
+
+Khi có điểm pool-extra, K4-free đủ 211 sẽ hiệu chỉnh t_c lần 2, cũng về 159.744 (`--calibrate-tc`), rồi ghi thành hằng số `K4_FREE_T_C`. Sau đó không chỉnh nữa.
+
+### pool-extra: các cặp 4B còn thiếu, gộp thành một subset Kaggle (`python -m r2ai.s31.pool_extra`)
+
+Nguồn cặp, loại trùng theo (query_id, doc_id):
+
+- **free**: cosine top-211 mới của mọi query, tính trên canonical + đủ 3 lô Pharmacity, trừ các cặp đã có điểm 4B. Cặp đã có điểm gồm pool13 mở rộng và 170 cặp pool13 cũ bị đẩy ra (đã chấm trên Kaggle).
+- **capped**: 255 query chạm trần ở K4-thr. Lấy đuôi 1,3×–2,0× của pool S31, cộng các doc mới (lô 3, hoà cosine) lọt vào top-round(2,0 × len(P1)) mới.
+
+| | Cặp |
+|---|---:|
+| **Tổng (sau loại trùng)** | **56.115** |
+| free (top-211) | 20.299 |
+| capped (đuôi query chạm trần) | 37.106 |
+| thuộc cả hai | 1.290 |
+| đã có trong shard S31 (giữ pair_id) | 53.395 |
+| mới (export, shard `pool-91000.parquet`, pair_id từ 20.000.000) | 2.720 (2.540 doc, trong đó 30 cặp / 23 doc Pharmacity) |
+
+- Query: 398 query có pool13 < 211; 255 query chạm trần; 27 query thuộc cả hai.
+- Top-n13 cosine mới chỉ khác pool13 mở rộng ở 10 query / 211 doc. Đây đúng là các doc hoà cosine tại biên S29 đã ghi ở Pha 1.
+- `pool211_index.parquet` có 253.200 cặp (1.200 × 211), nguồn điểm của từng cặp: pool13 232.858, evicted 43, extra 20.299.
+- **ETA trên Kaggle 2×T4: 56.115 / 5,8 cặp/s ≈ 2,7 giờ**, gọn trong một phiên.
+- Revision 4B giữ `22e683669bc0f0bd69640a1354a6d0aebcfeede5`.
+
+Chạy trên Kaggle:
+1. Tạo dataset mới "pool-extra" từ thư mục `out/runs/s31-strong-judge/pool-extra/kaggle/`, gồm `extra_pairs.parquet` (SHA `389f6d39…4c04`), `shards/pool-91000.parquet` (`27b7fb6c…8153`) và `judge_score.py` mới (`--subset extra`, `--extra-pool`).
+2. Notebook `notebooks/s31-kaggle-judge.ipynb` (mặc định đã là `SUBSET = "extra"`, `SESSION = 2`, `REVISION = 22e68366…`): Add Input gồm dataset pool cũ và pool-extra. Không thêm output pool13 cũ. Chạy Save & Run All.
+3. Tải về `/kaggle/working/s31/qwen3-reranker-4b/scores-extra.parquet` và `collect-extra-report.json`.
+
+Sau khi có `scores-extra.parquet` sẽ dựng hai bản: **K4-free** (đủ top-211, không còn phụ thuộc K_q) và **K4-thr-ext** (K4-thr, trần mở rộng cho 255 query chạm trần).

@@ -145,26 +145,55 @@ def pool_shards(pool: Path) -> list[Path]:
     return shards
 
 
-SUBSETS = ("all", "pool13", "tail")
+def all_shards(args: argparse.Namespace) -> list[Path]:
+    """Shards of ``--pool`` plus those of every ``--extra-pool``; shard names must be unique."""
+    shards = pool_shards(Path(args.pool)) + [s for extra in args.extra_pool for s in pool_shards(Path(extra))]
+    names = [s.name for s in shards]
+    if len(set(names)) != len(names):
+        raise ValueError(f"Duplicate shard names across --pool and --extra-pool: {names}")
+    return shards
 
 
-def subset_positions(shard: Path, subset: str) -> np.ndarray:
-    """Row positions of a shard in ``subset``: all rows, in_pool13 rows (1.3x), or the 1.3x-2.0x tail."""
+SUBSETS = ("all", "pool13", "tail", "extra")
+PAIRS_FILE = "extra_pairs.parquet"
+
+
+def subset_positions(shard: Path, subset: str, pair_ids: np.ndarray | None = None) -> np.ndarray:
+    """Row positions of a shard in ``subset``: all rows, in_pool13 rows (1.3x), the 1.3x-2.0x tail,
+    or ``extra`` (the pair IDs of the pairs file)."""
     if subset == "all":
         return np.arange(pq.ParquetFile(shard).metadata.num_rows)
     if subset not in SUBSETS:
         raise ValueError(f"Unknown subset {subset!r}")
+    if subset == "extra":
+        if pair_ids is None:
+            raise ValueError("subset extra needs the pair IDs of the pairs file")
+        ids = pq.read_table(shard, columns=["pair_id"]).column("pair_id").to_numpy(zero_copy_only=False)
+        return np.flatnonzero(np.isin(ids, pair_ids))
     mask = pq.read_table(shard, columns=["in_pool13"]).column("in_pool13").to_numpy(zero_copy_only=False)
     return np.flatnonzero(mask if subset == "pool13" else ~mask)
 
 
-def plan_parts(shards: Sequence[Path], part_pairs: int, subset: str = "all") -> list[dict[str, Any]]:
+def subset_pair_ids(args: argparse.Namespace) -> np.ndarray | None:
+    """Pair IDs of ``--pairs-file`` (default ``<pool>/extra_pairs.parquet``) for subset extra."""
+    if args.subset != "extra":
+        return None
+    path = Path(args.pairs_file) if args.pairs_file else Path(args.pool) / PAIRS_FILE
+    ids = pd.read_parquet(path, columns=["pair_id"]).pair_id.to_numpy(dtype=np.int64)
+    if len(np.unique(ids)) != len(ids):
+        raise ValueError(f"{path}: duplicate pair_id")
+    return ids
+
+
+def plan_parts(
+    shards: Sequence[Path], part_pairs: int, subset: str = "all", pair_ids: np.ndarray | None = None
+) -> list[dict[str, Any]]:
     """Deterministic parts: consecutive ``part_pairs`` subset rows of each shard, in file order."""
     if part_pairs <= 0:
         raise ValueError("part_pairs must be positive")
     parts = []
     for shard in shards:
-        positions = subset_positions(shard, subset)
+        positions = subset_positions(shard, subset, pair_ids)
         for index, begin in enumerate(range(0, len(positions), part_pairs)):
             parts.append({"shard": shard.name, "path": shard, "subset": subset, "part": index,
                           "positions": positions[begin : begin + part_pairs]})
@@ -460,7 +489,8 @@ def run_score(args: argparse.Namespace) -> dict[str, Any]:
     parts_dir.mkdir(parents=True, exist_ok=True)
     log = Logger(out / f"score-w{args.worker}.log")
     _seed_from([Path(p) for p in args.resume_from], parts_dir, args.model, log)
-    parts = worker_parts(plan_parts(pool_shards(pool), args.part_pairs, args.subset), args.worker, args.workers)
+    pair_ids = subset_pair_ids(args)
+    parts = worker_parts(plan_parts(all_shards(args), args.part_pairs, args.subset, pair_ids), args.worker, args.workers)
     todo = [part for part in parts if not (parts_dir / part_name(part)).exists()]
     log("plan", subset=args.subset, worker=args.worker, workers=args.workers, parts=len(parts), todo=len(todo),
         pairs_worker=part_pairs_count(parts), pairs_todo=part_pairs_count(todo))
@@ -567,7 +597,7 @@ def run_pilot(args: argparse.Namespace) -> dict[str, Any]:
 
 def run_status(args: argparse.Namespace) -> dict[str, Any]:
     parts_dir = _model_dir(Path(args.out), args.model) / "parts"
-    parts = plan_parts(pool_shards(Path(args.pool)), args.part_pairs, args.subset)
+    parts = plan_parts(all_shards(args), args.part_pairs, args.subset, subset_pair_ids(args))
     done = [p for p in parts if (parts_dir / part_name(p)).exists()]
     report = {"model": args.model, "subset": args.subset, "parts_done": len(done), "parts_total": len(parts),
               "pairs_done": part_pairs_count(done), "pairs_total": part_pairs_count(parts),
@@ -586,10 +616,18 @@ def run_collect(args: argparse.Namespace) -> dict[str, Any]:
     out = _model_dir(Path(args.out), args.model)
     parts_dir = out / "parts"
     _seed_from([Path(p) for p in args.resume_from], parts_dir, args.model, Logger(out / "collect.log"))
-    shards = pool_shards(pool)
+    shards = all_shards(args)
     keys = pd.concat([pd.read_parquet(s, columns=["pair_id", "query_id", "doc_id", "in_pool13"]) for s in shards],
                      ignore_index=True).set_index("pair_id")
-    wanted = keys.index if args.subset == "all" else keys.index[keys.in_pool13 == (args.subset == "pool13")]
+    if args.subset == "all":
+        wanted = keys.index
+    elif args.subset == "extra":
+        pair_ids = subset_pair_ids(args)
+        wanted = keys.index[keys.index.isin(pair_ids)]
+        if len(wanted) != len(pair_ids):
+            raise ValueError("Pairs file lists pair IDs that are not in the pool shards")
+    else:
+        wanted = keys.index[keys.in_pool13 == (args.subset == "pool13")]
     frames, metas = [], []
     for target in sorted(parts_dir.glob("pool-*.part-*.parquet")):
         frame = pd.read_parquet(target)
@@ -652,7 +690,11 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--part-pairs", type=int, default=DEFAULT_PART_PAIRS)
         p.add_argument("--resume-from", action="append", default=[], help="read-only earlier output root(s)")
         p.add_argument("--subset", choices=SUBSETS, default="all",
-                       help="all pairs, pool13 (in_pool13: the 1.3x pool) or tail (1.3x-2.0x)")
+                       help="all pairs, pool13 (in_pool13: the 1.3x pool), tail (1.3x-2.0x) or extra (pairs file)")
+        p.add_argument("--pairs-file", default=None,
+                       help=f"pair IDs of subset extra (default <pool>/{PAIRS_FILE})")
+        p.add_argument("--extra-pool", action="append", default=[],
+                       help="extra dir(s) whose shards/pool-*.parquet are added to --pool (pool-extra dataset)")
         if model_args:
             p.add_argument("--model-path", default=None, help="local snapshot dir instead of the HF id")
             p.add_argument("--revision", default=None, help="HF revision (commit) to pin")

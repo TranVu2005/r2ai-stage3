@@ -239,6 +239,8 @@ K_q' = kẹp(số doc trong pool có P4B ≥ t) vào [⌈0,5·K_q⌉, ⌊1,3·K_
 | K4-tfree-t0.08 | 194.296 | 66 / 159 / 261 | 12,4% | 20,8% | 0 / 0,71 | 159.406 (64 / 137 / 189) | 90.053.028 | `aa4217d1829af943029322786d980f8c33dfb6c8787021f5bddc5e43e0fd7fab` |
 | K4-tfree-t0.1 | 188.312 | 64 / 151 / 257 | 14,2% | 18,1% | 0 / 5,70 | 156.868 (61 / 134 / 189) | 88.695.686 | `46538130a9ac50b22e34d19e6d3a0351f8c2f5c209356bf95e7a3ac994fdafbd` |
 
+K4-tfree-t0.08 bị bỏ khỏi danh sách nộp (Vu, 21/10): gần trùng K4-thr, khác chỉ 0,71 doc/query.
+
 ### K4-thr-C: doc giữ nguyên K4-thr, chunk theo ngưỡng
 
 Duyệt doc đã chọn theo thứ tự RRF; mỗi doc có P4B ≥ t_c nhận đúng 1 chunk (nguyên body). t_c được chỉnh để tổng chunk bằng 175.148 (số chunk của J4-rrf-ph979): **t_c = 0,070560**. Có 123 cặp đúng bằng t_c, 60 trong số đó được lấy (hoà tách theo query_id, rồi vị trí RRF). 353 doc không có text nên không nhận chunk.
@@ -293,3 +295,5 @@ Chạy trên Kaggle:
 3. Tải về `/kaggle/working/s31/qwen3-reranker-4b/scores-extra.parquet` và `collect-extra-report.json`.
 
 Sau khi có `scores-extra.parquet` sẽ dựng hai bản: **K4-free** (đủ top-211, không còn phụ thuộc K_q) và **K4-thr-ext** (K4-thr, trần mở rộng cho 255 query chạm trần).
+
+**Hồi quy sau hook `chunk_selector`** (21/10 19:14, commit `08bcf6b`, `out/runs/s31-strong-judge/build-regress-hook/`): dựng lại J4-rrf-ph979 với đường mặc định (không selector, không thin). Kết quả JSON `965331b3…3950` và ZIP `585685f1…e5d4` khớp đúng bản đã nộp.

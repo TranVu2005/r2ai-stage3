@@ -254,3 +254,15 @@ def test_build_load_candidates_joins_pool13_and_checks_alignment(tmp_path):
     pd.DataFrame({"pair_id": [0], "query_id": [1], "doc_id": [10], "score": [0.7]}).to_parquet(short, index=False)
     with pytest.raises(ValueError):
         load_candidates(pool, short)
+
+
+def test_pharmacity_merge_pool_keeps_size_and_evicts_lowest():
+    from r2ai.s31.pharmacity_ext import merge_pool
+
+    existing = pd.DataFrame({"pair_id": [1, 2, 3], "doc_id": [10, 11, 12], "cosine_score": [0.9, 0.6, 0.5],
+                             "cosine_rank": [1, 2, 3]})
+    rows, evicted = merge_pool(existing, np.array([20, 21]), np.array([0.7, 0.5]))
+    assert rows.doc_id.tolist() == [10, 20, 11] and rows.cosine_rank.tolist() == [1, 2, 3]
+    assert rows.is_new.tolist() == [False, True, False] and evicted == 1
+    with pytest.raises(ValueError):
+        merge_pool(existing, np.array([10]), np.array([0.8]))

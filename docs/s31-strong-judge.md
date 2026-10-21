@@ -141,3 +141,42 @@ Ba bản cùng pool 1,3×, cùng số doc K90-ph/query, cùng chunk nc140, Pharm
 - **Q-rrf (n_c P1) dựng lại bằng builder S29 đã merge: JSON SHA `99be0252…153a` ≠ `6b21fbb5…9afc` của bản đã nộp.** Nguyên nhân: `e451fe7` đổi `json.dumps` sang `separators=(",", ":")` cho mọi bản, kể cả Q-rrf (JSON 629.390.612 B so với 630.093.327 B). Parse cả hai: 1.200/1.200 dòng **giống hệt** (doc, chunk, thứ tự). Cổng SHA theo đúng chữ không đạt; nội dung khớp. Không sửa code S29.
 - **`Jcheck-q06-rrf` qua đường S31: JSON SHA `da6cf34b…3fa7` = đúng `QRRF-nc140-ph` (LB 0,3940)**; 1.200/1.200 query cùng tập doc với Q-rrf. ZIP 97.666.826 B (hơn 2 B do tên member JSON dài hơn 1 ký tự). Build CPU 1.196,6 s.
 - Tương quan trên pool13: Spearman(cosine, 0.6B) toàn cục 0,419, TB theo query 0,367 (p10 0,176).
+
+## Kết quả 21/10/2026 (đo, chưa nộp)
+
+### Điểm 4B pool13 (Kaggle)
+
+`gpu/qwen3-reranker-4b/scores-pool13.parquet`: SHA `39d554f2…84fb` (khớp số Vu gửi), 281.924 cặp, 150/150 part, revision `22e683669bc0f0bd69640a1354a6d0aebcfeede5`, fp16, hf, 0 doc vượt 512 token. **GPU: 98.273,2 s T4 (27,3 giờ T4) ⇒ 2,87 cặp/s mỗi T4**, thấp hơn mức ước tính ~5 cặp/s. Chạy 2×T4 song song thì khoảng 13,6 giờ thật.
+
+### Pharmacity lô 3 (612 → 979 doc)
+
+`python -m r2ai.s31.pharmacity_ext prepare` tính cosine cho 367 doc lô 3, cùng cách tính và cùng vector query với S29, rồi trộn vào pool 1,3× của từng query. Số cặp mỗi query giữ nguyên `round(1,3 × K_q)`, doc mới lọt vào thì cặp cuối bị đẩy ra.
+
+- **103 doc lô 3 lọt pool13: 170 cặp mới, 134 query thay đổi, 170 cặp bị đẩy ra.** Tổng vẫn 281.924 cặp. Index SHA `ecf0ea1b…e3f`.
+- Chấm local trên RTX 3050: 0.6B bf16 170 cặp trong 14,2 s; 4B fp16 với `--device-map auto --max-gpu-memory 4GiB` (offload, cùng snapshot `22e68366…`) 170 cặp trong 101,6 s.
+- **Kiểm 4B local so với Kaggle trên 200 cặp pool13: Spearman 0,99998**, |Δ| TB 0,00085, max 0,0054.
+- Ghép điểm (`merge-scores`): 0.6B `q06_scores.parquet` SHA `3b04a00f…118d`, 4B SHA `ddf24b91…db0f`, mỗi file 281.924 cặp.
+
+### Bản dựng
+
+Mọi bản: 1.200 query, 195.147 doc, n_c ×1,4, nguyên body (không cắt), LZMA dict 256 MiB. Validator S26 (`scripts/s26/validate_pa3.py` + lô Pharmacity) báo `ok: true` cho cả 4 ZIP.
+
+| Bản | Pharmacity | ZIP B | ZIP SHA256 | Chunk | vi / zh doc | Doc thay so với QRRF-nc140-ph TB/query (sym-diff) | Doc lô 3 được chọn |
+|---|---|---:|---|---:|---|---:|---:|
+| QRRF-nc140-ph (LB 0,3940) | 612 | 97.666.824 | `c57f3e99…59d0` | 175.313 | 151.036 / 44.111 | 0 | 0 |
+| J4-rrf | 612 | 97.996.591 | `80494fb6f5a432fb3b76b7ed61edbffb2282096390df9ac243f771f072e98606` | 175.270 | 152.965 / 42.182 | 15,71 (31,41) | 0 |
+| J4-rrf3 | 612 | 98.029.728 | `72f1bdc0a6304a2e6de7ed2422ec4045a4f09e01a37f991d0517f7182a78eab1` | 175.249 | 151.606 / 43.541 | 10,86 (21,72) | 0 |
+| **J4-rrf-ph979** | 979 | 97.920.078 | `585685f18cde4493372a58efa4fb01846c205e73ec7f5252f86fd825af39e5d4` | 175.148 | 152.994 / 42.153 | 15,76 (31,53) | 91 doc / 136 cặp |
+| **J4-rrf3-ph979** | 979 | 97.925.448 | `8f34a80322a7240729debe3e2260662a8936201bff3596d908c12e3c78623a0d` | 175.123 | 151.639 / 43.508 | 10,94 (21,88) | 89 doc / 135 cặp |
+
+Cổng hồi quy chạy lại cùng lượt build (lô 3 đã có trong thư mục lots): `Jcheck-q06-rrf` JSON vẫn bằng `da6cf34b…3fa7`. Như vậy builder không bị ảnh hưởng khi thư mục lots có thêm lô 3.
+
+Tương quan thứ hạng trên pool13 (bản 612; bản 979 lệch < 0,0002):
+
+| Cặp | Spearman toàn cục | TB theo query | p10 theo query |
+|---|---:|---:|---:|
+| 4B ~ 0.6B | 0,7369 | 0,6869 | 0,4933 |
+| 4B ~ cosine | 0,4416 | 0,3636 | 0,1791 |
+| 0.6B ~ cosine | 0,4192 | 0,3669 | 0,1757 |
+
+Đọc LB: J4-rrf so với QRRF-nc140-ph cho biết đóng góp của 4B so với 0.6B (cùng 612 doc Pharmacity); J4-rrf3 so với J4-rrf cho biết đóng góp thêm của 0.6B. Cặp `-ph979` so với cặp 612 tương ứng cho biết tác động của lô 3 (136 / 135 cặp doc lô 3 được chọn, ≈ 0,11 doc/query; chênh LB nhỏ ở mức này khó tách khỏi nhiễu).

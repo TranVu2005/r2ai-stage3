@@ -1,8 +1,8 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-20 23:38 (UTC+7)
+- Cập nhật: 2026-10-21 12:50 (UTC+7)
 - Model thực hiện: Claude Opus 5.5
-- Commit HEAD đã kiểm trước cập nhật này: `b4d248ad3119ec77c47e1f76611c30b16df954fd`, nhánh `feat/s31-strong-judge`
+- Commit HEAD đã kiểm trước cập nhật này: `f4ea7755d9171e14c66dd91f37327f4071ae281d`, nhánh `feat/s31-strong-judge`
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - **Best mới đã đo: R1m 0,2673** (Qwen3-Reranker-0,6B + RRF trên phía zh, D16; người dùng cung cấp 15/10). **R1m chưa tích hợp vào repo này**: chờ phía vi (S15, sáng 16/10) rồi tích hợp một lần, kèm pin model Qwen3 (revision `e61197ed…`) và cache điểm. Trong repo, best tái tạo được vẫn là **C1 0,2655**. **C3 (S6-f + zh đợt 3) đã vào `main` local theo S14b: replay JSON `6cf9284d…3436` và ZIP `1c2472d1…1af9` khớp, chưa có điểm LB.** Chi tiết mục 5 (S14b).
 - **S14 (14/10, nhánh `feat/integrate`, chưa push): tái tạo C1 bằng một lệnh.** Best đã đo: **C1 Final 0,2655** (người dùng cung cấp) = base S6-f-K150 + doc zh đợt 2 (τ_doc tuyệt đối −0,87255859375, trần 30) + chunk zh ZL (τ 0,96, ≤ 3 doc/query, mỗi ID v2 một chunk, chỉ doc đã chọn) + LZMA dict 256 MiB; ZIP 82.047.434 B, ZIP SHA256 `e7c84e2c37c996fe3d046bf22a4d25b2fd9e8e1c2568d928fa45797108720c13`, JSON `83375428b79957b1580299f97b05299bb292957826bd4cb8bdc602a83b8dd5f3`. `python -m r2ai.compose replay --manifest configs/best-c1.yaml` (pin đủ input trong `configs/best-c1.yaml`, thiếu pin thì dừng) dựng lại **JSON SHA và ZIP SHA đều khớp**, validator native 0 lỗi / 1.200 query / 126.208 chunk. Replay S6-f JSON `d0da38b1…dca1` khớp; A1-115 JSON `4ffbba8b…2c82` khớp (ZIP khác 8 byte do mtime, gate là JSON); VS-append JSON và ZIP khớp. `submission-best.yaml` vẫn mặc định A1-115. Chi tiết mục 5 (S14) và `submissions/LOG.md`.
@@ -262,6 +262,8 @@ Cả hai: doc/query 136,48, 0 doc thêm do bảo vệ, chunk CC/query 9,34 (h1) 
 **Chưa làm (chờ Vu):** `feat/zh-v2` có thêm 6 commit mới (trích xuất lại, supersede) và `feat/en-pubmed`, `feat/reranker-trial` chưa được merge vào `main`; C3 không cần chúng (nguồn zh được pin theo SHA). Gộp R1m: xem đầu file.
 
 ## 6. Lệch so với `R2AI_STAGE3_CONTEXT.md`
+
+Cập nhật 2026-10-21 12:50 (UTC+7), Claude Opus 5.5, HEAD kiểm trước cập nhật `f4ea7755d9171e14c66dd91f37327f4071ae281d`, nhánh `feat/s31-strong-judge`. S31: điểm 4B pool13 từ Kaggle SHA `39d554f2…84fb` khớp, 281.924 cặp, rev `22e68366…`, fp16; 98.273 s T4 (2,87 cặp/s/T4). Pharmacity lô 3 (979 doc): 103 doc / 170 cặp lọt pool13 (134 query), chấm local 0.6B + 4B (4B offload so Kaggle Spearman 0,99998 trên 200 cặp). Dựng 4 bản, validator S26 ok cả 4, nguyên body: J4-rrf ZIP `80494fb6…8606` (thay 15,71 doc/query so QRRF-nc140-ph), J4-rrf3 `72f1bdc0…eab1` (10,86), **J4-rrf-ph979 `585685f1…e5d4` (15,76; 91 doc lô 3)**, **J4-rrf3-ph979 `8f34a803…3a0d` (10,94; 89 doc lô 3)**. Spearman 4B~0.6B 0,737 (TB/query 0,687), 4B~cosine 0,442 (0,364). Jcheck vẫn = QRRF-nc140-ph JSON. Chưa nộp, chưa có LB.
 
 Cập nhật 2026-10-20 23:31 (UTC+7), Claude Opus 5.5, HEAD kiểm trước cập nhật `fc425141169777fe8e11d04e8f66323c54d17637`, nhánh `feat/s31-strong-judge`. Merge builder S29 `e451fe7`. Vu báo LB (21/10): QRRF-nc140-ph 0,3940 (tốt nhất), pool16 0,3931, wq0.65 0,3933 → S31 chỉ chấm pool13 cho 4B, không chấm phần đuôi; notebook phiên 2 = pool13, tự resume và pin commit; RunPod mặc định pool13. Hồi quy: Q-rrf dựng lại bằng builder S29 mới ra JSON `99be0252…` ≠ `6b21fbb5…` (đã nộp) vì `e451fe7` đổi sang JSON gọn; nội dung 1.200 dòng giống hệt. `r2ai.s31.build` Jcheck-q06-rrf (RRF cosine + 0.6B, nc140) ra JSON `da6cf34b…` đúng QRRF-nc140-ph. J4-rrf / J4-rrf3 sẵn sàng, chờ `scores-pool13.parquet` 4B. 30 test S29+S31 qua.
 
@@ -524,6 +526,7 @@ Cập nhật 2026-10-17 20:25 (UTC+7), GPT-6 (Codex, S24 recovery): D21 bỏ qua
 
 | Thời gian (UTC+7) | Ai | Thay đổi |
 |---|---|---|
+| 2026-10-21 12:50 | Claude Opus 5.5 | S31: 4B pool13 Kaggle (27,3 h T4); Pharmacity lô 3 103 doc/170 cặp chấm local; dựng J4-rrf, J4-rrf3, J4-rrf-ph979, J4-rrf3-ph979, validator S26 ok; chưa nộp. |
 | 2026-10-20 23:38 | Claude Opus 5.5 | S31 report: chỉ J4-rrf và J4-rrf3 (J4-only-rrf2 = J4-rrf, Vu xác nhận); thêm cách đọc LB: J4-rrf vs QRRF-nc140-ph = 4B so với 0.6B, J4-rrf3 vs J4-rrf = đóng góp thêm của 0.6B. |
 | 2026-10-20 23:31 | Claude Opus 5.5 | S31: merge builder S29; chỉ pool13 (bỏ tail); `r2ai.s31.build` J4-rrf/J4-rrf3; Jcheck JSON = QRRF-nc140-ph `da6cf34b…`; Q-rrf dựng lại khác SHA chỉ do JSON gọn, nội dung giống hệt. |
 | 2026-10-20 22:27 | GPT-6 (Codex) | S29: QRRF-nc140-ph + 4 sweep CPU + QRRF-pool16 đã dựng; 6 ZIP SHA/thống kê tại §6, validator S26 0 lỗi toàn bộ. Pool16 chấm thêm 65.257 cặp GPU (65.057 sau pilot) trong 6.212 s, không OOM; khác primary 18,0067 doc-ID/query. Reviewer findings về default chunk/body và candidate SHA đã được khóa; 15 test S29 pass. LB cũ theo Vu: QRRF 0,3863, Q-filter 0,3693; ZIP mới chưa submit/đo LB. |

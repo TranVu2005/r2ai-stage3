@@ -45,11 +45,20 @@ def variant_rank_keys(name: str, judge_tag: str | None) -> tuple[str, ...]:
     raise ValueError(f"Unsupported S31 variant {name!r} for judge tag {judge_tag!r}")
 
 
-def load_candidates(pool_dir: Path, judge_scores: Path | None) -> pd.DataFrame:
-    """Pool13 rows with q06_score (S29) and, if given, judge_score; all joined on pair_id."""
-    index = pd.read_parquet(pool_dir / "pool_index.parquet")
-    pool13 = index[index.in_pool13].copy()
-    ref = pd.read_parquet(pool_dir / "s29_qwen06_scores.parquet")
+def load_candidates(
+    pool_dir: Path, judge_scores: Path | None, pool13_index: Path | None = None, q06_scores: Path | None = None
+) -> pd.DataFrame:
+    """Pool13 rows with q06_score (S29) and, if given, judge_score; all joined on pair_id.
+
+    ``pool13_index``/``q06_scores`` replace the pool's 1.3x rows and the S29 scores (the
+    Pharmacity-extended pool from ``r2ai.s31.pharmacity_ext``).
+    """
+    if pool13_index is None:
+        index = pd.read_parquet(pool_dir / "pool_index.parquet")
+        pool13 = index[index.in_pool13].copy()
+    else:
+        pool13 = pd.read_parquet(pool13_index)
+    ref = pd.read_parquet(q06_scores or pool_dir / "s29_qwen06_scores.parquet")
     frame = pool13.merge(ref[["pair_id", "query_id", "doc_id", "qwen_score"]], on="pair_id", suffixes=("", "_ref"))
     if len(frame) != len(pool13) or not (
         (frame.query_id == frame.query_id_ref).all() and (frame.doc_id == frame.doc_id_ref).all()
@@ -92,16 +101,29 @@ def _scores_digest(frame: pd.DataFrame, columns: Sequence[str]) -> str:
     return digest.hexdigest()
 
 
-def build(out: Path, variants: Sequence[str], judge: str | None, judge_scores: Path | None, pool_dir: Path) -> list[dict[str, Any]]:
+def build(
+    out: Path,
+    variants: Sequence[str],
+    judge: str | None,
+    judge_scores: Path | None,
+    pool_dir: Path,
+    pool13_index: Path | None = None,
+    q06_scores: Path | None = None,
+    name_suffix: str = "",
+) -> list[dict[str, Any]]:
     started = time.monotonic()
     judge_tag = JUDGE_TAGS.get(judge) if judge else None
-    keys_by_variant = {name: variant_rank_keys(name, judge_tag) for name in variants}
+    keys_by_base = {name: variant_rank_keys(name, judge_tag) for name in variants}
+    keys_by_variant = {f"{name}{name_suffix}": keys for name, keys in keys_by_base.items()}
+    variants = list(keys_by_variant)
+    q06_path = q06_scores or pool_dir / "s29_qwen06_scores.parquet"
+    candidate_file = pool13_index or pool_dir / "pool_index.parquet"
     if any("judge_rank" in keys for keys in keys_by_variant.values()) and judge_scores is None:
         raise ValueError("Judge variants need --scores (scores-pool13.parquet of the judge)")
     inputs = _inputs()
     for key in ("p1", "baseline", "canonical", "extra_docs"):
         paths.require_inputs(inputs[key])
-    for path in [pool_dir / "pool_index.parquet", pool_dir / "s29_qwen06_scores.parquet"] + ([judge_scores] if judge_scores else []):
+    for path in [candidate_file, q06_path] + ([judge_scores] if judge_scores else []):
         paths.require_inputs(path)
     s29_build._preflight_outputs(out, tuple(variants))
     for name in variants:
@@ -109,7 +131,7 @@ def build(out: Path, variants: Sequence[str], judge: str | None, judge_scores: P
         paths.assert_writable(out / f"{name}.s31.json.tmp")
     out.mkdir(parents=True, exist_ok=True)
 
-    frame = load_candidates(pool_dir, judge_scores)
+    frame = load_candidates(pool_dir, judge_scores, pool13_index, q06_scores)
     ranked = rank_candidates(frame)
 
     # Same context preparation as r2ai.s29.build.build.
@@ -138,7 +160,7 @@ def build(out: Path, variants: Sequence[str], judge: str | None, judge_scores: P
     reference = {qid: select_rrf(rows, len(baseline[qid]["relevant_docs"]), ("cosine_rank", "q06_rank"), RRF_K)
                  for qid, rows in ranked.items()}
     reference_ids = {qid: [int(r["doc_id"]) for r in rows] for qid, rows in reference.items()}
-    candidate_digest = _sha256(pool_dir / "pool_index.parquet")
+    candidate_digest = _sha256(candidate_file)
     score_columns = ["q06_score"] + (["judge_score"] if "judge_score" in frame else [])
     score_digest = _scores_digest(frame, score_columns)
     correlations = judge_correlations(frame.assign(cosine=frame.cosine_score), ["cosine", *score_columns])
@@ -162,9 +184,12 @@ def build(out: Path, variants: Sequence[str], judge: str | None, judge_scores: P
             "judge": judge if "judge_rank" in keys else None,
             "judge_scores": str(judge_scores) if judge_scores and "judge_rank" in keys else None,
             "judge_scores_sha256": _sha256(judge_scores) if judge_scores and "judge_rank" in keys else None,
-            "q06_scores_sha256": _sha256(pool_dir / "s29_qwen06_scores.parquet"),
+            "q06_scores": str(q06_path),
+            "q06_scores_sha256": _sha256(q06_path),
+            "pool_index": str(candidate_file),
             "pool_index_sha256": candidate_digest,
-            "pool": "in_pool13 (round(1.3 * K_q), identical to the S29 pool)",
+            "pool": "in_pool13 (round(1.3 * K_q), identical to the S29 pool)" if pool13_index is None
+            else "round(1.3 * K_q) per query after merging the new Pharmacity lots (r2ai.s31.pharmacity_ext)",
             "keep_rule": "len(relevant_docs) of each K90-ph row",
             "chunk_multiplier": CHUNK_MULTIPLIER,
             "whole_body": WHOLE_BODY,
@@ -176,7 +201,7 @@ def build(out: Path, variants: Sequence[str], judge: str | None, judge_scores: P
             "zip_bytes": summary.get("zip_bytes"),
             "note": "the S29 builder's build.json names the 0.6B model; this sidecar records the S31 rank sources",
         }
-        if name == "Jcheck-q06-rrf":
+        if name == "Jcheck-q06-rrf" and pool13_index is None:
             sidecar["regression_target_json_sha256"] = QRRF_NC140_JSON_SHA256
             sidecar["regression_pass"] = summary.get("json_sha256") == QRRF_NC140_JSON_SHA256
         _atomic_json(out / f"{name}.s31.json", sidecar)
@@ -194,6 +219,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--scores", type=Path, default=None, help="judge scores-pool13.parquet")
     parser.add_argument("--pool", type=Path, default=None, help="S31 pool dir")
     parser.add_argument("--out", type=Path, default=None, help="output dir below RUNS_DIR")
+    parser.add_argument("--pool13-index", type=Path, default=None, help="extended 1.3x pool (pharmacity_ext)")
+    parser.add_argument("--q06-scores", type=Path, default=None, help="0.6B scores matching --pool13-index")
+    parser.add_argument("--name-suffix", default="", help="appended to the variant names, e.g. -ph979")
     args = parser.parse_args(argv)
     root = paths.RUNS_DIR / "s31-strong-judge"
     out = paths.resolve_path(args.out or root / "build")
@@ -202,7 +230,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     paths.assert_writable(out)
     pool_dir = paths.resolve_path(args.pool or root / "pool")
     scores = paths.resolve_path(args.scores) if args.scores else None
-    results = build(out, args.variant, args.judge, scores, pool_dir)
+    results = build(
+        out, args.variant, args.judge, scores, pool_dir,
+        paths.resolve_path(args.pool13_index) if args.pool13_index else None,
+        paths.resolve_path(args.q06_scores) if args.q06_scores else None,
+        args.name_suffix,
+    )
     failed = [r["name"] for r in results if r.get("regression_pass") is False]
     if failed:
         print(json.dumps({"regression_failed": failed}), flush=True)

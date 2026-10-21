@@ -232,7 +232,7 @@ def yes_probability(no_logit: np.ndarray, yes_logit: np.ndarray) -> np.ndarray:
 
 class HFScorer:
     def __init__(self, model_path: str, revision: str | None, dtype: str, log: Logger, attn: str = "sdpa",
-                 device_map: str | None = None):
+                 device_map: str | None = None, max_gpu_memory: str | None = None):
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -246,6 +246,8 @@ class HFScorer:
         load = dict(attn_implementation=attn, **kwargs)
         if device_map:
             load["device_map"] = device_map  # e.g. "auto": split an 8B model over 2x T4
+            if max_gpu_memory:  # cap GPU 0; the rest is offloaded to CPU and run on GPU layer by layer
+                load["max_memory"] = {0: max_gpu_memory, "cpu": "64GiB"}
         try:
             model = AutoModelForCausalLM.from_pretrained(model_path, dtype=torch_dtype, **load)
         except TypeError:  # transformers < 4.56 uses torch_dtype
@@ -396,7 +398,8 @@ def make_scorer(args: argparse.Namespace, log: Logger) -> Any:
                           quantization=args.quantization or spec.get("quantization"))
     if spec.get("quantization") and args.backend == "hf":
         raise ValueError(f"{args.model} needs --backend vllm (quantized checkpoint)")
-    return HFScorer(model_path, revision, args.dtype, log, attn=args.attn, device_map=args.device_map)
+    return HFScorer(model_path, revision, args.dtype, log, attn=args.attn, device_map=args.device_map,
+                    max_gpu_memory=args.max_gpu_memory)
 
 
 def _acquire_lock(path: Path) -> None:
@@ -657,6 +660,7 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument("--dtype", choices=("auto", "bfloat16", "float16", "float32"), default="auto")
             p.add_argument("--attn", default="sdpa", help="transformers attn_implementation")
             p.add_argument("--device-map", default=None, help='hf device_map, e.g. "auto" to split over GPUs')
+            p.add_argument("--max-gpu-memory", default=None, help='with --device-map auto: GPU 0 cap, e.g. "4GiB"')
             p.add_argument("--max-batch-tokens", type=int, default=16_384, help="padded tokens per batch (hf)")
             p.add_argument("--max-batch-size", type=int, default=32)
             p.add_argument("--max-model-len", type=int, default=2048, help="vllm")

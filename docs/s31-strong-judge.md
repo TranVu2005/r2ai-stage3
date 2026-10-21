@@ -297,3 +297,31 @@ Chạy trên Kaggle:
 Sau khi có `scores-extra.parquet` sẽ dựng hai bản: **K4-free** (đủ top-211, không còn phụ thuộc K_q) và **K4-thr-ext** (K4-thr, trần mở rộng cho 255 query chạm trần).
 
 **Hồi quy sau hook `chunk_selector`** (21/10 19:14, commit `08bcf6b`, `out/runs/s31-strong-judge/build-regress-hook/`): dựng lại J4-rrf-ph979 với đường mặc định (không selector, không thin). Kết quả JSON `965331b3…3950` và ZIP `585685f1…e5d4` khớp đúng bản đã nộp.
+
+## LB 21/10 (lượt 3) và bản dùng điểm pool-extra (CPU, chưa nộp)
+
+LB do Vu báo: **K4-thr-C 0,4183** (Doc 0,4139 / Chunk 0,4227), là bản tốt nhất. K4-free-p13 0,4096 (Doc 0,4033; recall giảm vì trần pool 211).
+
+Điểm pool-extra lấy từ Kaggle: `gpu/qwen3-reranker-4b/scores-extra.parquet`, SHA `84cf53fa…f0e3` khớp report collect. 56.115 cặp, 44 part, revision `22e68366…`, fp16, hf, 19.435 s T4.
+
+Pool đã chấm của mỗi query (`scored_union`) gộp ba nguồn, loại trùng theo doc: pool13 mở rộng, 170 cặp pool13 cũ bị đẩy ra (lấy điểm Kaggle pool13), và cặp extra. Thứ tự là cosine giảm dần. Mỗi query có từ 211 đến 522 cặp.
+
+Chunk của cả hai bản: doc đã chọn, theo thứ tự RRF, có P4B ≥ t_c cố định = 0,07055959618729296 (t_c của K4-thr-C, không hiệu chỉnh lại). Cả hai ZIP đều vượt trần khi giữ nguyên body (khoảng 117 MB), nên body bị cắt theo quy tắc S29. Validator S26 báo `ok` cả hai. Output ở `out/runs/s31-strong-judge/build-ext/`.
+
+| Bản | Tổng doc | Doc/query P10 / P50 / P90 | Chunk | Chunk/query P10 / P50 / P90 | Cắt body: ký tự, N chunk | ZIP B | ZIP SHA256 |
+|---|---:|---|---:|---|---|---:|---|
+| K4-thr-C (LB 0,4183) | 195.147 | 66 / 160,5 / 261 | 175.148 | 47 / 140 / 251 | không cắt | 100.471.357 | `31980453…5a87` |
+| **K4-thr-C-ext** | 226.791 | 66 / 163 / 384 | 204.668 | 47 / 143 / 372 | 3.061, **N = 37.732** (bỏ 81,2 triệu ký tự) | 102.301.925 | `8f441cfeac954bb8c20ae40e74a9218e56ad2fbcaa3140deafa81d827083c725` |
+| **K4-free** | 229.062 | 86 / 159 / 396 | 204.240 | 57 / 141 / 375 | 3.055, **N = 37.865** (bỏ 81,4 triệu ký tự) | 102.321.530 | `e65dce3901e923072ed078b1e086a79db07a5c3de25a4cb1ed02a3490801093c` |
+
+**K4-thr-C-ext** = K4-thr-C, riêng 255 query chạm trần ở K4-thr thì dùng toàn bộ pool đã chấm, với trần ⌊2,0·K_q⌋ (cùng t = 0,0775):
+- Thêm 31.644 doc. K'/K của 255 query: P10 1,86, median 2,00. **155 / 255 query chạm luôn trần mới 2,0×.**
+- So với K4-thr: chỉ thêm doc (26,37 doc/query TB), không bớt; 945 query giống hệt.
+
+**K4-free** (đào sâu thích ứng, không dùng K_q / n_c; P = 211, F = 86, t = 0,0775):
+- 628 query có doc thứ 211 với P4B ≥ t. Trong đó 525 query được mở rộng tới hết pool đã chấm; 103 query không còn cặp nào đã chấm ngoài top-211.
+- **454 query vẫn còn doc ≥ t ở đáy pool đã chấm**: 351 query đã mở rộng mà doc cuối vẫn ≥ t, cộng 103 query không mở rộng được.
+- Pool/query: P50 211, P90 428. Chạm sàn 17,2%, chạm trần 0,5%.
+- So với K4-thr TB/query: thêm 34,59, bớt 6,32 (sym-diff 40,91); 253 query giống hệt.
+
+Lưu ý: K4-thr-C nộp nguyên body. Ở hai bản này, khoảng 37,8 nghìn chunk body dài bị cắt còn khoảng 3.060 ký tự. Vì vậy chênh LB so với K4-thr-C gồm cả tác động của doc/chunk thêm lẫn tác động của việc cắt body.

@@ -116,6 +116,7 @@ Theo quyết định 21/10 chỉ dựng trên pool 1,3×:
 | `J4-rrf` | cosine + 4B | `scores-pool13.parquet` của 4B |
 | `J4-rrf3` | cosine + 0.6B + 4B | như trên |
 | `Jcheck-q06-rrf` | cosine + 0.6B | không cần GPU; cổng hồi quy |
+| `K4-scale` / `K4-thr` / `K4-mix` | cosine + 4B, K_q' biến thiên, tổng như J4-rrf | điểm 4B (mục LB 21/10) |
 
 ```bash
 python -m r2ai.s31.build --judge qwen3-reranker-4b --scores out/runs/s31-strong-judge/gpu/qwen3-reranker-4b/scores-pool13.parquet --variant J4-rrf --variant J4-rrf3
@@ -180,3 +181,42 @@ Tương quan thứ hạng trên pool13 (bản 612; bản 979 lệch < 0,0002):
 | 0.6B ~ cosine | 0,4192 | 0,3669 | 0,1757 |
 
 Đọc LB: J4-rrf so với QRRF-nc140-ph cho biết đóng góp của 4B so với 0.6B (cùng 612 doc Pharmacity); J4-rrf3 so với J4-rrf cho biết đóng góp thêm của 0.6B. Cặp `-ph979` so với cặp 612 tương ứng cho biết tác động của lô 3 (136 / 135 cặp doc lô 3 được chọn, ≈ 0,11 doc/query; chênh LB nhỏ ở mức này khó tách khỏi nhiễu).
+
+## LB 21/10 và bản K_q' biến thiên, thin chunks (đo trên CPU, chưa nộp)
+
+LB do Vu báo: **J4-rrf-ph979 0,3997** (Doc 0,3989 / Chunk 0,4005), là nền mới; J4-rrf3-ph979 0,3994. Vì vậy bỏ 0.6B và không chạy 8B.
+
+### K4-scale / K4-thr / K4-mix (`--variant K4-scale --variant K4-thr --variant K4-mix`)
+
+Các bản dùng chung: pool 1,3× đã gộp Pharmacity 979, điểm 4B, chunk nc140, nguyên body. Tổng doc bằng J4-rrf-ph979 (195.147). Mỗi query lấy top-K_q' theo RRF(cosine, 4B), với K_q = `len(relevant_docs)` của K90-ph (Vu chọn). Sàn và trần là `ceil(lo·K_q)` .. `floor(hi·K_q)`.
+
+- **scale**: K_q × r_q / TB(r), với r_q = P4B trung bình của top-K_q theo RRF (Vu chọn); kẹp [0,6; 1,3]·K_q.
+- **thr**: K_q' = kẹp(số doc trong pool có P4B ≥ t) vào [0,5; 1,3]·K_q, sau đó lấy top-K_q' theo RRF (Vu chọn). t được chỉnh để tổng ra 195.147: t = 0,07752. Có 247 cặp đúng bằng t, 130 trong số đó nằm trên vết cắt (hoà được tách theo thứ tự query, rồi rank 4B).
+- **mix**: sqrt(K_q × n_q(t)), dùng cùng t với thr; kẹp [0,5; 1,3]·K_q.
+- scale và mix đạt đúng tổng nhờ nhân một hệ số c rồi mới kẹp (Vu chọn): c = 1,00052 cho scale, 1,01291 cho mix. Phần dư sau làm tròn chia cho các query có phần lẻ lớn nhất.
+
+| Bản | K_q'/K_q P10 / median / P90 | Chạm sàn | Chạm trần | Doc khác J4-rrf-ph979 TB/query: thêm / bớt (sym-diff) | Chunk | ZIP B | ZIP SHA256 |
+|---|---|---:|---:|---:|---:|---:|---|
+| J4-rrf-ph979 (LB 0,3997) | 1 / 1 / 1 | – | – | 0 | 175.148 | 97.920.078 | `585685f1…e5d4` |
+| K4-scale | 0,603 / 0,985 / 1,298 | 21,6% | 28,1% | 20,42 / 20,42 (40,84) | 159.318 | 90.063.032 | `2cf1635c5cccc5dace81d36a6d93aa3bb9bcf881c5a5362f5fe6054f473f67e3` |
+| K4-thr | 0,505 / 1,021 / 1,298 | 12,2% | 21,2% | 19,58 / 19,58 (39,15) | 159.744 | 90.228.065 | `9aa9342574418c8614a595fb6a69fb84353115862f528bf002aa36dd24cb307c` |
+| K4-mix | 0,691 / 1,024 / 1,191 | 2,6% | 0% | 11,96 / 11,96 (23,91) | 167.412 | 94.140.782 | `839851e4b9a000b5af59eab6b6ea99675c9fc83cff4b3669aad60e4c4e78ed2e` |
+
+Vì tổng doc bằng nhau, số doc thêm TB/query luôn bằng số doc bớt TB/query.
+
+Chunk giảm vì số chunk mỗi query là `min(round(1,4·n_c), K_q')`. Query bị giảm K_q' thì mất chunk, còn query được tăng K_q' không có thêm chunk, do trần chunk tính theo n_c của P1. Như vậy chênh LB của các bản K4 gồm cả tác động lên Doc lẫn tác động lên Chunk.
+
+Validator S26 báo `ok` cho cả 3 bản. Output nằm ở `out/runs/s31-strong-judge/build-k4/`.
+
+### `--thin-chunks` và J4-rrf-ph979-thin
+
+Cờ `--thin-chunks` mặc định tắt. Khi bật: doc `quality == thin` có ≥ 20 ký tự text (sau strip) và chưa có chunk sẽ được làm carrier, chunk là nguyên `doc_text` (verbatim, không cắt kể cả khi có cắt body). Các chunk này tính vào trần n_c ×1,4 như doc thường. Corpus có 7.105 doc thin, trong đó 6.490 đủ điều kiện.
+
+| Bản | Chunk thin thêm | Query có chunk thin | Chunk tổng | ZIP B | ZIP SHA256 |
+|---|---:|---:|---:|---:|---|
+| J4-rrf-ph979 | 0 | 0 | 175.148 | 97.920.078 | `585685f1…e5d4` |
+| J4-rrf-ph979-thin | 1.139 | 377 (TB 3,0, max 35) | 175.328 | 97.561.097 | `21797e25205aca5b3cadb1f455262a0bfafe981c1e298d1d18c146ee6cfc3ba2` |
+
+Do có trần, 1.139 chunk thin đẩy ra 959 chunk body/P1 xếp sau. Kết quả: tổng chunk chỉ +180, số chunk thay đổi ở 53 query, ZIP nhỏ đi 358.981 B vì text thin ngắn hơn body bị đẩy ra. Doc giữ nguyên. Validator S26 báo `ok`.
+
+**Hồi quy** (`out/runs/s31-strong-judge/build-thin-regress/`): dựng lại J4-rrf-ph979 với cờ tắt, sau khi đã có thay đổi builder (`fixed_k`, `thin_texts`). JSON `965331b3…3950` và ZIP `585685f1…e5d4` khớp đúng bản đã nộp.

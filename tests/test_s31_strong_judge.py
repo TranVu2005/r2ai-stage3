@@ -266,3 +266,51 @@ def test_pharmacity_merge_pool_keeps_size_and_evicts_lowest():
     assert rows.is_new.tolist() == [False, True, False] and evicted == 1
     with pytest.raises(ValueError):
         merge_pool(existing, np.array([10]), np.array([0.8]))
+
+
+def test_variable_k_variants_use_cosine_and_judge():
+    from r2ai.s31.build import variant_k_mode, variant_rank_keys
+
+    for mode in ("scale", "thr", "mix"):
+        assert variant_k_mode(f"K4-{mode}", "J4") == mode
+        assert variant_rank_keys(f"K4-{mode}", "J4") == ("cosine_rank", "judge_rank")
+    assert variant_k_mode("J4-rrf", "J4") is None
+    assert variant_k_mode("K4-scale", None) is None
+
+
+def test_allocate_total_hits_target_within_bounds():
+    from r2ai.s31.select import allocate_total
+
+    raw = np.array([1.0, 2.0, 3.0, 50.0])
+    lo, hi = np.array([2, 2, 2, 2]), np.array([6, 6, 6, 6])
+    counts, c = allocate_total(raw, lo, hi, 16)
+    assert counts.sum() == 16 and (counts >= lo).all() and (counts <= hi).all()
+    assert counts[3] == 6 and counts[0] <= counts[1] <= counts[2]
+    with pytest.raises(ValueError):
+        allocate_total(raw, lo, hi, 30)
+
+
+def test_threshold_counts_exact_total_with_ties():
+    from r2ai.s31.select import threshold_counts
+
+    qidx = np.array([0, 0, 0, 1, 1, 1])
+    scores = np.array([0.9, 0.5, 0.5, 0.5, 0.5, 0.1])
+    tie = np.array([1, 2, 3, 1, 2, 3])
+    res = threshold_counts(qidx, scores, tie, np.array([1, 1]), np.array([3, 3]), 4)
+    assert res["k"].sum() == 4 and res["t"] == 0.5
+    assert res["pairs_at_t"] == 4 and res["pairs_at_t_above_cut"] == 2
+    assert res["k"].tolist() == [3, 1]
+
+
+def test_thin_chunks_add_carriers_only_when_enabled():
+    from r2ai.s29.build import _carriers, _thin_carrier
+
+    row = {"relevant_chunks": [{"doc_id": 1, "chunk_text": "a"}, {"doc_id": 2, "chunk_text": "b"}]}
+    picked = [(1, 1), (7, 7), (3, 3), (4, 4)]
+    own, groups = {1: "a"}, {3: [3], 4: [4]}
+    assert _carriers(row, picked, own, {}, groups, {}, 1.5) == [(1, 1), (3, 3), (4, 4)]
+    thin = {7: "thin doc text, verbatim"}
+    assert _carriers(row, picked, own, {}, groups, {}, 1.5, thin) == [(1, 1), (7, 7), (3, 3)]
+    assert _thin_carrier(7, 7, own, {}, groups, {}, thin)
+    assert not _thin_carrier(3, 3, own, {}, groups, {}, thin)
+    assert not _thin_carrier(7, 7, own, {}, groups, {}, None)

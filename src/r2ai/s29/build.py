@@ -298,7 +298,13 @@ def _carriers(
     groups: dict[int, list[int]],
     physical: dict[int, int],
     chunk_multiplier: float = 1.0,
+    thin_texts: dict[int, str] | None = None,
 ) -> list[tuple[int, int]]:
+    """Selected docs that get a chunk, in selection order, capped at the n_c target.
+
+    ``thin_texts`` (``--thin-chunks``): thin docs without chunks are also carriers, with
+    their whole text as the chunk; they count toward the cap like any other doc.
+    """
     count = _chunk_target(len(row["relevant_chunks"]), len(picked), chunk_multiplier)
     return [
         selected
@@ -306,7 +312,27 @@ def _carriers(
         if selected[1] in own_texts
         or selected[1] in all_p1_texts
         or _canonical_owner(selected[0], groups, physical) in groups
+        or (thin_texts is not None and selected[0] in thin_texts)
     ][:count]
+
+
+def _thin_carrier(
+    doc_id: int,
+    corpus_id: int,
+    own_texts: dict[int, str],
+    all_p1_texts: dict[int, str],
+    groups: dict[int, list[int]],
+    physical: dict[int, int],
+    thin_texts: dict[int, str] | None,
+) -> bool:
+    """A carrier only because of ``--thin-chunks`` (no P1 text and no chunk group)."""
+    return (
+        thin_texts is not None
+        and doc_id in thin_texts
+        and corpus_id not in own_texts
+        and corpus_id not in all_p1_texts
+        and _canonical_owner(doc_id, groups, physical) not in groups
+    )
 
 
 def _json_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -344,6 +370,8 @@ def _build_variant(
     chunk_multiplier: float,
     whole_body: bool,
     mean_doc_id_symdiff_vs_primary: float | None,
+    fixed_k: bool = True,
+    thin_texts: dict[int, str] | None = None,
 ) -> dict[str, Any]:
     started = time.monotonic()
     inputs = _inputs()
@@ -365,8 +393,10 @@ def _build_variant(
         ]
         picked_by_q[qid] = picked
         for doc_id, corpus_id in _carriers(
-            row, picked, row_own, all_p1_texts, groups, physical, chunk_multiplier
+            row, picked, row_own, all_p1_texts, groups, physical, chunk_multiplier, thin_texts
         ):
+            if _thin_carrier(doc_id, corpus_id, row_own, all_p1_texts, groups, physical, thin_texts):
+                continue
             if corpus_id not in row_own and corpus_id not in all_p1_texts:
                 if doc_id not in extra_texts:
                     need_body.add(doc_id)
@@ -421,6 +451,8 @@ def _build_variant(
     def write_bundle(body_char_limit: int | None) -> dict[str, Any]:
         stats = []
         source_counts = {"p1_row": 0, "p1_any": 0, "body": 0, "none": 0}
+        if thin_texts is not None:
+            source_counts["thin"] = 0
         json_hash = hashlib.sha256()
         json_bytes = 0
         chunks_total = 0
@@ -438,11 +470,17 @@ def _build_variant(
                     picked = picked_by_q[qid]
                     own = {int(chunk["doc_id"]): chunk["chunk_text"] for chunk in row["relevant_chunks"]}
                     carriers = _carriers(
-                        row, picked, own, all_p1_texts, groups, physical, chunk_multiplier
+                        row, picked, own, all_p1_texts, groups, physical, chunk_multiplier, thin_texts
                     )
                     output_chunks = []
+                    thin_chunks = 0
                     for doc_id, corpus_id in carriers:
-                        if corpus_id in own:
+                        is_thin = _thin_carrier(doc_id, corpus_id, own, all_p1_texts, groups, physical, thin_texts)
+                        if is_thin:
+                            text = thin_texts[doc_id]
+                            source_counts["thin"] += 1
+                            thin_chunks += 1
+                        elif corpus_id in own:
                             text = own[corpus_id]
                             source_counts["p1_row"] += 1
                         elif corpus_id in all_p1_texts:
@@ -464,7 +502,7 @@ def _build_variant(
                             else:
                                 source_counts["none"] += 1
                                 continue
-                        if body_char_limit and (corpus_id not in own and corpus_id not in all_p1_texts):
+                        if body_char_limit and not is_thin and (corpus_id not in own and corpus_id not in all_p1_texts):
                             text = text[:body_char_limit]
                         output_chunks.append({"doc_id": int(corpus_id), "chunk_text": text})
                     result = {
@@ -486,7 +524,7 @@ def _build_variant(
                     selected_ids = set(result["relevant_docs"])
                     if len(selected_ids) != len(result["relevant_docs"]):
                         raise ValueError(f"Duplicate output doc IDs for query {qid}")
-                    if len(selected_ids) != len(baseline_ids):
+                    if fixed_k and len(selected_ids) != len(baseline_ids):
                         raise ValueError(f"Output count differs from K90-ph for query {qid}")
                     counts = {"zh": 0, "vi": 0}
                     for doc_id, _ in picked:
@@ -514,6 +552,8 @@ def _build_variant(
                             "thin_docs": sum(doc_id in thin for doc_id, _ in picked),
                         }
                     )
+                    if thin_texts is not None:
+                        stats[-1]["thin_chunks"] = thin_chunks
                 closing = b"\n]\n"
                 stream.write(closing)
                 json_hash.update(closing)
@@ -613,7 +653,8 @@ def _build_variant(
         "document_token_limit": DOC_TOKEN_LIMIT,
         "pool_multiplier": candidate_pool_multiplier,
         "pool_rule": f"round({candidate_pool_multiplier:g} * len(P1 relevant_docs))",
-        "keep_rule": "exact len(relevant_docs) from K90-ph ZIP per query",
+        "keep_rule": "exact len(relevant_docs) from K90-ph ZIP per query" if fixed_k
+        else "per-query count chosen by the caller (total and rule in its own sidecar)",
         "rrf_k": rrf_k,
         "qwen_weight": qwen_weight,
         "chunks_rule": "round(n_c of P1 row * chunk_multiplier), S26 selected-doc carrier order",

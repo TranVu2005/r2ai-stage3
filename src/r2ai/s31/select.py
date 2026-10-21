@@ -40,6 +40,92 @@ def select_rrf(
     return [{**row, "rrf_score": score} for score, row in ranked[:keep]]
 
 
+def allocate_total(
+    raw: np.ndarray, lo: np.ndarray, hi: np.ndarray, target: int, iters: int = 200
+) -> tuple[np.ndarray, float]:
+    """Integer counts in [lo, hi] summing to ``target``, proportional to ``c * raw`` clipped.
+
+    ``c`` is found by bisection on the continuous clipped sum; the integer remainder goes
+    to the largest fractional parts (ties by position). Returns the counts and ``c``.
+    """
+    raw, lo, hi = (np.asarray(x, dtype=np.float64) for x in (raw, lo, hi))
+    if (raw < 0).any() or (lo > hi).any():
+        raise ValueError("raw must be nonnegative and lo <= hi")
+    if not lo.sum() <= target <= hi.sum():
+        raise ValueError(f"target {target} outside [{lo.sum()}, {hi.sum()}]")
+
+    def total(c: float) -> float:
+        return float(np.clip(c * raw, lo, hi).sum())
+
+    a, b = 0.0, 1.0
+    while total(b) < target:
+        b *= 2.0
+    for _ in range(iters):
+        mid = (a + b) / 2.0
+        if total(mid) < target:
+            a = mid
+        else:
+            b = mid
+    x = np.clip(b * raw, lo, hi)
+    counts = np.floor(x + 1e-9).astype(np.int64)
+    counts = np.minimum(counts, hi.astype(np.int64))
+    remainder = int(target - counts.sum())
+    if remainder < 0:
+        raise ValueError("allocation overshoot")
+    open_ = np.flatnonzero(counts < hi)
+    frac = (x - counts)[open_]
+    order = open_[np.lexsort((open_, -frac))]
+    if remainder > len(order):
+        raise ValueError("allocation cannot reach target")
+    counts[order[:remainder]] += 1
+    if counts.sum() != target or (counts < lo).any() or (counts > hi).any():
+        raise ValueError("allocation failed")
+    return counts, b
+
+
+def threshold_counts(
+    qidx: np.ndarray, scores: np.ndarray, tiebreak: np.ndarray, lo: np.ndarray, hi: np.ndarray, target: int
+) -> dict[str, Any]:
+    """Global judge threshold t with clip(n_q(t), lo, hi) summing exactly to ``target``.
+
+    Pairs are ordered by score descending, then query position, then ``tiebreak``; the
+    threshold is a cut position in that order, so equal scores at t are split by the
+    tie order. ``n`` = pairs per query above the cut (unclipped), ``k`` = clipped counts.
+    """
+    lo, hi = np.asarray(lo, dtype=np.int64), np.asarray(hi, dtype=np.int64)
+    order = np.lexsort((tiebreak, qidx, -scores))
+    q_sorted = qidx[order]
+
+    def counts(i: int) -> np.ndarray:
+        return np.bincount(q_sorted[:i], minlength=len(lo))
+
+    def total(i: int) -> int:
+        return int(np.clip(counts(i), lo, hi).sum())
+
+    if not total(0) <= target <= total(len(order)):
+        raise ValueError(f"target {target} outside [{total(0)}, {total(len(order))}]")
+    a, b = 0, len(order)
+    while a < b:
+        mid = (a + b) // 2
+        if total(mid) < target:
+            a = mid + 1
+        else:
+            b = mid
+    n = counts(a)
+    k = np.clip(n, lo, hi)
+    if int(k.sum()) != target:
+        raise ValueError("threshold search failed")
+    t = float(scores[order[a - 1]]) if a else float("inf")
+    return {
+        "k": k,
+        "n": n,
+        "cut": a,
+        "t": t,
+        "pairs_at_t": int((scores == t).sum()),
+        "pairs_at_t_above_cut": int((scores[order[:a]] == t).sum()),
+    }
+
+
 def doc_set_diff(a: dict[int, Sequence[int]], b: dict[int, Sequence[int]]) -> dict[str, float]:
     """Per-query doc-ID differences between two selections with the same queries."""
     if set(a) != set(b):

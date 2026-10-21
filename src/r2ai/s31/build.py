@@ -8,6 +8,18 @@ K90-ph per query by multi-source RRF (k=60), and writes each bundle with
 
 ``Jcheck-q06-rrf`` = RRF(cosine, 0.6B) through this path; its JSON must equal the
 S29 ``QRRF-nc140-ph`` JSON (regression gate for the S31 path, needs no GPU scores).
+
+``K4-scale`` / ``K4-thr`` / ``K4-mix``: per-query doc count K_q' set from the 4B scores
+(K_q = len(relevant_docs) of K90-ph), same total as J4-rrf, docs = top-K_q' of
+RRF(cosine, 4B):
+  scale: K_q * r_q / mean(r), r_q = mean P4B of the RRF top-K_q; clip [0.6, 1.3] K_q.
+  thr:   number of pool docs with P4B >= t; clip [0.5, 1.3] K_q; t sets the total.
+  mix:   sqrt(K_q * n_q(t)) with the t of thr; clip [0.5, 1.3] K_q.
+scale and mix reach the total with one factor c on the raw counts (clip after c).
+
+``--thin-chunks`` (off by default): thin docs (quality ``thin``) with at least
+``THIN_MIN_CHARS`` characters of text and no chunk get their whole text verbatim as
+the chunk; they count toward the n_c x1.4 cap like any other doc.
 """
 from __future__ import annotations
 
@@ -25,13 +37,32 @@ import pyarrow.parquet as pq
 from r2ai import paths
 from r2ai.s29 import build as s29_build
 from r2ai.s29.qwen_judge import _atomic_json, _inputs, _load_submission, _sha256
-from r2ai.s31.select import RRF_K, add_judge_rank, doc_set_diff, judge_correlations, select_rrf
+from r2ai.s31.select import (
+    RRF_K,
+    add_judge_rank,
+    allocate_total,
+    doc_set_diff,
+    judge_correlations,
+    select_rrf,
+    threshold_counts,
+)
 
 CHUNK_MULTIPLIER = 1.4
 WHOLE_BODY = True
 POOL_MULTIPLIER = 1.3
 QRRF_NC140_JSON_SHA256 = "da6cf34bbb71b25a1662c904f9db4e7a0e33408301137ca5c73c335595d63fa7"
 JUDGE_TAGS = {"qwen3-reranker-4b": "J4", "qwen3-reranker-8b": "J8"}
+K_BOUNDS = {"scale": (0.6, 1.3), "thr": (0.5, 1.3), "mix": (0.5, 1.3)}
+THIN_MIN_CHARS = 20
+
+
+def variant_k_mode(name: str, judge_tag: str | None) -> str | None:
+    """``scale``/``thr``/``mix`` for the variable-count variants (K4-*), else None."""
+    if judge_tag:
+        for mode in K_BOUNDS:
+            if name == f"K{judge_tag[1:]}-{mode}":
+                return mode
+    return None
 
 
 def variant_rank_keys(name: str, judge_tag: str | None) -> tuple[str, ...]:
@@ -42,6 +73,8 @@ def variant_rank_keys(name: str, judge_tag: str | None) -> tuple[str, ...]:
         return ("cosine_rank", "judge_rank")
     if judge_tag and name == f"{judge_tag}-rrf3":
         return ("cosine_rank", "q06_rank", "judge_rank")
+    if variant_k_mode(name, judge_tag):
+        return ("cosine_rank", "judge_rank")
     raise ValueError(f"Unsupported S31 variant {name!r} for judge tag {judge_tag!r}")
 
 
@@ -92,6 +125,60 @@ def rank_candidates(frame: pd.DataFrame) -> dict[int, list[dict[str, Any]]]:
     return grouped
 
 
+def _quantiles(values: np.ndarray) -> dict[str, float]:
+    return {"p10": float(np.quantile(values, 0.10)), "median": float(np.median(values)),
+            "p90": float(np.quantile(values, 0.90)), "min": float(values.min()), "max": float(values.max())}
+
+
+def variable_keep(
+    ranked: dict[int, list[dict[str, Any]]], base_k: dict[int, int], mode: str, thr: dict[str, Any] | None = None
+) -> tuple[dict[int, int], dict[str, Any], dict[str, Any] | None]:
+    """K_q' per query for a K4-* mode; returns (keep, report, threshold result for reuse)."""
+    qids = sorted(ranked)
+    k = np.array([base_k[q] for q in qids], dtype=np.int64)
+    target = int(k.sum())
+    lo_f, hi_f = K_BOUNDS[mode]
+    lo = np.ceil(lo_f * k - 1e-9).astype(np.int64)
+    hi = np.floor(hi_f * k + 1e-9).astype(np.int64)
+    if any(hi[i] > len(ranked[q]) for i, q in enumerate(qids)):
+        raise ValueError("Upper bound exceeds the pool size")
+    report: dict[str, Any] = {"mode": mode, "bounds_x_k": [lo_f, hi_f], "total": target,
+                              "bounds_rule": "ceil(lo*K_q) .. floor(hi*K_q)"}
+    if mode == "scale":
+        keys = ("cosine_rank", "judge_rank")
+        r = np.array([np.mean([row["judge_score"] for row in select_rrf(ranked[q], base_k[q], keys)]) for q in qids])
+        raw = k * r / r.mean()
+        new, c = allocate_total(raw, lo, hi, target)
+        report.update({"r_q": _quantiles(r), "r_mean": float(r.mean()), "c": c})
+    else:
+        if thr is None:
+            qidx = np.concatenate([np.full(len(ranked[q]), i) for i, q in enumerate(qids)])
+            scores = np.concatenate([[row["judge_score"] for row in ranked[q]] for q in qids]).astype(np.float64)
+            tie = np.concatenate([[row["judge_rank"] for row in ranked[q]] for q in qids])
+            thr_lo = np.ceil(K_BOUNDS["thr"][0] * k - 1e-9).astype(np.int64)
+            thr_hi = np.floor(K_BOUNDS["thr"][1] * k + 1e-9).astype(np.int64)
+            thr = threshold_counts(qidx, scores, tie, thr_lo, thr_hi, target)
+        report.update({"t": thr["t"], "pairs_at_t": thr["pairs_at_t"],
+                       "pairs_at_t_above_cut": thr["pairs_at_t_above_cut"],
+                       "n_q_over_k": _quantiles(thr["n"] / k)})
+        if mode == "thr":
+            new = thr["k"]
+        else:
+            raw = np.sqrt(k * thr["n"].astype(np.float64))
+            new, c = allocate_total(raw, lo, hi, target)
+            report["c"] = c
+    ratio = new / k
+    report.update({
+        "k_ratio": _quantiles(ratio),
+        "queries_at_floor": int((new == lo).sum()),
+        "queries_at_cap": int((new == hi).sum()),
+        "share_at_floor": float((new == lo).mean()),
+        "share_at_cap": float((new == hi).mean()),
+        "total_check": int(new.sum()),
+    })
+    return {q: int(n) for q, n in zip(qids, new)}, report, thr
+
+
 def _scores_digest(frame: pd.DataFrame, columns: Sequence[str]) -> str:
     digest = hashlib.sha256()
     for row in frame[["query_id", "doc_id", "cosine_rank", *columns]].itertuples(index=False):
@@ -110,6 +197,7 @@ def build(
     pool13_index: Path | None = None,
     q06_scores: Path | None = None,
     name_suffix: str = "",
+    thin_chunks: bool = False,
 ) -> list[dict[str, Any]]:
     started = time.monotonic()
     judge_tag = JUDGE_TAGS.get(judge) if judge else None
@@ -150,6 +238,13 @@ def build(
     doc_lang = dict(zip(docs.doc_id.astype(int).tolist(), docs.lang.tolist()))
     thin = set(docs.loc[docs.quality == "thin", "doc_id"].astype(int).tolist())
     del docs
+    thin_texts = None
+    if thin_chunks:
+        table = pq.read_table(docs_path, columns=["doc_id", "doc_text"],
+                              filters=[("doc_id", "in", sorted(thin))]).to_pandas()
+        thin_texts = {int(d): t for d, t in zip(table.doc_id, table.doc_text)
+                      if t is not None and len(t.strip()) >= THIN_MIN_CHARS}
+        del table
     extra_texts, extra_spans = s29_build._load_extra_docs(inputs)
     for doc_id in extra_texts:
         groups[doc_id] = [doc_id]
@@ -164,17 +259,31 @@ def build(
     score_columns = ["q06_score"] + (["judge_score"] if "judge_score" in frame else [])
     score_digest = _scores_digest(frame, score_columns)
     correlations = judge_correlations(frame.assign(cosine=frame.cosine_score), ["cosine", *score_columns])
+    base_k = {qid: len(baseline[qid]["relevant_docs"]) for qid in ranked}
+    modes = {f"{name}{name_suffix}": variant_k_mode(name, judge_tag) for name in keys_by_base}
+    keep_by_variant: dict[str, dict[int, int]] = {}
+    keep_reports: dict[str, dict[str, Any]] = {}
+    thr_cache = None
+    for name, mode in modes.items():
+        if mode:
+            keep_by_variant[name], keep_reports[name], thr_cache = variable_keep(ranked, base_k, mode, thr_cache)
+    j4_ids = None
+    if keep_by_variant:
+        j4_ids = {qid: [int(r["doc_id"]) for r in select_rrf(rows, base_k[qid], ("cosine_rank", "judge_rank"), RRF_K)]
+                  for qid, rows in ranked.items()}
 
     summaries = []
     for name in variants:
         keys = keys_by_variant[name]
-        chosen = {qid: select_rrf(rows, len(baseline[qid]["relevant_docs"]), keys, RRF_K) for qid, rows in ranked.items()}
+        keep = keep_by_variant.get(name, base_k)
+        chosen = {qid: select_rrf(rows, keep[qid], keys, RRF_K) for qid, rows in ranked.items()}
         chosen_ids = {qid: [int(r["doc_id"]) for r in rows] for qid, rows in chosen.items()}
         diff = doc_set_diff(chosen_ids, reference_ids)
         summary = s29_build._build_variant(
             out, name, p1_rows, baseline, p1_any, first_chunk_by_id, row_ids, groups, cid_to_doc, doc_lang, thin,
             inputs["canonical"], extra_texts, extra_spans, chosen, candidate_digest, POOL_MULTIPLIER, score_digest,
             RRF_K, None, CHUNK_MULTIPLIER, WHOLE_BODY, diff["mean_symmetric_difference"],
+            fixed_k=name not in keep_by_variant, thin_texts=thin_texts,
         )
         sidecar = {
             "name": name,
@@ -190,7 +299,15 @@ def build(
             "pool_index_sha256": candidate_digest,
             "pool": "in_pool13 (round(1.3 * K_q), identical to the S29 pool)" if pool13_index is None
             else "round(1.3 * K_q) per query after merging the new Pharmacity lots (r2ai.s31.pharmacity_ext)",
-            "keep_rule": "len(relevant_docs) of each K90-ph row",
+            "keep_rule": "len(relevant_docs) of each K90-ph row" if name not in keep_by_variant
+            else f"variable K_q' ({keep_reports[name]['mode']}), total = sum len(relevant_docs) of K90-ph",
+            "keep": keep_reports.get(name),
+            "vs_j4_rrf_doc_sets": doc_set_diff(chosen_ids, j4_ids) if name in keep_by_variant else None,
+            "thin_chunks": None if thin_texts is None else {
+                "min_chars": THIN_MIN_CHARS, "thin_docs_eligible": len(thin_texts),
+                "thin_docs_in_corpus": len(thin), "chunks_added": summary["chunk_source"].get("thin"),
+                "rule": "thin doc without chunk: whole doc_text verbatim as its chunk, counted in the n_c x1.4 cap",
+            },
             "chunk_multiplier": CHUNK_MULTIPLIER,
             "whole_body": WHOLE_BODY,
             "vs_qrrf_doc_sets": diff,
@@ -222,6 +339,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--pool13-index", type=Path, default=None, help="extended 1.3x pool (pharmacity_ext)")
     parser.add_argument("--q06-scores", type=Path, default=None, help="0.6B scores matching --pool13-index")
     parser.add_argument("--name-suffix", default="", help="appended to the variant names, e.g. -ph979")
+    parser.add_argument("--thin-chunks", action="store_true",
+                        help="thin docs (>= 20 chars) without chunk get their whole text as chunk")
     args = parser.parse_args(argv)
     root = paths.RUNS_DIR / "s31-strong-judge"
     out = paths.resolve_path(args.out or root / "build")
@@ -234,7 +353,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         out, args.variant, args.judge, scores, pool_dir,
         paths.resolve_path(args.pool13_index) if args.pool13_index else None,
         paths.resolve_path(args.q06_scores) if args.q06_scores else None,
-        args.name_suffix,
+        args.name_suffix, args.thin_chunks,
     )
     failed = [r["name"] for r in results if r.get("regression_pass") is False]
     if failed:

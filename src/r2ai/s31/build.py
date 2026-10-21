@@ -30,6 +30,13 @@ chunks = selected docs with P4B >= t_c, t_c set so the chunk total is K4_FREE_CH
 scores) calibrates t_c once to K4_FREE_CHUNKS with ``--calibrate-tc`` and then fixes it
 as the constant K4_FREE_T_C.
 
+With the pool-extra 4B scores (``--extra-scores``):
+``K4-thr-C-ext``: K4-thr-C, but the queries at the 1.3x cap in K4-thr get the whole
+scored pool (S31 2.0x + extra) and the cap floor(2.0 K_q); chunks P4B >= T_C_FIXED.
+``K4-free``: adaptive depth: pool = cosine top-P_FREE; if its last doc has P4B >= T_FREE,
+the pool grows to every scored pair of the query; docs P4B >= T_FREE, floor F_FREE,
+cap = pool; chunks P4B >= T_C_FIXED (no recalibration).
+
 ``--thin-chunks`` (off by default): thin docs (quality ``thin``) with at least
 ``THIN_MIN_CHARS`` characters of text and no chunk get their whole text verbatim as
 the chunk; they count toward the n_c x1.4 cap like any other doc.
@@ -74,8 +81,10 @@ THR_C_CHUNKS = 175_148  # chunk total of J4-rrf-ph979 (LB 0.3997)
 P_FREE = 211
 F_FREE = 86
 T_FREE = 0.07751765647688268
-K4_FREE_CHUNKS = 159_744  # chunk total of K4-thr (LB 0.4122)
-K4_FREE_T_C: float | None = None  # set once from the full K4-free calibration
+K4_FREE_CHUNKS = 159_744  # chunk total of K4-thr (LB 0.4122), used by K4-free-p13 only
+T_C_FIXED = 0.07055959618729296  # t_c of K4-thr-C (LB 0.4183), fixed for K4-thr-C-ext and K4-free
+K4_FREE_T_C = T_C_FIXED
+CAP_EXT = 2.0  # cap of the capped queries in K4-thr-C-ext: floor(2.0 * K_q)
 
 
 class _Calibrated(Exception):
@@ -94,6 +103,10 @@ def variant_k_mode(name: str, judge_tag: str | None) -> str | None:
         return "thr"
     if name == f"{prefix}free-p13":
         return "free-p13"
+    if name == f"{prefix}thr-C-ext":
+        return "thr-ext"
+    if name == f"{prefix}free":
+        return "free"
     match = re.fullmatch(re.escape(prefix) + r"tfree-t(\d+(?:\.\d+)?)", name)
     if match:
         return f"tfree:{float(match.group(1))}"
@@ -107,6 +120,8 @@ def variant_chunk_mode(name: str, judge_tag: str | None) -> str | None:
         return "threshold"
     if judge_tag and name == f"K{judge_tag[1:]}-free-p13":
         return "threshold-free"
+    if judge_tag and name in (f"K{judge_tag[1:]}-thr-C-ext", f"K{judge_tag[1:]}-free"):
+        return "fixed"
     return None
 
 
@@ -123,6 +138,124 @@ def fixed_chunk_selector(score_of: dict[int, dict[int, float]], t_c: float, info
         return result
 
     return select
+
+
+def scored_union(
+    ranked: dict[int, list[dict[str, Any]]],
+    pool_index: pd.DataFrame,
+    orig_scores: pd.DataFrame,
+    extra_pairs: pd.DataFrame,
+    extra_scores: pd.DataFrame,
+) -> dict[int, list[dict[str, Any]]]:
+    """Every pair with a 4B score per query, in cosine order (cosine_rank renumbered 1..N).
+
+    Sources, deduplicated by doc in this priority: the extended pool13 (``ranked``), the
+    original pool13 pairs evicted by the Pharmacity merge (Kaggle pool13 scores), the
+    pool-extra pairs (``scores-extra.parquet``). S31 tail pairs keep their S31 cosine.
+    """
+    extra = extra_pairs.merge(extra_scores[["pair_id", "query_id", "doc_id", "score"]], on="pair_id",
+                              how="left", suffixes=("", "_s"))
+    if extra.score.isna().any():
+        raise ValueError(f"scores-extra misses {int(extra.score.isna().sum())} pool-extra pairs")
+    if not ((extra.query_id == extra.query_id_s).all() and (extra.doc_id == extra.doc_id_s).all()):
+        raise ValueError("scores-extra pair_id/query_id/doc_id differ from extra_pairs")
+    s31_cos = pool_index.set_index("pair_id").cosine_score
+    tail = extra.source == "s31-tail"
+    extra.loc[tail, "cosine_score"] = s31_cos.reindex(extra.loc[tail, "pair_id"]).to_numpy()
+    if extra.cosine_score.isna().any():
+        raise ValueError("pool-extra pair without cosine")
+    ext_ids = {int(r["pair_id"]) for rows in ranked.values() for r in rows}
+    evicted = pool_index[pool_index.in_pool13 & ~pool_index.pair_id.isin(ext_ids)].merge(
+        orig_scores[["pair_id", "score"]], on="pair_id", how="left")
+    if evicted.score.isna().any():
+        raise ValueError("evicted pool13 pairs without Kaggle 4B score")
+    out: dict[int, list[dict[str, Any]]] = {}
+    seen: dict[int, set[int]] = {}
+    for qid, rows in ranked.items():
+        out[qid] = [{"pair_id": int(r["pair_id"]), "doc_id": int(r["doc_id"]), "cosine_score": float(r["cosine_score"]),
+                     "judge_score": float(r["judge_score"]), "origin": "pool13", "order": (0, int(r["cosine_rank"]))}
+                    for r in rows]
+        seen[qid] = {r["doc_id"] for r in out[qid]}
+    for origin, prio, frame in (("evicted", 1, evicted), ("extra", 2, extra)):
+        for pid, qid, did, cos, score in zip(frame.pair_id, frame.query_id, frame.doc_id, frame.cosine_score, frame.score):
+            qid, did = int(qid), int(did)
+            if did in seen[qid]:
+                continue
+            seen[qid].add(did)
+            out[qid].append({"pair_id": int(pid), "doc_id": did, "cosine_score": float(cos), "judge_score": float(score),
+                             "origin": origin, "order": (prio, int(pid))})
+    for qid, rows in out.items():
+        rows.sort(key=lambda r: (-r["cosine_score"], r["order"]))
+        for rank, row in enumerate(rows, 1):
+            row["cosine_rank"] = rank
+    return out
+
+
+def _with_judge_rank(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = [dict(r) for r in rows]
+    add_judge_rank(rows, "judge_score", "judge_rank")
+    return rows
+
+
+def thr_ext_pools(
+    ranked: dict[int, list[dict[str, Any]]], union: dict[int, list[dict[str, Any]]], base_k: dict[int, int],
+    thr_keep: dict[int, int], t: float,
+) -> tuple[dict[int, list[dict[str, Any]]], dict[int, int], dict[str, Any]]:
+    """K4-thr-C-ext: capped queries of K4-thr use the whole scored pool and cap floor(2.0 K_q)."""
+    pools, keep, capped = {}, {}, []
+    for qid, rows in ranked.items():
+        k = base_k[qid]
+        if thr_keep[qid] == int(np.floor(1.3 * k + 1e-9)):
+            capped.append(qid)
+            pool = _with_judge_rank(union[qid])
+            lo, hi = int(np.ceil(0.5 * k - 1e-9)), int(np.floor(CAP_EXT * k + 1e-9))
+            if hi > len(pool):
+                raise ValueError(f"Query {qid}: scored pool {len(pool)} < cap {hi}")
+            keep[qid] = int(np.clip(sum(1 for r in pool if r["judge_score"] >= t), lo, hi))
+            pools[qid] = pool
+        else:
+            pools[qid] = rows
+            keep[qid] = thr_keep[qid]
+    k_c = np.array([keep[q] for q in capped])
+    base_c = np.array([base_k[q] for q in capped])
+    hi_c = np.floor(CAP_EXT * base_c + 1e-9).astype(int)
+    report = {"mode": "thr-ext", "t": t, "cap_ext_x_k": CAP_EXT, "capped_queries": len(capped),
+              "total": int(sum(keep.values())), "added_docs": int(k_c.sum() - np.floor(1.3 * base_c + 1e-9).astype(int).sum()),
+              "capped_k_ratio": _quantiles(k_c / base_c), "capped_still_at_new_cap": int((k_c == hi_c).sum()),
+              "capped_pool_size": _quantiles(np.array([len(pools[q]) for q in capped], dtype=np.float64)),
+              "docs_per_query": _quantiles(np.array([keep[q] for q in sorted(keep)], dtype=np.float64))}
+    return pools, keep, report
+
+
+def free_adaptive(union: dict[int, list[dict[str, Any]]]) -> tuple[dict[int, list[dict[str, Any]]], dict[int, int], dict[str, Any]]:
+    """K4-free: top-P_FREE; deepen to every scored pair when the 211th doc has P4B >= T_FREE."""
+    pools, keep, deepened, still = {}, {}, [], []
+    for qid, rows in union.items():
+        if len(rows) < P_FREE:
+            raise ValueError(f"Query {qid}: only {len(rows)} scored pairs < {P_FREE}")
+        pool = rows[:P_FREE]
+        if pool[-1]["judge_score"] >= T_FREE and len(rows) > P_FREE:
+            pool = rows
+            deepened.append(qid)
+        if pool[-1]["judge_score"] >= T_FREE:  # bottom of the scored pool still at or above t
+            still.append(qid)
+        pool = _with_judge_rank(pool)
+        pools[qid] = pool
+        keep[qid] = int(np.clip(sum(1 for r in pool if r["judge_score"] >= T_FREE), F_FREE, len(pool)))
+    qids = sorted(pools)
+    new = np.array([keep[q] for q in qids])
+    size = np.array([len(pools[q]) for q in qids])
+    at_211 = [q for q in qids if union[q][P_FREE - 1]["judge_score"] >= T_FREE]
+    report = {"mode": "free", "p": P_FREE, "floor": F_FREE, "t": T_FREE, "total": int(new.sum()),
+              "queries_211th_doc_at_or_above_t": len(at_211),
+              "queries_deepened": len(deepened),
+              "queries_last_scored_doc_still_at_or_above_t": len(still),
+              "queries_last_scored_doc_still_at_or_above_t_ids": still,
+              "pool_size": _quantiles(size.astype(np.float64)),
+              "docs_per_query": _quantiles(new.astype(np.float64)),
+              "queries_at_floor": int((new == F_FREE).sum()), "queries_at_cap": int((new == size).sum()),
+              "share_at_floor": float((new == F_FREE).mean()), "share_at_cap": float((new == size).mean())}
+    return pools, keep, report
 
 
 def free_pool(ranked: dict[int, list[dict[str, Any]]]) -> dict[int, list[dict[str, Any]]]:
@@ -326,6 +459,9 @@ def build(
     name_suffix: str = "",
     thin_chunks: bool = False,
     calibrate_tc: bool = False,
+    extra_scores: Path | None = None,
+    extra_dir: Path | None = None,
+    orig_scores: Path | None = None,
 ) -> list[dict[str, Any]]:
     started = time.monotonic()
     judge_tag = JUDGE_TAGS.get(judge) if judge else None
@@ -394,8 +530,20 @@ def build(
     keep_reports: dict[str, dict[str, Any]] = {}
     thr_cache = None
     pools: dict[str, dict[int, list[dict[str, Any]]]] = {}
+    union = None
+    if any(mode in ("thr-ext", "free") for mode in modes.values()):
+        if extra_scores is None or extra_dir is None or orig_scores is None:
+            raise ValueError("K4-thr-C-ext / K4-free need --extra-scores, --extra-dir and --orig-scores")
+        union = scored_union(ranked, pd.read_parquet(pool_dir / "pool_index.parquet"), pd.read_parquet(orig_scores),
+                             pd.read_parquet(extra_dir / "extra_pairs.parquet"), pd.read_parquet(extra_scores))
     for name, mode in modes.items():
-        if mode == "free-p13":
+        if mode == "thr-ext":
+            thr_keep, _, thr_cache = variable_keep(ranked, base_k, "thr", thr_cache)
+            pools[name], keep_by_variant[name], keep_reports[name] = thr_ext_pools(
+                ranked, union, base_k, thr_keep, thr_cache["t"])
+        elif mode == "free":
+            pools[name], keep_by_variant[name], keep_reports[name] = free_adaptive(union)
+        elif mode == "free-p13":
             pools[name] = free_pool(ranked)
             keep_by_variant[name], keep_reports[name] = free_keep(pools[name])
         elif mode:
@@ -429,6 +577,9 @@ def build(
         elif chunk_target is not None:
             score_of = {qid: {int(r["doc_id"]): float(r["judge_score"]) for r in rows} for qid, rows in ranked.items()}
             selector = threshold_chunk_selector(score_of, chunk_target, chunk_info)
+        elif chunk_modes[name] == "fixed":
+            score_of = {qid: {int(r["doc_id"]): float(r["judge_score"]) for r in rows} for qid, rows in source.items()}
+            selector = fixed_chunk_selector(score_of, T_C_FIXED, chunk_info)
         try:
             summary = s29_build._build_variant(
                 out, name, p1_rows, baseline, p1_any, first_chunk_by_id, row_ids, groups, cid_to_doc, doc_lang, thin,
@@ -459,6 +610,9 @@ def build(
             "keep_rule": "len(relevant_docs) of each K90-ph row" if name not in keep_by_variant
             else f"P4B >= {T_FREE} in cosine top-min({P_FREE}, pool13), floor {F_FREE}, cap = pool (no K_q, no n_c)"
             if modes[name] == "free-p13"
+            else f"K4-thr; capped queries: whole scored pool, cap floor({CAP_EXT} K_q)" if modes[name] == "thr-ext"
+            else f"P4B >= {T_FREE}; pool top-{P_FREE}, deepened to all scored pairs if the {P_FREE}th has P4B >= t; "
+                 f"floor {F_FREE}, cap = pool" if modes[name] == "free"
             else f"variable K_q' ({keep_reports[name]['mode']}), total = sum len(relevant_docs) of K90-ph",
             "keep": keep_reports.get(name),
             "vs_j4_rrf_doc_sets": doc_set_diff(chosen_ids, j4_ids) if name in keep_by_variant else None,
@@ -475,6 +629,8 @@ def build(
                 "rule": "selected docs in RRF order, one whole-body chunk per doc with P4B >= t_c",
                 "body_cut_chunks": summary.get("body_cut_chunks"), "body_cut_chars": summary.get("body_cut_chars"),
             },
+            "extra_scores": str(extra_scores) if union is not None and modes[name] in ("thr-ext", "free") else None,
+            "extra_scores_sha256": _sha256(extra_scores) if union is not None and modes[name] in ("thr-ext", "free") else None,
             "vs_qrrf_doc_sets": diff,
             "reference": "RRF(cosine, 0.6B) k=60 = doc set of Q-rrf / QRRF-nc140-ph",
             "judge_correlations_pool13": correlations,
@@ -506,6 +662,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--name-suffix", default="", help="appended to the variant names, e.g. -ph979")
     parser.add_argument("--thin-chunks", action="store_true",
                         help="thin docs (>= 20 chars) without chunk get their whole text as chunk")
+    parser.add_argument("--extra-scores", type=Path, default=None, help="4B scores-extra.parquet (pool-extra)")
+    parser.add_argument("--extra-dir", type=Path, default=None, help="pool-extra dir (extra_pairs.parquet)")
+    parser.add_argument("--orig-scores", type=Path, default=None,
+                        help="Kaggle 4B scores-pool13.parquet (scores of the evicted pool13 pairs)")
     parser.add_argument("--calibrate-tc", action="store_true",
                         help="threshold-chunk variants: print the t_c reaching the chunk target, write nothing")
     args = parser.parse_args(argv)
@@ -521,6 +681,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         paths.resolve_path(args.pool13_index) if args.pool13_index else None,
         paths.resolve_path(args.q06_scores) if args.q06_scores else None,
         args.name_suffix, args.thin_chunks, args.calibrate_tc,
+        paths.resolve_path(args.extra_scores) if args.extra_scores else None,
+        paths.resolve_path(args.extra_dir or root / "pool-extra"),
+        paths.resolve_path(args.orig_scores or root / "gpu" / "qwen3-reranker-4b" / "scores-pool13.parquet"),
     )
     failed = [r["name"] for r in results if r.get("regression_pass") is False]
     if failed:

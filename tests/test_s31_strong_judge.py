@@ -380,3 +380,23 @@ def test_pool_extra_needed_pairs_dedup_and_flags(monkeypatch):
     assert got == {11: (2, True, True), 12: (3, False, True), 13: (4, False, True), 14: (0, False, True)}
     rows = pe.needed_pairs(fresh, {1: 2}, {(1, 10)}, {}, set())
     assert [(r[1], r[4], r[5]) for r in rows] == [(11, True, False)]
+
+
+def test_free_adaptive_deepens_only_when_211th_doc_passes(monkeypatch):
+    from r2ai.s31 import build as b
+
+    monkeypatch.setattr(b, "P_FREE", 2)
+    monkeypatch.setattr(b, "F_FREE", 1)
+    monkeypatch.setattr(b, "T_FREE", 0.5)
+
+    def rows(scores):
+        return [{"doc_id": i, "cosine_rank": i + 1, "judge_score": s} for i, s in enumerate(scores)]
+
+    union = {1: rows([0.9, 0.2, 0.8]), 2: rows([0.9, 0.6, 0.7, 0.1]), 3: rows([0.9, 0.6])}
+    pools, keep, report = b.free_adaptive(union)
+    assert [len(pools[q]) for q in (1, 2, 3)] == [2, 4, 2]
+    assert keep == {1: 1, 2: 3, 3: 2}
+    assert report["queries_deepened"] == 1
+    assert report["queries_last_scored_doc_still_at_or_above_t_ids"] == [3]
+    assert b.variant_k_mode("K4-thr-C-ext", "J4") == "thr-ext" and b.variant_k_mode("K4-free", "J4") == "free"
+    assert b.variant_chunk_mode("K4-free", "J4") == "fixed"

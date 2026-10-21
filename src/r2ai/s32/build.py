@@ -6,6 +6,7 @@
   C-max) over the S31 pool13 (Pharmacity 612 docs); compare with ``QRRF-nc140-ph``.
 * ``C06-rrf4``  = RRF(k=60) of cosine, C and the 4B doc_text judge over the Pharmacity-extended
   pool13 (979 docs); compare with ``J4-rrf-ph979``.
+* ``C06-rrf-nt`` = ``C06-rrf`` with C-max-nt (best non-title chunk; title-only docs keep the title score).
 * ``Check-q06-rrf`` swaps C for the S29 0.6B doc_text score: its JSON must equal ``QRRF-nc140-ph``.
 * ``Check-j4-rrf`` is the S31 ``J4-rrf-ph979`` selection through this code path: its JSON must equal
   the JSON SHA256 recorded in that bundle's sidecar.
@@ -45,7 +46,10 @@ VARIANTS: dict[str, tuple[str, str, tuple[str, ...], str]] = {
     "C06-rrf": ("pool13", "chunk", ("cosine_rank", "q06_rank"), "q06"),
     "Check-j4-rrf": ("ph979", "q06", ("cosine_rank", "judge_rank"), "j4"),
     "C06-rrf4": ("ph979", "chunk", ("cosine_rank", "q06_rank", "judge_rank"), "j4"),
+    "C06-rrf-nt": ("pool13", "chunk", ("cosine_rank", "q06_rank"), "q06"),
 }
+# variants that fix the chunk score kind regardless of --c-kind
+VARIANT_KIND = {"C06-rrf-nt": "cmaxnt"}
 
 
 def _frame(index: str, c_source: str, c_kind: str, score_dir: Path, s31: Path, need_judge: bool) -> tuple[pd.DataFrame, dict[str, Path | None]]:
@@ -101,15 +105,16 @@ def build(out: Path, variants: Sequence[str], score_dir: Path, c_kind: str = "cm
     for base in variants:
         name = names[base]
         index, c_source, keys, ref_kind = VARIANTS[base]
+        kind = VARIANT_KIND.get(base, c_kind)
         need_judge = "judge_rank" in keys or ref_kind == "j4"
-        frame, files = _frame(index, c_source, c_kind, score_dir, s31, need_judge)
+        frame, files = _frame(index, c_source, kind, score_dir, s31, need_judge)
         ranked = s31_build.rank_candidates(frame)
         if set(ranked) != set(baseline):
             raise ValueError("pool13 and K90-ph query IDs differ")
         base_k = {qid: len(baseline[qid]["relevant_docs"]) for qid in ranked}
         ref_keys = ("cosine_rank", "q06_rank") if ref_kind == "q06" else ("cosine_rank", "judge_rank")
         if ref_kind == "q06":  # QRRF-nc140-ph: always the S29 0.6B doc_text score on the 612-doc pool13
-            ref_frame, _ = _frame("pool13", "q06", c_kind, score_dir, s31, False)
+            ref_frame, _ = _frame("pool13", "q06", kind, score_dir, s31, False)
             ref_ranked = s31_build.rank_candidates(ref_frame)
         else:
             ref_ranked = ranked
@@ -136,9 +141,9 @@ def build(out: Path, variants: Sequence[str], score_dir: Path, c_kind: str = "cm
             else "S31 pool13 extended by Pharmacity lot 3 (979 docs), r2ai.s31.pharmacity_ext",
             "rank_sources": list(keys),
             "rank_source_meaning": {"cosine_rank": "BGE-M3 doc-level cosine",
-                                    "q06_rank": "S29 0.6B doc_text score" if c_source == "q06" else f"S32 chunk judge {c_kind}",
+                                    "q06_rank": "S29 0.6B doc_text score" if c_source == "q06" else f"S32 chunk judge {kind}",
                                     "judge_rank": "S31 Qwen3-Reranker-4B doc_text score"},
-            "c_kind": None if c_source == "q06" else c_kind,
+            "c_kind": None if c_source == "q06" else kind,
             "rrf_k": RRF_K,
             "keep_rule": "len(relevant_docs) of each K90-ph row",
             "chunk_multiplier": CHUNK_MULTIPLIER,
@@ -180,7 +185,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--variant", action="append", required=True, help=", ".join(sorted(VARIANTS)))
     parser.add_argument("--scores", type=Path, default=None, help="S32 scores dir from `r2ai.s32.scores reduce`")
-    parser.add_argument("--c-kind", default="cmax", choices=("cmax", "ctop2", "cmix"))
+    parser.add_argument("--c-kind", default="cmax", choices=("cmax", "ctop2", "cmix", "cmaxnt"))
     parser.add_argument("--out", type=Path, default=None, help="output dir below RUNS_DIR")
     parser.add_argument("--name-suffix", default="")
     args = parser.parse_args(argv)

@@ -6,6 +6,8 @@
 * ``doc_scores.parquet``: one row per (query, doc) pair of the S31 pool13 plus the Pharmacity lot 3
   pairs, with ``cmax`` (max P(yes) over the scored chunks), ``ctop2`` (mean of the two best),
   ``cmix`` (max(cmax, S29 0.6B doc_text score)), ``q06`` (S29 / S31-ext 0.6B doc_text score);
+* ``cmaxnt`` (C-max-nt): max over the scored chunks whose field is not ``title``; a doc whose scored
+  chunks are all titles keeps its title score. ``cmax_is_title`` flags pairs whose best chunk is a title;
 * ``fallback`` pairs (doc without chunk) take ``q06`` for all three and are flagged;
 * ``score-<kind>-pool13.parquet`` / ``score-<kind>-ph979.parquet`` for kind in cmax/ctop2/cmix:
   ``pair_id, query_id, doc_id, qwen_score`` aligned to the S31 pool13 index and to the
@@ -25,7 +27,7 @@ import pandas as pd
 from r2ai import paths
 from r2ai.s29.qwen_judge import _atomic_json, _sha256
 
-KINDS = ("cmax", "ctop2", "cmix")
+KINDS = ("cmax", "ctop2", "cmix", "cmaxnt")
 
 
 def reduce_chunk_scores(
@@ -33,7 +35,7 @@ def reduce_chunk_scores(
 ) -> pd.DataFrame:
     """One row per source pair: cmax / ctop2 / cmix / q06 and the fallback flag.
 
-    ``chunk_pairs``: pair_id, src_pair_id, query_id, doc_id, source. ``chunk_scores``: pair_id, score.
+    ``chunk_pairs``: pair_id, src_pair_id, query_id, doc_id, source, field. ``chunk_scores``: pair_id, score.
     ``fallback``: src_pair_id, query_id, doc_id, source (documents scored by ``q06``).
     ``q06``: src_pair_id, q06 for every pair.
     """
@@ -45,18 +47,22 @@ def reduce_chunk_scores(
     expected = chunk_pairs.groupby("src_pair_id").size().rename("n_selected")
     ordered = scored.sort_values(["src_pair_id", "score"], ascending=[True, False], kind="stable")
     grouped = ordered.groupby("src_pair_id")
+    nt = scored[scored.field != "title"].groupby("src_pair_id").score.max().rename("cmaxnt")
+    best = grouped.head(1).set_index("src_pair_id").field.eq("title").rename("cmax_is_title")
     agg = pd.DataFrame({
         "cmax": grouped.score.max(),
         "ctop2": grouped.score.apply(lambda s: float(s.iloc[:2].mean())),
         "n_scored": grouped.size(),
     })
-    agg = agg.join(expected)
+    agg = agg.join(expected).join(nt).join(best)
+    agg["cmaxnt"] = agg.cmaxnt.fillna(agg.cmax)
     meta = chunk_pairs.drop_duplicates("src_pair_id").set_index("src_pair_id")[["query_id", "doc_id", "source"]]
     agg = agg.join(meta)
     agg["fallback"] = False
     fb = fallback.set_index("src_pair_id")[["query_id", "doc_id", "source"]].copy()
     fb["n_scored"] = 0
     fb["n_selected"] = 0
+    fb["cmax_is_title"] = False
     fb["fallback"] = True
     out = pd.concat([agg.reset_index(), fb.reset_index()], ignore_index=True)
     if out.src_pair_id.duplicated().any():
@@ -64,7 +70,7 @@ def reduce_chunk_scores(
     out = out.merge(q06[["src_pair_id", "q06"]], on="src_pair_id", how="left")
     if out.q06.isna().any():
         raise ValueError("Missing 0.6B doc_text score for some pairs")
-    for kind in ("cmax", "ctop2"):
+    for kind in ("cmax", "ctop2", "cmaxnt"):
         out[kind] = np.where(out.fallback, out.q06, out[kind])
     out["cmix"] = np.maximum(out.cmax, out.q06)
     return out.sort_values("src_pair_id").reset_index(drop=True)
@@ -95,7 +101,7 @@ def reduce_command(pool: Path, scores_path: Path, out: Path) -> dict[str, Any]:
         paths.assert_writable(target)
     out.mkdir(parents=True, exist_ok=True)
     chunk_pairs = pd.read_parquet(pool / "chunk_pairs.parquet",
-                                  columns=["pair_id", "src_pair_id", "query_id", "doc_id", "source", "chunk_rank"])
+                                  columns=["pair_id", "src_pair_id", "query_id", "doc_id", "source", "chunk_rank", "field"])
     fallback = pd.read_parquet(pool / "doc_fallback.parquet")
     chunk_scores = pd.read_parquet(scores_path)
     q06_main = pd.read_parquet(s31 / "pool" / "s29_qwen06_scores.parquet")[["pair_id", "qwen_score"]]
@@ -127,7 +133,7 @@ def reduce_command(pool: Path, scores_path: Path, out: Path) -> dict[str, Any]:
         columns={"score": "j4"})
     main = main.merge(j4, on="pair_id", how="left").rename(columns={"cosine_score": "cosine"})
     pairs = [("cmax", "q06"), ("cmax", "j4"), ("cmax", "cosine"), ("ctop2", "q06"), ("ctop2", "j4"), ("ctop2", "cosine"),
-             ("cmix", "q06"), ("cmix", "j4"), ("cmix", "cosine"), ("cmax", "ctop2"), ("q06", "j4"), ("q06", "cosine"),
+             ("cmix", "q06"), ("cmix", "j4"), ("cmix", "cosine"), ("cmax", "ctop2"), ("cmax", "cmaxnt"), ("cmaxnt", "q06"), ("cmaxnt", "j4"), ("cmaxnt", "cosine"), ("q06", "j4"), ("q06", "cosine"),
              ("j4", "cosine")]
     correlations = {"all_pool13_pairs": spearman_table(main, pairs),
                     "chunk_scored_pairs_only": spearman_table(main[~main.fallback], pairs)}
@@ -147,6 +153,9 @@ def reduce_command(pool: Path, scores_path: Path, out: Path) -> dict[str, Any]:
         "cmax_quantiles": {f"p{int(q * 100)}": float(docs.cmax.quantile(q)) for q in (0.1, 0.5, 0.9)},
         "q06_quantiles": {f"p{int(q * 100)}": float(docs.q06.quantile(q)) for q in (0.1, 0.5, 0.9)},
         "share_cmax_gt_q06": float((docs.cmax > docs.q06).mean()),
+        "share_cmax_from_title_chunk_scored_pairs": float(docs.loc[~docs.fallback, "cmax_is_title"].mean()),
+        "share_cmax_from_title_pool13_chunk_scored": float(docs.loc[~docs.fallback & (docs.source == "pool13"), "cmax_is_title"].mean()),
+        "share_cmaxnt_ne_cmax": float((docs.loc[~docs.fallback, "cmaxnt"] != docs.loc[~docs.fallback, "cmax"]).mean()),
     }
     _atomic_json(out / "reduce.json", report)
     return report

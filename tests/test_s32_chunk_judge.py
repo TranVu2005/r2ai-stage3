@@ -42,6 +42,7 @@ def _frames():
         "doc_id": [10, 10, 10, 11, 12],
         "source": ["pool13"] * 5,
         "chunk_rank": [1, 2, 3, 1, 1],
+        "field": ["title", "body", "body", "title", "body"],
     })
     scores = pd.DataFrame({"pair_id": [0, 1, 2, 3, 4], "score": [0.2, 0.9, 0.6, 0.4, 0.1]})
     fallback = pd.DataFrame({"src_pair_id": [103], "query_id": [2], "doc_id": [13], "source": ["pool13"]})
@@ -87,4 +88,25 @@ def test_spearman_table_global_and_per_query():
 def test_variant_table_rank_keys_start_with_cosine():
     for index, source, keys, ref in s32_build.VARIANTS.values():
         assert keys[0] == "cosine_rank" and index in ("pool13", "ph979") and source in ("q06", "chunk") and ref in ("q06", "j4")
+    assert s32_build.VARIANT_KIND["C06-rrf-nt"] == "cmaxnt"
+    assert s32_build.VARIANTS["C06-rrf-nt"][2] == s32_build.VARIANTS["C06-rrf"][2]
     assert s32_build.VARIANTS["C06-rrf4"][2] == ("cosine_rank", "q06_rank", "judge_rank")
+
+
+def test_cmax_nt_skips_title_unless_only_title():
+    out = reduce_chunk_scores(*_frames()).set_index("src_pair_id")
+    # pair 100: title 0.2, bodies 0.9 and 0.6 -> best is a body chunk
+    assert out.loc[100, "cmaxnt"] == pytest.approx(0.9) and not out.loc[100, "cmax_is_title"]
+    # pair 101 has only a title chunk: keeps the title score
+    assert out.loc[101, "cmaxnt"] == pytest.approx(0.4) and out.loc[101, "cmax_is_title"]
+    # fallback: q06
+    assert out.loc[103, "cmaxnt"] == pytest.approx(0.33)
+
+
+def test_cmax_nt_differs_when_title_is_best():
+    chunk_pairs, scores, fallback, q06 = _frames()
+    scores = scores.copy()
+    scores.loc[0, "score"] = 0.95  # title of pair 100 now the best chunk
+    out = reduce_chunk_scores(chunk_pairs, scores, fallback, q06).set_index("src_pair_id")
+    assert out.loc[100, "cmax"] == pytest.approx(0.95) and bool(out.loc[100, "cmax_is_title"])
+    assert out.loc[100, "cmaxnt"] == pytest.approx(0.9)

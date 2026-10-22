@@ -37,6 +37,12 @@ scored pool (S31 2.0x + extra) and the cap floor(2.0 K_q); chunks P4B >= T_C_FIX
 the pool grows to every scored pair of the query; docs P4B >= T_FREE, floor F_FREE,
 cap = pool; chunks P4B >= T_C_FIXED (no recalibration).
 
+``K4-thr-C-fx``: docs of K4-thr-C; one whole-body chunk per selected doc with P4B >=
+T_C_FIXED, never cut (fails over the ceiling). Built after the S29 builder fix that gives
+Pharmacity docs their body (before it, selected Pharmacity docs never carried a chunk).
+``--no-extra-chunks`` offers Pharmacity docs as without text (the pre-fix behaviour), for
+the regression check of chunk-selector variants against bundles built before the fix.
+
 Fixed top-K, no K_q and no n_c (``--extra-scores``): pool = cosine top-P_FREE of the
 scored union (judge ranks recomputed inside it), K docs per query, one whole-body chunk
 for every selected doc with text (no threshold, never cut: fails over the ceiling).
@@ -76,7 +82,13 @@ from r2ai.s31.select import (
 CHUNK_MULTIPLIER = 1.4
 WHOLE_BODY = True
 POOL_MULTIPLIER = 1.3
+# Built before the S29 builder fix (Pharmacity docs without chunk): QRRF-nc140-ph selects
+# 211 Pharmacity docs, so Jcheck-q06-rrf no longer reproduces it with the fixed builder.
 QRRF_NC140_JSON_SHA256 = "da6cf34bbb71b25a1662c904f9db4e7a0e33408301137ca5c73c335595d63fa7"
+# Regression gates after the fix: K4-thr-C with --no-extra-chunks must give the pre-fix
+# K4-thr-C JSON (LB 0.4183); K4-thr-C-fx is the new reference.
+K4_THR_C_JSON_SHA256 = "d771c4f9b0b5f7b8c68f934b28aeb207179a047a2f7a83f29c7b62628939c9b0"
+K4_THR_C_FX_JSON_SHA256 = "c105b78da25c7dbfa141a48187484161fc858dc92fffd0a0311011e00453499c"
 JUDGE_TAGS = {"qwen3-reranker-4b": "J4", "qwen3-reranker-8b": "J8"}
 K_BOUNDS = {"scale": (0.6, 1.3), "thr": (0.5, 1.3), "mix": (0.5, 1.3), "tfree": (0.5, 1.3)}
 THIN_MIN_CHARS = 20
@@ -108,7 +120,7 @@ def variant_k_mode(name: str, judge_tag: str | None) -> str | None:
     for mode in ("scale", "thr", "mix"):
         if name == f"{prefix}{mode}":
             return mode
-    if name == f"{prefix}thr-C":
+    if name in (f"{prefix}thr-C", f"{prefix}thr-C-fx"):
         return "thr"
     if name == f"{prefix}free-p13":
         return "free-p13"
@@ -129,6 +141,8 @@ def variant_chunk_mode(name: str, judge_tag: str | None) -> str | None:
         return "all"
     if judge_tag and name == f"K{judge_tag[1:]}-thr-C":
         return "threshold"
+    if judge_tag and name == f"K{judge_tag[1:]}-thr-C-fx":
+        return "fixed-whole"
     if judge_tag and name == f"K{judge_tag[1:]}-free-p13":
         return "threshold-free"
     if judge_tag and name in (f"K{judge_tag[1:]}-thr-C-ext", f"K{judge_tag[1:]}-free"):
@@ -511,6 +525,7 @@ def build(
     extra_scores: Path | None = None,
     extra_dir: Path | None = None,
     orig_scores: Path | None = None,
+    no_extra_chunks: bool = False,
 ) -> list[dict[str, Any]]:
     started = time.monotonic()
     judge_tag = JUDGE_TAGS.get(judge) if judge else None
@@ -630,14 +645,22 @@ def build(
         elif chunk_target is not None:
             score_of = {qid: {int(r["doc_id"]): float(r["judge_score"]) for r in rows} for qid, rows in ranked.items()}
             selector = threshold_chunk_selector(score_of, chunk_target, chunk_info)
-        elif chunk_modes[name] in ("fixed", "all"):
+        elif chunk_modes[name] in ("fixed", "fixed-whole", "all"):
             score_of = {qid: {int(r["doc_id"]): float(r["judge_score"]) for r in rows} for qid, rows in source.items()}
-            selector = fixed_chunk_selector(score_of, T_C_FIXED if chunk_modes[name] == "fixed" else None, chunk_info)
+            selector = fixed_chunk_selector(score_of, None if chunk_modes[name] == "all" else T_C_FIXED, chunk_info)
+        if no_extra_chunks:
+            if selector is None:
+                raise ValueError(f"--no-extra-chunks needs a chunk-selector variant, not {name}")
+            unmasked = selector
+
+            def selector(offered, _select=unmasked):
+                return _select({q: [(d, c, h and d not in extra_texts) for d, c, h in items] for q, items in offered.items()})
         try:
             summary = s29_build._build_variant(
                 out, name, p1_rows, baseline, p1_any, first_chunk_by_id, row_ids, groups, cid_to_doc, doc_lang, thin,
                 inputs["canonical"], extra_texts, extra_spans, chosen, candidate_digest, POOL_MULTIPLIER, score_digest,
-                RRF_K, None, CHUNK_MULTIPLIER, WHOLE_BODY and (selector is None or chunk_modes[name] == "all"),
+                RRF_K, None, CHUNK_MULTIPLIER,
+                WHOLE_BODY and (selector is None or chunk_modes[name] in ("all", "fixed-whole")),
                 diff["mean_symmetric_difference"],
                 fixed_k=name not in keep_by_variant, thin_texts=thin_texts, chunk_selector=selector,
             )
@@ -682,13 +705,17 @@ def build(
                 "rule": "thin doc without chunk: whole doc_text verbatim as its chunk, counted in the n_c x1.4 cap",
             },
             "chunk_multiplier": CHUNK_MULTIPLIER if selector is None else None,
-            "whole_body": WHOLE_BODY if selector is None else "whole body unless over the ZIP ceiling (S29 cut rule)",
+            "whole_body": WHOLE_BODY if selector is None or chunk_modes[name] in ("all", "fixed-whole")
+            else "whole body unless over the ZIP ceiling (S29 cut rule)",
             "chunk_threshold": None if selector is None else {
                 **chunk_info, "target_chunks": chunk_target,
                 "rule": "one whole-body chunk for every selected doc with text, never cut"
-                if chunk_modes[name] == "all" else "selected docs in RRF order, one whole-body chunk per doc with P4B >= t_c",
+                if chunk_modes[name] == "all" else "one whole-body chunk per selected doc with P4B >= t_c, never cut"
+                if chunk_modes[name] == "fixed-whole" else "selected docs in RRF order, one whole-body chunk per doc with P4B >= t_c",
                 "body_cut_chunks": summary.get("body_cut_chunks"), "body_cut_chars": summary.get("body_cut_chars"),
             },
+            "extra_chunks": "masked (pre-fix behaviour, regression only)" if no_extra_chunks
+            else "Pharmacity docs carry their body (S29 builder fix)",
             "extra_scores": str(extra_scores) if name in pools and union is not None else None,
             "extra_scores_sha256": _sha256(extra_scores) if name in pools and union is not None else None,
             "vs_qrrf_doc_sets": diff,
@@ -702,6 +729,11 @@ def build(
         if name == "Jcheck-q06-rrf" and pool13_index is None:
             sidecar["regression_target_json_sha256"] = QRRF_NC140_JSON_SHA256
             sidecar["regression_pass"] = summary.get("json_sha256") == QRRF_NC140_JSON_SHA256
+        target = {("K4-thr-C", True): K4_THR_C_JSON_SHA256,
+                  ("K4-thr-C-fx", False): K4_THR_C_FX_JSON_SHA256}.get((name, no_extra_chunks))
+        if target and pool13_index is not None:
+            sidecar["regression_target_json_sha256"] = target
+            sidecar["regression_pass"] = summary.get("json_sha256") == target
         _atomic_json(out / f"{name}.s31.json", sidecar)
         print(json.dumps(sidecar, ensure_ascii=False), flush=True)
         summaries.append(sidecar)
@@ -726,6 +758,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--extra-dir", type=Path, default=None, help="pool-extra dir (extra_pairs.parquet)")
     parser.add_argument("--orig-scores", type=Path, default=None,
                         help="Kaggle 4B scores-pool13.parquet (scores of the evicted pool13 pairs)")
+    parser.add_argument("--no-extra-chunks", action="store_true",
+                        help="regression only: offer Pharmacity docs as without text (pre-fix builder)")
     parser.add_argument("--calibrate-tc", action="store_true",
                         help="threshold-chunk variants: print the t_c reaching the chunk target, write nothing")
     args = parser.parse_args(argv)
@@ -744,6 +778,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         paths.resolve_path(args.extra_scores) if args.extra_scores else None,
         paths.resolve_path(args.extra_dir or root / "pool-extra"),
         paths.resolve_path(args.orig_scores or root / "gpu" / "qwen3-reranker-4b" / "scores-pool13.parquet"),
+        args.no_extra_chunks,
     )
     failed = [r["name"] for r in results if r.get("regression_pass") is False]
     if failed:

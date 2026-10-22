@@ -1,6 +1,6 @@
 # S33: kiểm giả thuyết "gold = pipeline baseline của BTC" bằng bge-reranker-v2-m3
 
-Cập nhật 2026-10-22 18:30 (UTC+7), nhánh `feat/s33-btc-baseline` (S31 `e3f49e7` + merge S32 `410e54e`). Mọi số dưới đây đo trên máy local. **Chưa nộp, chưa có điểm LB.**
+Cập nhật 2026-10-22 19:25 (UTC+7), nhánh `feat/s33-btc-baseline` (S31 `e3f49e7` + merge S32 `410e54e`). Mọi số dưới đây đo trên máy local. **Chưa nộp, chưa có điểm LB.**
 
 ## Giả thuyết
 
@@ -87,9 +87,9 @@ Ba bản cùng pool, cùng K = 40, cùng quy tắc chunk; chỉ khác nguồn x�
 - Nếu Doc P của BGR ≈ 0,376 (J4-K40) hoặc thấp hơn: rerank bằng bge trên pool cosine không tái tạo được gold. Giả thuyết yếu đi, nhưng chưa loại hẳn, vì pool BTC có thể khác (BM25 + chunk-level).
 - BGR-K40-chk so với BGR-K40-doc cho biết BTC chấm theo chunk hay theo đầu doc.
 
-## Pha C (en): chưa làm
+## Pha C (en): bỏ (Vu, 22/10)
 
-Chờ Vu quyết. Lý do: E1 (15/10) đã nộp doc en chọn bằng bge-reranker-v2-m3 mà Doc R không đổi, và PROGRESS ghi đã chốt "dừng thêm probe en".
+Không làm. E1 (15/10) đã nộp doc en chọn bằng bge-reranker-v2-m3 mà Doc R không đổi (precision en dưới khoảng 0,4%); giữ quyết định dừng probe en.
 
 ## File và lệnh
 

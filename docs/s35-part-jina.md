@@ -76,4 +76,32 @@ Pilot 2 (cùng 20 query): b10s0 / b10s1 / b10s2 / b25s1. Hai lần xáo trộn k
 
 `scripts/s35/run_part2.sh b10s0`: chấm 302.086 cặp (checkpoint mỗi 10 query, chạy lại tự bỏ qua part đã có) → `JINA-K40` + `Check-J4-K40` (`r2ai.s35.topk`) → `J3-thrC` (`r2ai.s35.build --variant J3-thrC`) → validator S26. Nhật ký `out/runs/s35-part-jina/part2.log`. Tiếp tục sau khi máy tắt: chạy lại đúng lệnh trên.
 
-Kết quả đầy đủ của phần này được ghi bên dưới khi chạy xong.
+## Kết quả Phần 2 (đo, chưa nộp)
+
+Chấm xong 22/10 21:11 UTC (lượt `b10s0`, 120 part, 302.086 cặp, ≈ 7 h GPU local; 190–260 s/part, chậm dần vì GPU 81°C). `scores-all.parquet` SHA `e9a4818e…cf39`; điểm TB 0,039, min −0,28, max 0,846. Revision model và tokenizer như trên; dtype bf16.
+
+**Spearman trên 253.200 cặp pool 211** (toàn cục / TB theo query / P10 theo query):
+
+| Cặp | Toàn cục | TB query | P10 query |
+|---|---:|---:|---:|
+| Jina ~ 4B (P4B) | 0,719 | 0,645 | 0,455 |
+| Jina ~ cosine | 0,472 | 0,391 | 0,186 |
+| Jina ~ bge R-doc (S33) | 0,726 | 0,666 | 0,490 |
+| Jina ~ bge R-chk (S33) | 0,681 | 0,594 | 0,421 |
+| 4B ~ bge R-doc | 0,690 | 0,610 | 0,399 |
+| 4B ~ cosine | 0,499 | 0,355 | 0,173 |
+
+Jina gần 4B và bge R-doc hơn là 4B gần bge; không đo được chất lượng thật, chỉ có LB.
+
+| Bản | Doc | Chunk | ZIP B | JSON SHA256 | ZIP SHA256 |
+|---|---:|---:|---:|---|---|
+| Check-J4-K40 (hồi quy) | 48.000 | 47.512 | 30.091.487 | `e464bbd19436167c7074aaee0f6bfa487fe1e27efe4984c1a244caf0f9d4cafc` (**khớp J4-K40**) | `1eebb1db…` |
+| **JINA-K40** | 48.000 | 47.550 | 32.437.433 | `edf6cbe7edfe9bb7110aef5e1077f89808c980f35135081f74a2d5b84a7f1098` | `2dce5d47…` |
+| **J3-thrC** | 195.147 | 175.148 | 101.181.680 | `e11e51e6bd0e3793…` | `546b6307…` |
+
+- **JINA-K40** (top-40 theo Jina trong cosine top-211, mỗi doc một chunk nguyên body, không cắt): khác J4-K40 **17,40 doc/query** (sym-diff 34,80; 0 query giống hệt). **Lệch ngôn ngữ:** doc vi 92,6% / zh 7,4% (J4-K40: 82,9% / 17,1%), Jina đẩy doc zh xuống; cần cân nhắc trước khi nộp. So trực tiếp với J4-K40 (Doc P 0,376).
+- **J3-thrC** = RRF(cosine, 4B, Jina) trên pool13 theo đường K4-thr-C: cùng 195.147 doc, K_q' và t = 0,0775 như K4-thr-C; chunk hiệu chỉnh về 175.148, `t_c` = 0,079210. Khác K4-thr-C 9,35 doc/query (sym-diff 18,69), khác J4-rrf 21,7 doc/query. ZIP dưới trần, không cắt body, mọi query có chunk.
+- Validator S26 báo `ok: true`, 0 lỗi cả ba ZIP. Output ở `out/runs/s35-part-jina/build-topk/` và `build-j3/`; Part 1 ở `build-part/`.
+
+**Chưa làm:** lượt xáo trộn thứ hai/ba để lấy trung bình (nhiễu 0,87 giữa hai lượt; 3 lượt nâng Spearman với P4B 0,662 → 0,686, mỗi lượt ≈ 7 h); bản K_q-free gộp mọi tín hiệu thắng; chưa nộp bản nào.
+

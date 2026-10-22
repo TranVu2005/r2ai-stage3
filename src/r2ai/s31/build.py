@@ -511,10 +511,18 @@ def build(
     extra_scores: Path | None = None,
     extra_dir: Path | None = None,
     orig_scores: Path | None = None,
+    rank_hook: Any = None,
+    rank_keys_override: dict[str, tuple[str, ...]] | None = None,
+    variant_alias: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
+    """``rank_hook(ranked)`` may add rank keys to the pool13 rows and returns a sidecar dict;
+    ``rank_keys_override`` replaces the RRF keys of a variant; ``variant_alias`` maps an output
+    name to the S31 variant whose keep/chunk rule it follows (all three used by ``r2ai.s35``)."""
     started = time.monotonic()
     judge_tag = JUDGE_TAGS.get(judge) if judge else None
-    keys_by_base = {name: variant_rank_keys(name, judge_tag) for name in variants}
+    variant_alias = variant_alias or {}
+    keys_by_base = {name: (rank_keys_override or {}).get(name) or variant_rank_keys(variant_alias.get(name, name), judge_tag)
+                    for name in variants}
     keys_by_variant = {f"{name}{name_suffix}": keys for name, keys in keys_by_base.items()}
     variants = list(keys_by_variant)
     q06_path = q06_scores or pool_dir / "s29_qwen06_scores.parquet"
@@ -534,6 +542,7 @@ def build(
 
     frame = load_candidates(pool_dir, judge_scores, pool13_index, q06_scores)
     ranked = rank_candidates(frame)
+    hook_info = rank_hook(ranked) if rank_hook else None
 
     # Same context preparation as r2ai.s29.build.build.
     p1_rows = _load_submission(inputs["p1"], with_chunks=True)
@@ -573,8 +582,8 @@ def build(
     score_digest = _scores_digest(frame, score_columns)
     correlations = judge_correlations(frame.assign(cosine=frame.cosine_score), ["cosine", *score_columns])
     base_k = {qid: len(baseline[qid]["relevant_docs"]) for qid in ranked}
-    modes = {f"{name}{name_suffix}": variant_k_mode(name, judge_tag) for name in keys_by_base}
-    chunk_modes = {f"{name}{name_suffix}": variant_chunk_mode(name, judge_tag) for name in keys_by_base}
+    modes = {f"{name}{name_suffix}": variant_k_mode(variant_alias.get(name, name), judge_tag) for name in keys_by_base}
+    chunk_modes = {f"{name}{name_suffix}": variant_chunk_mode(variant_alias.get(name, name), judge_tag) for name in keys_by_base}
     keep_by_variant: dict[str, dict[int, int]] = {}
     keep_reports: dict[str, dict[str, Any]] = {}
     thr_cache = None
@@ -699,6 +708,8 @@ def build(
             "zip_bytes": summary.get("zip_bytes"),
             "note": "the S29 builder's build.json names the 0.6B model; this sidecar records the S31 rank sources",
         }
+        if hook_info is not None:
+            sidecar["rank_hook"] = hook_info
         if name == "Jcheck-q06-rrf" and pool13_index is None:
             sidecar["regression_target_json_sha256"] = QRRF_NC140_JSON_SHA256
             sidecar["regression_pass"] = summary.get("json_sha256") == QRRF_NC140_JSON_SHA256

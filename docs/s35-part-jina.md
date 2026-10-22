@@ -46,7 +46,7 @@ Quy tắc = K4-thr-C: pool13 (round(1,3·K_q), Pharmacity 979), điểm 4B, K_q'
 
 - **Hồi quy đạt:** Check-PART-id ra đúng JSON K4-thr-C (1.200/1.200 query giống hệt). ZIP dài hơn 10 B chỉ vì tên file trong header ZIP.
 - PART-thrC khác K4-thr-C **17,03 doc/query** (sym-diff 34,06; chỉ 1 query giống hệt); khác J4-rrf 27,0 doc/query. ZIP dưới trần 102.600.000 B, không cắt body (N = 0), mọi query có chunk. Validator S26 báo `ok: true`, 0 lỗi cả hai ZIP.
-- **t_c khác 0,0706:** giữ nguyên quy tắc K4-thr-C (tổng chunk 175.148) thì t_c hiệu chỉnh ra 0,075858, vì PART chọn doc có P4B cao hơn. Nếu cố định t_c = 0,0706 thì có khoảng 177.200 doc đủ ngưỡng (≈ +2.000 chunk, ZIP thêm ≈ 1,2 MB, vượt trần 102,6 MB và phải cắt body), nên không dùng. Cần Vu xác nhận nếu muốn t_c cố định.
+- **t_c khác 0,0706:** giữ nguyên quy tắc K4-thr-C (tổng chunk 175.148) thì t_c hiệu chỉnh ra 0,075858, vì PART chọn doc có P4B cao hơn. Nếu cố định t_c = 0,0706 thì có khoảng 177.200 doc đủ ngưỡng (≈ +2.000 chunk, ZIP thêm ≈ 1,2 MB, vượt trần 102,6 MB và phải cắt body), nên không dùng. **Vu xác nhận (22/10): giữ t_c hiệu chỉnh về 175.148 chunk.**
 
 ## Phần 2: Jina Reranker v3.5 (GPU local)
 

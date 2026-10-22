@@ -352,6 +352,61 @@ def prepare_rchk(out: Path, rdoc: Path) -> dict[str, Any]:
     return manifest
 
 
+def prepare_tie(out_rdoc: Path, out_rchk: Path) -> dict[str, Any]:
+    """Pairs of the J4-K40 pool (cosine top-211 of the S31 scored union) missing from pool211_index.
+
+    Both lists cut a block of exactly tied cosines (duplicate vectors) at rank 211 in a different
+    order, so a few queries differ. The missing pairs are pool13 pairs: R-doc rows come verbatim
+    from the S31 shards, R-chk rows verbatim from the S32 shards (or the S32 fallback list).
+    """
+    from r2ai.s31 import build as s31_build
+    from r2ai.s33.build import load_union
+
+    union, _ = load_union(s31_root())
+    pools, _ = s31_build.topk_pools(union, s31_build.P_FREE)
+    pool211 = load_pool211()
+    known = set(zip(pool211.query_id.astype(int), pool211.doc_id.astype(int)))
+    rows = [{"pair_id": int(r["pair_id"]), "query_id": q, "doc_id": int(r["doc_id"]), "cosine_rank": int(r["cosine_rank"]),
+             "cosine_score": float(r["cosine_score"]), "score_origin": r["origin"]}
+            for q, rs in pools.items() for r in rs if (q, int(r["doc_id"])) not in known]
+    tie = pd.DataFrame(rows)
+    report: dict[str, Any] = {"pairs": len(tie), "queries": int(tie.query_id.nunique()) if len(tie) else 0,
+                              "origin": tie.score_origin.value_counts().to_dict() if len(tie) else {}}
+    for out in (out_rdoc, out_rchk):
+        _prepare_out(out)
+    log = _logger(out_rdoc / "prepare.log")
+    ids = set(tie.pair_id)
+    texts = pd.concat([pd.read_parquet(s, columns=["pair_id", "query_id", "doc_id", "lang", "query_text", "doc_text", "doc_tokens"])
+                       .pipe(lambda f: f[f.pair_id.isin(ids)]) for s in s31_text_shards()], ignore_index=True)
+    rdoc = tie.merge(texts, on=["pair_id", "query_id", "doc_id"], how="left", validate="one_to_one")
+    if rdoc.doc_text.isna().any():
+        raise ValueError("tie pair without S31 doc text")
+    rdoc["in_pool13"] = True
+    report["rdoc_shards"] = write_shards(out_rdoc, rdoc, RDOC_COLUMNS, log)
+    _atomic_frame(out_rdoc / "pool_index.parquet", rdoc[[c for c in RDOC_COLUMNS if c not in ("query_text", "doc_text")]])
+    s32_dir = s32_pool()
+    s32_index = pd.read_parquet(s32_dir / "chunk_pairs.parquet")
+    chk = pd.concat([pd.read_parquet(s).pipe(lambda f: f[f.src_pair_id.isin(ids)]) for s in sorted((s32_dir / "shards").glob("pool-*.parquet"))],
+                    ignore_index=True)
+    chk["origin"] = chk.chunk_id.map(dict(zip(s32_index.chunk_id, s32_index.origin)))
+    chk["chunk_source"] = "s32"
+    chk["in_pool13"] = True
+    chk["cosine_rank"] = chk.src_pair_id.map(dict(zip(tie.pair_id, tie.cosine_rank))).astype(np.int64)
+    fallback = pd.read_parquet(s32_dir / "doc_fallback.parquet")
+    fallback = fallback[fallback.src_pair_id.isin(ids)].assign(source="s32")
+    if set(chk.src_pair_id) | set(fallback.src_pair_id) != ids:
+        raise ValueError("tie pairs missing from both the S32 chunk pool and its fallback list")
+    log_c = _logger(out_rchk / "prepare.log")
+    report["rchk_rows"] = len(chk)
+    report["rchk_fallback"] = len(fallback)
+    report["rchk_shards"] = write_shards(out_rchk, chk, RCHK_COLUMNS, log_c)
+    _atomic_frame(out_rchk / "chunk_pairs.parquet", chk[[c for c in RCHK_COLUMNS if c not in ("query_text", "doc_text")]])
+    _atomic_frame(out_rchk / "doc_fallback.parquet", fallback)
+    for out in (out_rdoc, out_rchk):
+        _atomic_json(out / "manifest.json", report)
+    return report
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -360,9 +415,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     rchk = sub.add_parser("rchk", help="pool211 top-3 chunk shards (S32 selection)")
     rchk.add_argument("--out", type=Path, default=None)
     rchk.add_argument("--rdoc", type=Path, default=None)
+    sub.add_parser("tie", help="J4-K40 pool pairs missing from pool211_index (cosine ties at rank 211)")
     args = parser.parse_args(argv)
     root = run_root()
-    if args.command == "rdoc":
+    if args.command == "tie":
+        result = prepare_tie(root / "pool-rdoc-tie", root / "pool-rchk-tie")
+    elif args.command == "rdoc":
         result = prepare_rdoc(paths.resolve_path(args.out or root / "pool-rdoc"))
     else:
         result = prepare_rchk(paths.resolve_path(args.out or root / "pool-rchk"), paths.resolve_path(args.rdoc or root / "pool-rdoc"))

@@ -3,8 +3,9 @@
 ``python -m r2ai.s33.build --variant BGR-K40-doc --variant BGR-K40-chk``
 
 * Pool: the scored union of S31 (extended pool13 + evicted + pool-extra), cosine top-211 per query,
-  exactly as ``COS-K<K>`` / ``J4-K<K>`` (``r2ai.s31.build.topk_pools``); its pair IDs must equal
-  ``pool211_index.parquet``.
+  exactly as ``COS-K<K>`` / ``J4-K<K>`` (``r2ai.s31.build.topk_pools``). It differs from
+  ``pool211_index.parquet`` by 186 pairs (exact cosine ties at rank 211); those are scored from the
+  ``pool-*-tie`` pools.
 * ``BGR-K<K>-doc``: top-K by R-doc = bge logit of (query, doc_text 512). ``BGR-K<K>-chk``: top-K by
   R-chk = max bge logit over the top-3 t256 chunks (S32 choice); docs without a chunk take R-doc.
   Order: descending score, ties by cosine rank then doc_id (``add_judge_rank``). No cosine fusion.
@@ -71,7 +72,8 @@ def load_union(root31: Path) -> tuple[dict[int, list[dict[str, Any]]], dict[str,
     return union, files
 
 
-def build(out: Path, variants: Sequence[str], rdoc_scores: Path, rchk_scores: Path | None, rchk_pool: Path | None,
+def build(out: Path, variants: Sequence[str], rdoc_scores: Sequence[Path], rchk_scores: Sequence[Path] = (),
+          rchk_pool: Sequence[Path] = (),
           check: bool = True) -> list[dict[str, Any]]:
     started = time.monotonic()
     root31 = paths.RUNS_DIR / "s31-strong-judge"
@@ -86,7 +88,7 @@ def build(out: Path, variants: Sequence[str], rdoc_scores: Path, rchk_scores: Pa
             parsed[name] = (40, "rrf_cos_4b")
         else:
             raise ValueError(f"Unsupported S33 variant {name!r}")
-    if any(src == "r_chk" for _, src in parsed.values()) and (rchk_scores is None or rchk_pool is None):
+    if any(src == "r_chk" for _, src in parsed.values()) and (not rchk_scores or not rchk_pool):
         raise ValueError("BGR-K*-chk needs --rchk-scores and --rchk-pool")
     inputs = _inputs()
     for key in ("p1", "baseline", "canonical", "extra_docs"):
@@ -98,27 +100,36 @@ def build(out: Path, variants: Sequence[str], rdoc_scores: Path, rchk_scores: Pa
     out.mkdir(parents=True, exist_ok=True)
 
     union, files = load_union(root31)
-    pools, _ = s31_build.topk_pools(union, s31_build.P_FREE)
+    pools, _ = s31_build.topk_pools(union, s31_build.P_FREE)  # the J4-K40 pool
+    pool = pd.DataFrame([{"pair_id": int(r["pair_id"]), "query_id": q, "doc_id": int(r["doc_id"])}
+                         for q, rows in pools.items() for r in rows])
     pool211 = pd.read_parquet(pool211_path)
-    got = {(q, int(r["pair_id"])) for q, rows in pools.items() for r in rows}
-    if got != set(zip(pool211.query_id.astype(int), pool211.pair_id.astype(int))):
-        raise ValueError("cosine top-211 of the S31 scored union differs from pool211_index.parquet")
+    in_index = pool.merge(pool211[["query_id", "doc_id"]], on=["query_id", "doc_id"], how="left", indicator=True)._merge == "both"
+    pool_vs_index = {"pairs_not_in_pool211_index": int((~in_index).sum()),
+                     "queries": int(pool.query_id[~in_index.to_numpy()].nunique()),
+                     "reason": "exact cosine ties at rank 211 cut in a different order; scored from the tie pools"}
 
-    # ---- bge scores per pool211 pair
-    rdoc = pd.read_parquet(rdoc_scores)
-    scores = pool211[["pair_id", "query_id", "doc_id"]].merge(
-        rdoc[["pair_id", "query_id", "doc_id", "score"]], on="pair_id", how="left", suffixes=("", "_s"), validate="one_to_one")
+    # ---- bge scores per pool pair (main pools + the tie pools)
+    rdoc = pd.concat([pd.read_parquet(p) for p in rdoc_scores], ignore_index=True)
+    if rdoc.pair_id.duplicated().any():
+        raise ValueError("duplicate pair_id across the R-doc score files")
+    scores = pool.merge(rdoc[["pair_id", "query_id", "doc_id", "score"]], on="pair_id", how="left", suffixes=("", "_s"),
+                        validate="one_to_one")
     if scores.score.isna().any() or not ((scores.query_id == scores.query_id_s).all() and (scores.doc_id == scores.doc_id_s).all()):
-        raise ValueError("R-doc scores do not cover/align with pool211")
+        raise ValueError(f"R-doc scores do not cover/align with the pool ({int(scores.score.isna().sum())} missing)")
     scores = scores[["pair_id", "score"]].rename(columns={"score": "r_doc"})
     chk_info: dict[str, Any] = {}
-    if rchk_scores is not None and rchk_pool is not None:
-        best = reduce_chunks(pd.read_parquet(rchk_scores), pd.read_parquet(rchk_pool / "chunk_pairs.parquet"))
+    if rchk_scores and rchk_pool:
+        chunk_scores = pd.concat([pd.read_parquet(p) for p in rchk_scores], ignore_index=True)
+        chunk_pairs = pd.concat([pd.read_parquet(p / "chunk_pairs.parquet") for p in rchk_pool], ignore_index=True)
+        if chunk_scores.pair_id.duplicated().any() or chunk_pairs.pair_id.duplicated().any():
+            raise ValueError("duplicate chunk pair_id across the R-chk pools")
+        best = reduce_chunks(chunk_scores, chunk_pairs)
         scores = scores.merge(best, on="pair_id", how="left", validate="one_to_one")
         fallback = scores.r_chk.isna()
-        fb_ids = set(pd.read_parquet(rchk_pool / "doc_fallback.parquet").src_pair_id.astype(int))
-        if set(scores.pair_id[fallback].astype(int)) != fb_ids:
-            raise ValueError("pairs without chunk score differ from doc_fallback.parquet")
+        fb_ids = set().union(*[set(pd.read_parquet(p / "doc_fallback.parquet").src_pair_id.astype(int)) for p in rchk_pool])
+        if not set(scores.pair_id[fallback].astype(int)) <= fb_ids:
+            raise ValueError("pool pairs without chunk score that are not in doc_fallback.parquet")
         scores["r_chk_fallback"] = fallback
         scores.loc[fallback, "r_chk"] = scores.loc[fallback, "r_doc"]
         chk_info = {"fallback_pairs": int(fallback.sum()),
@@ -198,10 +209,10 @@ def build(out: Path, variants: Sequence[str], rdoc_scores: Path, rchk_scores: Pa
                             "r_chk": "max bge-reranker-v2-m3 logit over the top-3 t256 chunks (S32 choice); no chunk: r_doc",
                             "rrf_cos_4b": "RRF(cosine, Qwen3-Reranker-4B), k=60 (= J4-K40)"}[source],
             "keep_rule": f"top-{k} of the S31 scored-union cosine top-{s31_build.P_FREE} (no K_q, no n_c, no threshold)",
-            "rdoc_scores": str(rdoc_scores), "rdoc_scores_sha256": _sha256(rdoc_scores),
-            "rchk_scores": str(rchk_scores) if rchk_scores else None,
-            "rchk_scores_sha256": _sha256(rchk_scores) if rchk_scores else None,
-            "pool211_index_sha256": candidate_digest,
+            "rdoc_scores": {str(p): _sha256(p) for p in rdoc_scores},
+            "rchk_scores": {str(p): _sha256(p) for p in rchk_scores} or None,
+            "pool": f"cosine top-{s31_build.P_FREE} of the S31 scored union (= J4-K40 pool)",
+            "pool_vs_pool211_index": pool_vs_index, "pool211_index_sha256": candidate_digest,
             "s31_inputs": {k2: str(v) for k2, v in files.items()},
             "vs_j4_k40_doc_sets": diff,
             "docs_lang": {"counts": langs, "share": {l: n / sum(langs.values()) for l, n in sorted(langs.items())}},
@@ -229,9 +240,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--variant", action="append", required=True, help="BGR-K<K>-doc / BGR-K<K>-chk")
     root = run_root()
-    parser.add_argument("--rdoc-scores", type=Path, default=root / "gpu-rdoc" / MODEL / "scores-all.parquet")
-    parser.add_argument("--rchk-scores", type=Path, default=root / "gpu-rchk" / MODEL / "scores-all.parquet")
-    parser.add_argument("--rchk-pool", type=Path, default=root / "pool-rchk")
+    parser.add_argument("--rdoc-scores", type=Path, action="append", default=None,
+                        help="default: gpu-rdoc and gpu-rdoc-tie scores-all.parquet")
+    parser.add_argument("--rchk-scores", type=Path, action="append", default=None)
+    parser.add_argument("--rchk-pool", type=Path, action="append", default=None, help="default: pool-rchk, pool-rchk-tie")
     parser.add_argument("--out", type=Path, default=root / "build")
     parser.add_argument("--no-check", action="store_true", help="skip the Check-J4-K40 regression bundle")
     args = parser.parse_args(argv)
@@ -240,9 +252,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ValueError(f"S33 output must stay below RUNS_DIR: {out}")
     paths.assert_writable(out)
     need_chk = any(v.endswith("-chk") for v in args.variant)
-    results = build(out, args.variant, paths.resolve_path(args.rdoc_scores),
-                    paths.resolve_path(args.rchk_scores) if need_chk else None,
-                    paths.resolve_path(args.rchk_pool) if need_chk else None, check=not args.no_check)
+    scores = lambda name: root / name / MODEL / "scores-all.parquet"  # noqa: E731
+    rdoc = args.rdoc_scores or [scores("gpu-rdoc"), scores("gpu-rdoc-tie")]
+    rchk = args.rchk_scores or [scores("gpu-rchk")]  # the 186 tie pairs have no chunk (S32 fallback)
+    rchk_pool = args.rchk_pool or [root / "pool-rchk", root / "pool-rchk-tie"]
+    results = build(out, args.variant, [paths.resolve_path(p) for p in rdoc],
+                    [paths.resolve_path(p) for p in rchk] if need_chk else (),
+                    [paths.resolve_path(p) for p in rchk_pool] if need_chk else (), check=not args.no_check)
     failed = [r["name"] for r in results if r.get("regression_pass") is False]
     if failed:
         print(json.dumps({"regression_failed": failed}), flush=True)

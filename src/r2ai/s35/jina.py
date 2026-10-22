@@ -10,12 +10,15 @@ base, ``trust_remote_code`` = the repo's ``modeling.py``, read before use). One 
 block in a single context (``<passage>`` + embed token each) and the query at the end; a doc embedding is
 projected to 512-d and scored by cosine with the block's query embedding.
 
-Blocks and normalisation (decision in docs/s35-part-jina.md): a query pool is cut into ``ceil(n / 50)`` balanced
-blocks of <= 50 docs in a deterministic shuffled order (seed = query_id + LAYOUT_SEED), because a doc embedding sees
-the passages before it. The final score is the model's own multi-block merge, as in ``JinaForRanking.rerank``: the
-block query embeddings are averaged with weight ``max((1 + score) / 2)`` and every doc is scored by cosine against
-that single query embedding, so all docs of a query share one reference vector. The per-block cosine and its
-z-score are kept as ``score_block`` / ``z_block``.
+Blocks and normalisation (pilot 20 queries, docs/s35-part-jina.md): a query pool is cut into ``ceil(n / 10)`` balanced
+blocks of <= 10 docs in a seeded shuffled order (layout ``b10s0``; the cap is 50). A doc embedding sees the passages
+before it, so the pool order matters (cosine order made the scores nearly uncorrelated with cosine, Spearman 0.12), a
+shuffle removes that bias and blocks of 10 were as good as 50 against the 4B scores and twice as fast. The final score is
+the model's own multi-block merge, as in ``JinaForRanking.rerank``: the block query embeddings are averaged with weight
+``max((1 + score) / 2)`` and every doc is scored by cosine against that single query embedding, so all docs of a query
+share one reference vector (a per-block z-score was less stable: 0.77 vs 0.87 between two shuffles). The per-block
+cosine and its z-score are kept as ``score_block`` / ``z_block``. Several shuffles (``b10s1`` ...) can be averaged in
+``collect --layout b10s0,b10s1``.
 """
 from __future__ import annotations
 
@@ -35,8 +38,8 @@ import pandas as pd
 
 MODEL_ID = "jinaai/jina-reranker-v3.5"
 REVISION = "e8a93f33f0b22108f8c2364f8484ce3422552fbc"
-MAX_BLOCK = 50
-DEFAULT_LAYOUT = "b50s0"
+MAX_BLOCK = 50  # user cap; the run uses blocks of 10 (see docs/s35-part-jina.md)
+DEFAULT_LAYOUT = "b10s0"
 LAYOUT_SEED = 35
 PILOT_QUERIES = 20
 PART_QUERIES = 10
@@ -236,71 +239,91 @@ def _per_query_spearman(frame: pd.DataFrame, left: str, right: str) -> dict[str,
     return {"mean": float(vals.mean()), "p10": float(vals.quantile(0.1)), "min": float(vals.min())}
 
 
-def pilot(pool_path: Path, out: Path, queries: int = PILOT_QUERIES) -> dict[str, Any]:
-    """Score ``queries`` evenly spaced queries (their cosine top-211) under several block layouts."""
+def pilot(pool_path: Path, out: Path, queries: int = PILOT_QUERIES, layouts: Sequence[str] = PILOT_LAYOUTS) -> dict[str, Any]:
+    """Score ``queries`` evenly spaced queries (their cosine top-211) under several block layouts; the first is the reference.
+
+    Reports speed, VRAM, per-query Spearman between layouts and with 4B / cosine, the stability of the merged score
+    against the per-block cosine and its z-score, and, when several shuffles of one block size ran, how much averaging
+    them raises the agreement with a held-out shuffle.
+    """
     import torch
 
+    layouts = tuple(layouts)
+    ref = layouts[0]
     pool = pd.read_parquet(pool_path)
     ids = np.array(sorted(pool.query_id.unique()))
     pick = ids[np.linspace(0, len(ids) - 1, queries).round().astype(int)]
     model, path = load_model()
     torch.cuda.reset_peak_memory_stats()
-    scores: dict[str, list[pd.DataFrame]] = {name: [] for name in PILOT_LAYOUTS}
-    timing: dict[str, list[dict[str, float]]] = {name: [] for name in PILOT_LAYOUTS}
+    scores: dict[str, list[pd.DataFrame]] = {name: [] for name in layouts}
+    timing: dict[str, list[dict[str, float]]] = {name: [] for name in layouts}
     for qid in pick:
         group = pool[(pool.query_id == qid) & pool.in_pool211].reset_index(drop=True)
-        for name in PILOT_LAYOUTS:
+        for name in layouts:
             torch.cuda.synchronize()
             t0 = time.monotonic()
             res = score_query(model, group.query_text.iat[0], group.doc_text.tolist(), int(qid), name)
             torch.cuda.synchronize()
             timing[name].append({"docs": len(group), "tokens": int(group.doc_tokens.sum()), "seconds": time.monotonic() - t0})
             scores[name].append(_score_frame(group, res))
-        print(json.dumps({"query_id": int(qid), "docs": len(group), **{n: round(timing[n][-1]["seconds"], 1) for n in PILOT_LAYOUTS}}), flush=True)
+        print(json.dumps({"query_id": int(qid), "docs": len(group), **{n: round(timing[n][-1]["seconds"], 1) for n in layouts}}), flush=True)
     peak = torch.cuda.max_memory_allocated() / 2**30
     base = pool[pool.in_pool211][["query_id", "doc_id", "cosine_score", "p4b"]]
     frames = {name: pd.concat(parts, ignore_index=True).merge(base, on=["query_id", "doc_id"]) for name, parts in scores.items()}
-    ref = frames["b50s0"]
-    wide = ref[["query_id", "doc_id", "cosine_score", "p4b"]].copy()
+    wide = frames[ref][["query_id", "doc_id", "cosine_score", "p4b"]].copy()
     for name, frame in frames.items():
         wide[name] = frame.score.to_numpy()
         wide[name + ":z"] = frame.z_block.to_numpy()
         wide[name + ":block"] = frame.score_block.to_numpy()
     k = 40
     top = lambda col: {q: set(g.nlargest(k, col).doc_id) for q, g in wide.groupby("query_id")}  # noqa: E731
-    top_ref = top("b50s0")
-    layouts = {}
-    for name in PILOT_LAYOUTS:
+    top_ref = top(ref)
+    per_layout = {}
+    for name in layouts:
         sec = np.array([t["seconds"] for t in timing[name]])
-        layouts[name] = {
+        per_layout[name] = {
             "seconds_per_query": float(sec.mean()),
             "docs_per_second": float(sum(t["docs"] for t in timing[name]) / sec.sum()),
             "tokens_per_second": float(sum(t["tokens"] for t in timing[name]) / sec.sum()),
-            "spearman_vs_b50s0": _per_query_spearman(wide, "b50s0", name) if name != "b50s0" else None,
+            f"spearman_vs_{ref}": _per_query_spearman(wide, ref, name) if name != ref else None,
             "spearman_vs_p4b": _per_query_spearman(wide, name, "p4b"),
             "spearman_vs_cosine": _per_query_spearman(wide, name, "cosine_score"),
-            "top40_overlap_vs_b50s0": float(np.mean([len(top_ref[q] & s) / k for q, s in top(name).items()])) if name != "b50s0" else None,
+            f"top40_overlap_vs_{ref}": float(np.mean([len(top_ref[q] & s) / k for q, s in top(name).items()])) if name != ref else None,
         }
-    norm = {"score(merge)~z_block (b50s0)": _per_query_spearman(wide, "b50s0", "b50s0:z"),
-            "score(merge)~score_block (b50s0)": _per_query_spearman(wide, "b50s0", "b50s0:block"),
-            "b50s0~b50s1 merge": _per_query_spearman(wide, "b50s0", "b50s1"),
-            "b50s0~b50s1 z_block": _per_query_spearman(wide, "b50s0:z", "b50s1:z"),
-            "b50s0~b50s1 score_block": _per_query_spearman(wide, "b50s0:block", "b50s1:block")}
+    norm = {f"merge~z_block ({ref})": _per_query_spearman(wide, ref, f"{ref}:z"),
+            f"merge~score_block ({ref})": _per_query_spearman(wide, ref, f"{ref}:block")}
+    if len(layouts) > 1:
+        other = layouts[1]
+        norm.update({f"{ref}~{other} merge": _per_query_spearman(wide, ref, other),
+                     f"{ref}~{other} z_block": _per_query_spearman(wide, f"{ref}:z", f"{other}:z"),
+                     f"{ref}~{other} score_block": _per_query_spearman(wide, f"{ref}:block", f"{other}:block")})
+    ensemble = {}
+    shuffled = [n for n in layouts if re.fullmatch(r"b\d+s\d+", n)]
+    for size in sorted({n.split("s")[0] for n in shuffled}):
+        group_names = [n for n in shuffled if n.startswith(size + "s")]
+        if len(group_names) >= 3:
+            held, rest = group_names[-1], group_names[:-1]
+            wide["_mean"] = wide[rest].mean(axis=1)
+            ensemble[size] = {"shuffles": group_names, "pair_agreement": _per_query_spearman(wide, rest[0], rest[1]),
+                              "mean_of_others_vs_held_out": _per_query_spearman(wide, "_mean", held),
+                              "single_vs_held_out": _per_query_spearman(wide, rest[0], held),
+                              "mean_all_vs_p4b": _per_query_spearman(wide.assign(_all=wide[group_names].mean(axis=1)), "_all", "p4b"),
+                              "single_vs_p4b": _per_query_spearman(wide, rest[0], "p4b")}
     manifest = pool_manifest(pool_path)
-    mean_docs = float(np.mean([t["docs"] for t in timing["b50s0"]]))
+    mean_docs = float(np.mean([t["docs"] for t in timing[ref]]))
     report = {
         "model": MODEL_ID, "revision": REVISION, "snapshot": path, "dtype": "bfloat16", "attention": "cuDNN causal SDPA (repeat KV)",
         "queries": int(queries), "pool": "cosine top-211 (in_pool211 rows)", "mean_docs_per_query": mean_docs,
-        "peak_vram_gib": peak, "layouts": layouts, "normalisation_stability": norm,
+        "peak_vram_gib": peak, "layouts": per_layout, "normalisation_stability": norm, "shuffle_ensemble": ensemble,
         "eta_full_hours_by_layout": {n: float(np.mean([t["seconds"] for t in timing[n]]) * manifest["pairs_per_query"]["mean"] / mean_docs
-                                              * manifest["queries"] / 3600) for n in PILOT_LAYOUTS},
+                                              * manifest["queries"] / 3600) for n in layouts},
         "full_pool_pairs_per_query_mean": manifest["pairs_per_query"]["mean"],
         "device": torch.cuda.get_device_name(0), "torch": torch.__version__,
     }
     out.mkdir(parents=True, exist_ok=True)
     _guard(out / "pilot.json", out / "pilot_scores.parquet")
     (out / "pilot.json").write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
-    _atomic_frame(out / "pilot_scores.parquet", wide)
+    _atomic_frame(out / "pilot_scores.parquet", wide.drop(columns=["_mean"], errors="ignore"))
     del model
     gc.collect()
     torch.cuda.empty_cache()
@@ -321,12 +344,13 @@ def score(pool_path: Path, out: Path, part_queries: int = PART_QUERIES, max_seco
     ids = sorted(pool.query_id.unique())
     parts = [ids[i : i + part_queries] for i in range(0, len(ids), part_queries)]
     out.mkdir(parents=True, exist_ok=True)
-    (out / "parts").mkdir(exist_ok=True)
+    parts_dir = out / f"parts-{layout}"
+    parts_dir.mkdir(exist_ok=True)
     model, path = load_model()
     started = time.monotonic()
     done = skipped = 0
     for index, part_ids in enumerate(parts):
-        target = out / "parts" / f"part-{index:04d}.parquet"
+        target = parts_dir / f"part-{index:04d}.parquet"
         if target.exists():
             skipped += 1
             continue
@@ -348,18 +372,25 @@ def score(pool_path: Path, out: Path, part_queries: int = PART_QUERIES, max_seco
     return {"parts": len(parts), "scored_now": done, "already_done": skipped, "snapshot": path, "layout": layout}
 
 
-def collect(pool_path: Path, out: Path) -> dict[str, Any]:
+def collect(pool_path: Path, out: Path, layouts: Sequence[str] = (DEFAULT_LAYOUT,)) -> dict[str, Any]:
+    """``scores-all.parquet``: ``score`` = mean over the layouts (one pass = that pass's merged score), plus one column per layout."""
     pool = pd.read_parquet(pool_path, columns=["query_id", "doc_id"])
-    files = sorted((out / "parts").glob("part-*.parquet"))
-    scores = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
-    if scores.duplicated(["query_id", "doc_id"]).any():
-        raise ValueError("Duplicate (query_id, doc_id) in the Jina parts")
-    merged = pool.merge(scores, on=["query_id", "doc_id"], how="left", validate="one_to_one")
-    if merged.score.isna().any():
-        raise ValueError(f"Jina scores miss {int(merged.score.isna().sum())} of {len(pool)} pool pairs ({len(files)} parts)")
+    merged = pool
+    counts = {}
+    for layout in layouts:
+        files = sorted((out / f"parts-{layout}").glob("part-*.parquet"))
+        scores = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
+        if scores.duplicated(["query_id", "doc_id"]).any():
+            raise ValueError(f"Duplicate (query_id, doc_id) in the Jina parts of {layout}")
+        merged = merged.merge(scores[["query_id", "doc_id", "score"]].rename(columns={"score": f"score_{layout}"}),
+                              on=["query_id", "doc_id"], how="left", validate="one_to_one")
+        if merged[f"score_{layout}"].isna().any():
+            raise ValueError(f"Jina {layout} misses {int(merged[f'score_{layout}'].isna().sum())} of {len(pool)} pool pairs ({len(files)} parts)")
+        counts[layout] = len(files)
+    merged["score"] = merged[[f"score_{layout}" for layout in layouts]].mean(axis=1)
     _guard(out / "scores-all.parquet")
     _atomic_frame(out / "scores-all.parquet", merged)
-    return {"pairs": len(merged), "parts": len(files)}
+    return {"pairs": len(merged), "layouts": list(layouts), "parts": counts}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -369,7 +400,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--part-queries", type=int, default=PART_QUERIES)
     parser.add_argument("--max-seconds", type=float, default=None)
     parser.add_argument("--queries", type=int, default=PILOT_QUERIES)
-    parser.add_argument("--layout", default=DEFAULT_LAYOUT)
+    parser.add_argument("--layout", default=DEFAULT_LAYOUT, help="score: one layout; collect: comma list averaged")
+    parser.add_argument("--layouts", default=None, help="pilot: comma list of layouts, first = reference")
+    parser.add_argument("--pilot-dir", default="pilot")
     args = parser.parse_args(argv)
     from r2ai import paths
 
@@ -380,11 +413,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "prepare":
         result = prepare(root)
     elif args.command == "pilot":
-        result = pilot(pool_path, root / "pilot", args.queries)
+        result = pilot(pool_path, root / args.pilot_dir, args.queries, tuple(args.layouts.split(",")) if args.layouts else PILOT_LAYOUTS)
     elif args.command == "score":
         result = score(pool_path, root, args.part_queries, args.max_seconds, args.layout)
     else:
-        result = collect(pool_path, root)
+        result = collect(pool_path, root, tuple(args.layout.split(",")))
     print(json.dumps(result, indent=2, ensure_ascii=False, default=str), flush=True)
     return 0
 

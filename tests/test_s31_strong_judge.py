@@ -412,3 +412,28 @@ def test_mix_rows_keeps_chunk_order_and_drops_unselected_docs():
     assert rows[0] == {"id": 1, "relevant_docs": [3, 1, 2], "relevant_chunks": chunks[0]["relevant_chunks"]}
     assert rows[1]["relevant_chunks"] == []
     assert stats["chunks_dropped_doc_not_selected"] == 1 and stats["queries_chunks_differ_from_chunk_source"] == 1
+
+
+def test_topk_pools_and_profile(monkeypatch):
+    from r2ai.s31 import build as b
+    from r2ai.s31.select import select_rrf
+
+    monkeypatch.setattr(b, "P_FREE", 3)
+
+    def rows(scores):
+        return [{"doc_id": i, "cosine_rank": i + 1, "judge_score": s} for i, s in enumerate(scores)]
+
+    union = {1: rows([0.1, 0.9, 0.5, 0.99]), 2: rows([0.8, 0.7, 0.6])}
+    pools, keep = b.topk_pools(union, 2)
+    assert keep == {1: 2, 2: 2} and [len(pools[q]) for q in (1, 2)] == [3, 3]
+    assert [r["judge_rank"] for r in pools[1]] == [3, 1, 2]  # doc 3 is outside the top-3 pool
+    chosen = {q: select_rrf(pools[q], keep[q], ("cosine_rank", "judge_rank")) for q in pools}
+    assert [r["doc_id"] for r in chosen[1]] == [1, 0]
+    profile = b.selection_profile(chosen, {0: "zh", 1: "vi"}, {1: [1], 2: [0, 1]})
+    assert profile["docs_lang"]["counts"] == {"vi": 2, "zh": 2}
+    assert profile["chunks_lang"]["counts"] == {"vi": 2, "zh": 1}
+    assert profile["mean_p4b_by_rank"]["1-10"]["pairs"] == 4
+    assert b.variant_k_mode("COS-K40", "J4") == "topk:40" and b.variant_rank_keys("COS-K40", "J4") == ("cosine_rank",)
+    assert b.variant_chunk_mode("J4-K60", "J4") == "all" and b.variant_k_mode("J4-rrf", "J4") is None
+    with pytest.raises(ValueError):
+        b.topk_pools(union, 4)

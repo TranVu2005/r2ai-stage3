@@ -37,6 +37,11 @@ scored pool (S31 2.0x + extra) and the cap floor(2.0 K_q); chunks P4B >= T_C_FIX
 the pool grows to every scored pair of the query; docs P4B >= T_FREE, floor F_FREE,
 cap = pool; chunks P4B >= T_C_FIXED (no recalibration).
 
+Fixed top-K, no K_q and no n_c (``--extra-scores``): pool = cosine top-P_FREE of the
+scored union (judge ranks recomputed inside it), K docs per query, one whole-body chunk
+for every selected doc with text (no threshold, never cut: fails over the ceiling).
+``COS-K<K>``: cosine order alone (BGE-M3 doc-level). ``J4-K<K>``: RRF(cosine, 4B).
+
 ``--thin-chunks`` (off by default): thin docs (quality ``thin``) with at least
 ``THIN_MIN_CHARS`` characters of text and no chunk get their whole text verbatim as
 the chunk; they count toward the n_c x1.4 cap like any other doc.
@@ -85,6 +90,7 @@ K4_FREE_CHUNKS = 159_744  # chunk total of K4-thr (LB 0.4122), used by K4-free-p
 T_C_FIXED = 0.07055959618729296  # t_c of K4-thr-C (LB 0.4183), fixed for K4-thr-C-ext and K4-free
 K4_FREE_T_C = T_C_FIXED
 CAP_EXT = 2.0  # cap of the capped queries in K4-thr-C-ext: floor(2.0 * K_q)
+RANK_BANDS = ((1, 10), (11, 20), (21, 40), (41, 60))
 
 
 class _Calibrated(Exception):
@@ -93,6 +99,9 @@ class _Calibrated(Exception):
 
 def variant_k_mode(name: str, judge_tag: str | None) -> str | None:
     """K_q' mode of a variable-count variant: ``scale``/``thr``/``mix``/``tfree:<t>``, else None."""
+    match = re.fullmatch(r"COS-K(\d+)", name) or (judge_tag and re.fullmatch(re.escape(judge_tag) + r"-K(\d+)", name))
+    if match:
+        return f"topk:{int(match.group(1))}"
     if not judge_tag:
         return None
     prefix = f"K{judge_tag[1:]}-"
@@ -116,6 +125,8 @@ def variant_k_mode(name: str, judge_tag: str | None) -> str | None:
 def variant_chunk_mode(name: str, judge_tag: str | None) -> str | None:
     """``threshold`` for K4-thr-C (t_c set so chunks = THR_C_CHUNKS), ``threshold-free``
     for K4-free-p13 (chunks = K4_FREE_CHUNKS), else None (n_c x1.4)."""
+    if (variant_k_mode(name, judge_tag) or "").startswith("topk:"):
+        return "all"
     if judge_tag and name == f"K{judge_tag[1:]}-thr-C":
         return "threshold"
     if judge_tag and name == f"K{judge_tag[1:]}-free-p13":
@@ -125,14 +136,17 @@ def variant_chunk_mode(name: str, judge_tag: str | None) -> str | None:
     return None
 
 
-def fixed_chunk_selector(score_of: dict[int, dict[int, float]], t_c: float, info: dict[str, Any]):
-    """``chunk_selector``: every offered carrier with text and P4B >= t_c, in RRF order."""
+def fixed_chunk_selector(score_of: dict[int, dict[int, float]], t_c: float | None, info: dict[str, Any]):
+    """``chunk_selector``: every offered carrier with text and P4B >= t_c (all if t_c is None), in RRF order."""
 
     def select(offered: dict[int, list[tuple[int, int, bool]]]) -> dict[int, list[tuple[int, int]]]:
-        result = {qid: [(d, c) for d, c, has_text in offered_q if has_text and score_of[qid][d] >= t_c]
+        result = {qid: [(d, c) for d, c, has_text in offered_q
+                        if has_text and (t_c is None or score_of[qid][d] >= t_c)]
                   for qid, offered_q in offered.items()}
         counts = np.array([len(result[q]) for q in sorted(result)])
-        info.update({"t_c": float(t_c), "chunks": int(counts.sum()), "chunks_per_query": _quantiles(counts),
+        info["chunk_doc_ids"] = {qid: [d for d, _ in pairs] for qid, pairs in result.items()}
+        info.update({"t_c": None if t_c is None else float(t_c), "chunks": int(counts.sum()),
+                     "chunks_per_query": _quantiles(counts),
                      "queries_without_chunk": int((counts == 0).sum()),
                      "carriers_without_text": int(sum(1 for o in offered.values() for _, _, h in o if not h))})
         return result
@@ -258,6 +272,39 @@ def free_adaptive(union: dict[int, list[dict[str, Any]]]) -> tuple[dict[int, lis
     return pools, keep, report
 
 
+def topk_pools(union: dict[int, list[dict[str, Any]]], k: int) -> tuple[dict[int, list[dict[str, Any]]], dict[int, int]]:
+    """Cosine top-P_FREE of the scored union with judge ranks inside it; K docs per query."""
+    if k > P_FREE:
+        raise ValueError(f"K={k} exceeds the pool of {P_FREE}")
+    pools = {}
+    for qid, rows in union.items():
+        if len(rows) < P_FREE:
+            raise ValueError(f"Query {qid}: only {len(rows)} scored pairs < {P_FREE}")
+        pools[qid] = _with_judge_rank(rows[:P_FREE])
+    return pools, {qid: k for qid in pools}
+
+
+def selection_profile(chosen: dict[int, list[dict[str, Any]]], doc_lang: dict[int, str],
+                      chunk_doc_ids: dict[int, list[int]] | None) -> dict[str, Any]:
+    """vi/zh shares of the selected docs (and chunks) and mean P4B per rank band."""
+    def langs(ids_by_q):
+        counts: dict[str, int] = {}
+        for ids in ids_by_q.values():
+            for d in ids:
+                counts[doc_lang[d]] = counts.get(doc_lang[d], 0) + 1
+        total = sum(counts.values())
+        return {"counts": counts, "share": {lang: n / total for lang, n in sorted(counts.items())}}
+
+    bands = {}
+    for lo, hi in RANK_BANDS:
+        scores = [float(r["judge_score"]) for rows in chosen.values() for r in rows[lo - 1:hi]]
+        if scores:
+            bands[f"{lo}-{hi}"] = {"mean_p4b": float(np.mean(scores)), "pairs": len(scores)}
+    return {"docs_lang": langs({q: [int(r["doc_id"]) for r in rows] for q, rows in chosen.items()}),
+            "chunks_lang": langs(chunk_doc_ids) if chunk_doc_ids is not None else None,
+            "mean_p4b_by_rank": bands}
+
+
 def free_pool(ranked: dict[int, list[dict[str, Any]]]) -> dict[int, list[dict[str, Any]]]:
     """Cosine top-min(P_FREE, pool) of each query, judge ranks recomputed inside it."""
     out: dict[int, list[dict[str, Any]]] = {}
@@ -326,6 +373,8 @@ def variant_rank_keys(name: str, judge_tag: str | None) -> tuple[str, ...]:
         return ("cosine_rank", "judge_rank")
     if judge_tag and name == f"{judge_tag}-rrf3":
         return ("cosine_rank", "q06_rank", "judge_rank")
+    if re.fullmatch(r"COS-K\d+", name):
+        return ("cosine_rank",)
     if variant_k_mode(name, judge_tag):
         return ("cosine_rank", "judge_rank")
     raise ValueError(f"Unsupported S31 variant {name!r} for judge tag {judge_tag!r}")
@@ -531,9 +580,9 @@ def build(
     thr_cache = None
     pools: dict[str, dict[int, list[dict[str, Any]]]] = {}
     union = None
-    if any(mode in ("thr-ext", "free") for mode in modes.values()):
+    if any(mode and (mode in ("thr-ext", "free") or mode.startswith("topk:")) for mode in modes.values()):
         if extra_scores is None or extra_dir is None or orig_scores is None:
-            raise ValueError("K4-thr-C-ext / K4-free need --extra-scores, --extra-dir and --orig-scores")
+            raise ValueError("K4-thr-C-ext / K4-free / *-K<K> need --extra-scores, --extra-dir and --orig-scores")
         union = scored_union(ranked, pd.read_parquet(pool_dir / "pool_index.parquet"), pd.read_parquet(orig_scores),
                              pd.read_parquet(extra_dir / "extra_pairs.parquet"), pd.read_parquet(extra_scores))
     for name, mode in modes.items():
@@ -543,6 +592,10 @@ def build(
                 ranked, union, base_k, thr_keep, thr_cache["t"])
         elif mode == "free":
             pools[name], keep_by_variant[name], keep_reports[name] = free_adaptive(union)
+        elif mode and mode.startswith("topk:"):
+            k = int(mode.split(":")[1])
+            pools[name], keep_by_variant[name] = topk_pools(union, k)
+            keep_reports[name] = {"mode": "topk", "k": k, "pool": P_FREE, "total": k * len(pools[name])}
         elif mode == "free-p13":
             pools[name] = free_pool(ranked)
             keep_by_variant[name], keep_reports[name] = free_keep(pools[name])
@@ -577,16 +630,18 @@ def build(
         elif chunk_target is not None:
             score_of = {qid: {int(r["doc_id"]): float(r["judge_score"]) for r in rows} for qid, rows in ranked.items()}
             selector = threshold_chunk_selector(score_of, chunk_target, chunk_info)
-        elif chunk_modes[name] == "fixed":
+        elif chunk_modes[name] in ("fixed", "all"):
             score_of = {qid: {int(r["doc_id"]): float(r["judge_score"]) for r in rows} for qid, rows in source.items()}
-            selector = fixed_chunk_selector(score_of, T_C_FIXED, chunk_info)
+            selector = fixed_chunk_selector(score_of, T_C_FIXED if chunk_modes[name] == "fixed" else None, chunk_info)
         try:
             summary = s29_build._build_variant(
                 out, name, p1_rows, baseline, p1_any, first_chunk_by_id, row_ids, groups, cid_to_doc, doc_lang, thin,
                 inputs["canonical"], extra_texts, extra_spans, chosen, candidate_digest, POOL_MULTIPLIER, score_digest,
-                RRF_K, None, CHUNK_MULTIPLIER, WHOLE_BODY and selector is None, diff["mean_symmetric_difference"],
+                RRF_K, None, CHUNK_MULTIPLIER, WHOLE_BODY and (selector is None or chunk_modes[name] == "all"),
+                diff["mean_symmetric_difference"],
                 fixed_k=name not in keep_by_variant, thin_texts=thin_texts, chunk_selector=selector,
             )
+            chunk_doc_ids = chunk_info.pop("chunk_doc_ids", None)
         except _Calibrated:
             result = {"name": name, "status": "calibrated_not_built", "target_chunks": chunk_target,
                       "keep": keep_reports.get(name), **chunk_info}
@@ -611,10 +666,14 @@ def build(
             else f"P4B >= {T_FREE} in cosine top-min({P_FREE}, pool13), floor {F_FREE}, cap = pool (no K_q, no n_c)"
             if modes[name] == "free-p13"
             else f"K4-thr; capped queries: whole scored pool, cap floor({CAP_EXT} K_q)" if modes[name] == "thr-ext"
+            else f"top-{keep_reports[name]['k']} of cosine top-{P_FREE} by {' + '.join(keys)} (no K_q, no n_c)"
+            if modes[name].startswith("topk:")
             else f"P4B >= {T_FREE}; pool top-{P_FREE}, deepened to all scored pairs if the {P_FREE}th has P4B >= t; "
                  f"floor {F_FREE}, cap = pool" if modes[name] == "free"
             else f"variable K_q' ({keep_reports[name]['mode']}), total = sum len(relevant_docs) of K90-ph",
             "keep": keep_reports.get(name),
+            "profile": selection_profile(chosen, {**doc_lang, **{d: "vi" for d in extra_texts}}, chunk_doc_ids)
+            if (modes[name] or "").startswith("topk:") else None,
             "vs_j4_rrf_doc_sets": doc_set_diff(chosen_ids, j4_ids) if name in keep_by_variant else None,
             "vs_k4_thr_doc_sets": doc_set_diff(chosen_ids, k4thr_ids) if name in keep_by_variant else None,
             "thin_chunks": None if thin_texts is None else {
@@ -626,11 +685,12 @@ def build(
             "whole_body": WHOLE_BODY if selector is None else "whole body unless over the ZIP ceiling (S29 cut rule)",
             "chunk_threshold": None if selector is None else {
                 **chunk_info, "target_chunks": chunk_target,
-                "rule": "selected docs in RRF order, one whole-body chunk per doc with P4B >= t_c",
+                "rule": "one whole-body chunk for every selected doc with text, never cut"
+                if chunk_modes[name] == "all" else "selected docs in RRF order, one whole-body chunk per doc with P4B >= t_c",
                 "body_cut_chunks": summary.get("body_cut_chunks"), "body_cut_chars": summary.get("body_cut_chars"),
             },
-            "extra_scores": str(extra_scores) if union is not None and modes[name] in ("thr-ext", "free") else None,
-            "extra_scores_sha256": _sha256(extra_scores) if union is not None and modes[name] in ("thr-ext", "free") else None,
+            "extra_scores": str(extra_scores) if name in pools and union is not None else None,
+            "extra_scores_sha256": _sha256(extra_scores) if name in pools and union is not None else None,
             "vs_qrrf_doc_sets": diff,
             "reference": "RRF(cosine, 0.6B) k=60 = doc set of Q-rrf / QRRF-nc140-ph",
             "judge_correlations_pool13": correlations,

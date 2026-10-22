@@ -118,6 +118,7 @@ Theo quyết định 21/10 chỉ dựng trên pool 1,3×:
 | `Jcheck-q06-rrf` | cosine + 0.6B | không cần GPU; cổng hồi quy |
 | `K4-scale` / `K4-thr` / `K4-mix` | cosine + 4B, K_q' biến thiên, tổng như J4-rrf | điểm 4B (mục LB 21/10) |
 | `K4-tfree-t<t>` / `K4-thr-C` / `K4-free-p13` | cosine + 4B; t cố định / chunk theo ngưỡng / hằng số không K_q | điểm 4B (mục LB 21/10 lượt 2) |
+| `COS-K<K>` / `J4-K<K>` | cosine / RRF(cosine, 4B), top-K cố định trong pool 211, chunk nguyên body cho mọi doc | điểm 4B + pool-extra (mục Top-K cố định) |
 
 ```bash
 python -m r2ai.s31.build --judge qwen3-reranker-4b --scores out/runs/s31-strong-judge/gpu/qwen3-reranker-4b/scores-pool13.parquet --variant J4-rrf --variant J4-rrf3
@@ -342,3 +343,32 @@ Kiểm writer: mix K4-thr-C với chính nó ra đúng JSON `d771c4f9…` của 
 - K4-free-D: chunk là chunk của K4-thr-C, chỉ giữ ở doc mà K4-free còn chọn. Số chunk mỗi query không vượt số chunk K4-thr-C của query đó, text nguyên body. Mất 6.249 chunk vì doc của chúng bị K4-free bỏ, ở 282 query.
 - Mọi doc mang chunk của K4-thr-C đều có P4B ≥ 0,07056 (theo cách dựng), nên quy tắc "t_c = 0,0706" được thoả. Có một điểm khác: 63 doc của K4-thr-C có P4B đúng bằng t_c nhưng không nhận chunk vì cắt hoà ở mức 175.148; các doc này vẫn không có chunk ở K4-free-D.
 - Validator S26 báo `ok` cả hai. Output ở `out/runs/s31-strong-judge/build-mix/`.
+
+## Top-K cố định, không K_q, không n_c: COS-K40, J4-K20/40/60 (CPU, chưa nộp)
+
+Mốc baseline của BTC (Vu cung cấp): Doc F2 0,5587, P 0,8805 / R 0,5146, khoảng 38 doc/query.
+
+Quy tắc chung:
+- Pool là cosine top-211 (`P_FREE`) của tập cặp đã có điểm 4B (pool13 mở rộng + evicted + pool-extra). Cosine là BGE-M3 dense doc-level. Hạng 4B được tính lại trong pool 211 này, nên không phụ thuộc K_q.
+- Mỗi query lấy đúng K doc.
+- Mỗi doc được chọn mà có nguồn chunk và có text nhận đúng một chunk nguyên body. Không có ngưỡng chunk. Không bao giờ cắt body: nếu ZIP vượt trần thì builder dừng.
+- **COS-K40**: top-40 theo cosine thuần. **J4-K<K>**: top-K theo RRF(cosine, 4B), k = 60. J4-K20 ⊂ J4-K40 ⊂ J4-K60 vì cùng một thứ tự.
+
+| Bản | Doc | Chunk | Doc vi / zh | Chunk vi / zh | ZIP B | ZIP SHA256 |
+|---|---:|---:|---|---|---:|---|
+| COS-K40 | 48.000 | 47.533 | 84,3% / 15,7% | 84,8% / 15,2% | 30.547.782 | `f9e02a50444a1fdd73f940a3d7baf3dbd2ec4291383c332a77ce19808a9c16e3` |
+| J4-K20 | 24.000 | 23.805 | 85,9% / 14,1% | 86,3% / 13,7% | 16.585.921 | `f485267818d7e82eec8066a2706f22dd963d212913e1e297d30c33dade7a1e56` |
+| J4-K40 | 48.000 | 47.512 | 82,9% / 17,1% | 83,3% / 16,7% | 30.091.475 | `3b706c5583c71c3eea8ba6071c36f0b133435f69dabf8c179f3c80c63ce532f4` |
+| J4-K60 | 72.000 | 71.167 | 81,4% / 18,6% | 81,8% / 18,2% | 42.416.459 | `e094bb99a6588be40944eecef396e09e0508b2020294f95fe51e5df4c647b2e0` |
+
+P4B trung bình theo hạng trong danh sách đã chọn. Mỗi ô là trung bình trên 1.200 query; hạng của J4-* là hạng RRF, của COS-K40 là hạng cosine.
+
+| Hạng | COS-K40 | J4-K20 / K40 / K60 |
+|---|---:|---:|
+| 1–10 | 0,6828 | 0,8524 |
+| 11–20 | 0,5811 | 0,7400 |
+| 21–40 | 0,5028 | 0,6469 |
+| 41–60 | – | 0,5522 |
+
+- Doc không có chunk: doc thin (không có nguồn chunk; cờ thin đã tắt) gồm COS-K40 372, J4-K20 143, J4-K40 390, J4-K60 682. Doc Pharmacity body rỗng gồm 95 / 52 / 98 / 151. Không query nào thiếu chunk. Query ít chunk nhất là query 556 ở J4-* (8 / 9 / 17 chunk; nhiều doc thin) và query 1009 ở COS-K40 (22).
+- Không cắt body. Validator S26 báo `ok` cả 4. Output ở `out/runs/s31-strong-judge/build-topk/`; profile nằm trong `<bản>.s31.json` → `profile`.

@@ -1,6 +1,6 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-22 14:10 (UTC+7)
+- Cập nhật: 2026-10-22 14:03 (UTC+7)
 - Model thực hiện: Claude Opus 5.5
 - Commit HEAD đã kiểm trước cập nhật này: `e3f49e7`, nhánh `feat/s31-strong-judge`
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
@@ -263,7 +263,7 @@ Cả hai: doc/query 136,48, 0 doc thêm do bảo vệ, chunk CC/query 9,34 (h1) 
 
 ## 6. Lệch so với `R2AI_STAGE3_CONTEXT.md`
 
-Cập nhật 2026-10-22 14:10 (UTC+7), Claude Opus 5.5, HEAD kiểm trước cập nhật `e3f49e7`, nhánh `feat/s31-strong-judge`. **Lỗi builder S29 (`32db7cd`): doc Pharmacity được chọn không bao giờ nhận chunk**; cả 979 doc đều có body, không phải body rỗng. Các bản S29/S31 cũ đều bị ảnh hưởng (K4-thr-C 353 lượt, J4-rrf-ph979 348, QRRF-nc140-ph 211). Đã sửa và có test. Bản cũ giữ làm lịch sử. Hồi quy mới: K4-thr-C dựng với `--no-extra-chunks` ra đúng JSON `d771c4f9…` và ZIP `31980453…`. **K4-thr-C-fx** (doc = K4-thr-C, chunk P4B ≥ 0,07056 nguyên body, không cắt): 175.548 chunk (+337 Pharmacity, +63 doc hoà t_c), ZIP 100.763.753 B `e8635c66…d760`, JSON `c105b78d…499c` là mốc mới; validator ok; chưa nộp. Mốc Jcheck-q06-rrf `da6cf34b…` chỉ còn giá trị với builder cũ.
+Cập nhật 2026-10-22 14:03 (UTC+7), Claude Opus 5.5, HEAD kiểm trước cập nhật `e3f49e7`, nhánh `feat/s31-strong-judge`. **Lỗi builder S29 (`32db7cd`): doc Pharmacity được chọn không bao giờ nhận chunk**; cả 979 doc đều có body, không phải body rỗng. Các bản S29/S31 cũ đều bị ảnh hưởng (K4-thr-C 353 lượt, J4-rrf-ph979 348, QRRF-nc140-ph 211). Đã sửa và có test. Bản cũ giữ làm lịch sử. Hồi quy mới: K4-thr-C dựng với `--no-extra-chunks` ra đúng JSON `d771c4f9…` và ZIP `31980453…`. **K4-thr-C-fx** (doc = K4-thr-C, chunk P4B ≥ 0,07056 nguyên body, không cắt): 175.548 chunk (+337 Pharmacity, +63 doc hoà t_c), ZIP 100.763.753 B `e8635c66…d760`, JSON `c105b78d…499c` là mốc mới; validator ok; chưa nộp. Mốc Jcheck-q06-rrf `da6cf34b…` chỉ còn giá trị với builder cũ.
 
 Cập nhật 2026-10-22 13:15 (UTC+7), Claude Opus 5.5, HEAD kiểm trước cập nhật `79180f5`, nhánh `feat/s31-strong-judge`. Baseline BTC (Vu cung cấp): Doc F2 0,5587, P 0,8805 / R 0,5146, khoảng 38 doc/query. Dựng top-K cố định (pool cosine top-211, không K_q, không n_c, chunk nguyên body cho mọi doc có text, không cắt; CPU, chưa nộp, validator ok cả 4): COS-K40 ZIP 30.547.782 B; J4-K20 16.585.921 B; J4-K40 30.091.475 B; J4-K60 42.416.459 B. Tỉ lệ zh của doc lần lượt 15,7% / 14,1% / 17,1% / 18,6%. P4B TB theo hạng RRF 1–10 / 11–20 / 21–40 / 41–60 = 0,852 / 0,740 / 0,647 / 0,552; với COS-K40 theo hạng cosine 1–10 / 11–20 / 21–40 = 0,683 / 0,581 / 0,503. K4-thr-C-extD, K4-free-D giữ sẵn để nộp sau; 63 doc hoà t_c giữ nguyên.
 
@@ -538,7 +538,7 @@ Cập nhật 2026-10-17 20:25 (UTC+7), GPT-6 (Codex, S24 recovery): D21 bỏ qua
 
 | Thời gian (UTC+7) | Ai | Thay đổi |
 |---|---|---|
-| 2026-10-22 14:10 | Claude Opus 5.5 | S29/S31: sửa lỗi builder (doc Pharmacity không có chunk) và thêm test; hồi quy `--no-extra-chunks` khớp K4-thr-C; dựng K4-thr-C-fx (+337 chunk Pharmacity, ZIP 100.763.753 B) làm mốc mới; chưa nộp. |
+| 2026-10-22 14:03 | Claude Opus 5.5 | S29/S31: sửa lỗi builder (doc Pharmacity không có chunk) và thêm test; hồi quy `--no-extra-chunks` khớp K4-thr-C; dựng K4-thr-C-fx (+337 chunk Pharmacity, ZIP 100.763.753 B) làm mốc mới; chưa nộp. |
 | 2026-10-22 13:15 | Claude Opus 5.5 | S31: biến thể top-K cố định `COS-K<K>` / `J4-K<K>` (pool 211, chunk nguyên body cho mọi doc); dựng COS-K40, J4-K20/40/60, validator ok; chưa nộp. |
 | 2026-10-22 12:50 | Claude Opus 5.5 | S31: `r2ai.s31.mix`; dựng K4-thr-C-extD (chunk = K4-thr-C ở 1.200 query) và K4-free-D (168.899 chunk, 282 query khác), nguyên body, dưới trần; chưa nộp. |
 | 2026-10-22 03:35 | Claude Opus 5.5 | S31: LB K4-thr-C 0,4183 (tốt nhất); dựng K4-thr-C-ext và K4-free (đào sâu thích ứng) bằng điểm pool-extra, t_c cố định 0,0706; cả hai vượt trần nên cắt body, N ≈ 37,8 nghìn; chưa nộp. |

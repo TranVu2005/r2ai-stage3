@@ -1,8 +1,8 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-22 03:35 (UTC+7)
+- Cập nhật: 2026-10-22 12:50 (UTC+7)
 - Model thực hiện: Claude Opus 5.5
-- Commit HEAD đã kiểm trước cập nhật này: `a633ca7`, nhánh `feat/s31-strong-judge`
+- Commit HEAD đã kiểm trước cập nhật này: `081e47c`, nhánh `feat/s31-strong-judge`
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - **Best mới đã đo: R1m 0,2673** (Qwen3-Reranker-0,6B + RRF trên phía zh, D16; người dùng cung cấp 15/10). **R1m chưa tích hợp vào repo này**: chờ phía vi (S15, sáng 16/10) rồi tích hợp một lần, kèm pin model Qwen3 (revision `e61197ed…`) và cache điểm. Trong repo, best tái tạo được vẫn là **C1 0,2655**. **C3 (S6-f + zh đợt 3) đã vào `main` local theo S14b: replay JSON `6cf9284d…3436` và ZIP `1c2472d1…1af9` khớp, chưa có điểm LB.** Chi tiết mục 5 (S14b).
 - **S14 (14/10, nhánh `feat/integrate`, chưa push): tái tạo C1 bằng một lệnh.** Best đã đo: **C1 Final 0,2655** (người dùng cung cấp) = base S6-f-K150 + doc zh đợt 2 (τ_doc tuyệt đối −0,87255859375, trần 30) + chunk zh ZL (τ 0,96, ≤ 3 doc/query, mỗi ID v2 một chunk, chỉ doc đã chọn) + LZMA dict 256 MiB; ZIP 82.047.434 B, ZIP SHA256 `e7c84e2c37c996fe3d046bf22a4d25b2fd9e8e1c2568d928fa45797108720c13`, JSON `83375428b79957b1580299f97b05299bb292957826bd4cb8bdc602a83b8dd5f3`. `python -m r2ai.compose replay --manifest configs/best-c1.yaml` (pin đủ input trong `configs/best-c1.yaml`, thiếu pin thì dừng) dựng lại **JSON SHA và ZIP SHA đều khớp**, validator native 0 lỗi / 1.200 query / 126.208 chunk. Replay S6-f JSON `d0da38b1…dca1` khớp; A1-115 JSON `4ffbba8b…2c82` khớp (ZIP khác 8 byte do mtime, gate là JSON); VS-append JSON và ZIP khớp. `submission-best.yaml` vẫn mặc định A1-115. Chi tiết mục 5 (S14) và `submissions/LOG.md`.
@@ -262,6 +262,8 @@ Cả hai: doc/query 136,48, 0 doc thêm do bảo vệ, chunk CC/query 9,34 (h1) 
 **Chưa làm (chờ Vu):** `feat/zh-v2` có thêm 6 commit mới (trích xuất lại, supersede) và `feat/en-pubmed`, `feat/reranker-trial` chưa được merge vào `main`; C3 không cần chúng (nguồn zh được pin theo SHA). Gộp R1m: xem đầu file.
 
 ## 6. Lệch so với `R2AI_STAGE3_CONTEXT.md`
+
+Cập nhật 2026-10-22 12:50 (UTC+7), Claude Opus 5.5, HEAD kiểm trước cập nhật `081e47c`, nhánh `feat/s31-strong-judge`. Không nộp K4-thr-C-ext / K4-free bản cắt body (Vu). Đo riêng vế doc (`r2ai.s31.mix`, chưa nộp, validator ok): **K4-thr-C-extD** = doc K4-thr-C-ext (226.791) + chunk K4-thr-C (175.148, trùng ở cả 1.200 query, nguyên body), ZIP `8e39eaab…640a` 100.581.430 B; **K4-free-D** = doc K4-free (229.062) + chunk K4-thr-C trên doc còn được chọn (168.899 chunk, 282 query khác K4-thr-C), ZIP `8e742117…c97a` 97.099.536 B. Kiểm writer: mix K4-thr-C với chính nó ra đúng JSON K4-thr-C.
 
 Cập nhật 2026-10-22 03:35 (UTC+7), Claude Opus 5.5, HEAD kiểm trước cập nhật `a633ca7`, nhánh `feat/s31-strong-judge`. LB (Vu báo): **K4-thr-C 0,4183** (Doc 0,4139 / Chunk 0,4227), bản tốt nhất; K4-free-p13 0,4096. Điểm pool-extra từ Kaggle: SHA `84cf53fa…f0e3`, 56.115 cặp, 19.435 s T4. Dựng trên CPU, chưa nộp, validator S26 ok cả 2, chunk theo t_c cố định 0,0706. K4-thr-C-ext: 226.791 doc, 255 query chạm trần lấy trần 2,0×K_q (155 query chạm cả trần mới), 204.668 chunk, ZIP `8f441cfe…c725` 102.301.925 B, cắt body 3.061 ký tự, N = 37.732. K4-free (đào sâu thích ứng): 229.062 doc, 525 query được mở rộng, **454 query vẫn còn doc ≥ t ở đáy pool đã chấm**, 204.240 chunk, ZIP `e65dce39…093c` 102.321.530 B, cắt body 3.055 ký tự, N = 37.865.
 
@@ -532,6 +534,7 @@ Cập nhật 2026-10-17 20:25 (UTC+7), GPT-6 (Codex, S24 recovery): D21 bỏ qua
 
 | Thời gian (UTC+7) | Ai | Thay đổi |
 |---|---|---|
+| 2026-10-22 12:50 | Claude Opus 5.5 | S31: `r2ai.s31.mix`; dựng K4-thr-C-extD (chunk = K4-thr-C ở 1.200 query) và K4-free-D (168.899 chunk, 282 query khác), nguyên body, dưới trần; chưa nộp. |
 | 2026-10-22 03:35 | Claude Opus 5.5 | S31: LB K4-thr-C 0,4183 (tốt nhất); dựng K4-thr-C-ext và K4-free (đào sâu thích ứng) bằng điểm pool-extra, t_c cố định 0,0706; cả hai vượt trần nên cắt body, N ≈ 37,8 nghìn; chưa nộp. |
 | 2026-10-21 19:20 | Claude Opus 5.5 | S31: hồi quy J4-rrf-ph979 sau hook `chunk_selector` khớp JSON `965331b3…3950` / ZIP `585685f1…e5d4`; bỏ K4-tfree-t0.08 khỏi danh sách nộp (gần trùng K4-thr). |
 | 2026-10-21 18:50 | Claude Opus 5.5 | S31: LB K4-thr 0,4122 (nền mới); dựng K4-tfree ×3, K4-thr-C, K4-free-p13; pool-extra 56.115 cặp cho Kaggle (`--subset extra`, `--extra-pool`); chưa nộp. |

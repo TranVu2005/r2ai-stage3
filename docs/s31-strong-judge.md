@@ -325,3 +325,20 @@ Chunk của cả hai bản: doc đã chọn, theo thứ tự RRF, có P4B ≥ t_
 - So với K4-thr TB/query: thêm 34,59, bớt 6,32 (sym-diff 40,91); 253 query giống hệt.
 
 Lưu ý: K4-thr-C nộp nguyên body. Ở hai bản này, khoảng 37,8 nghìn chunk body dài bị cắt còn khoảng 3.060 ký tự. Vì vậy chênh LB so với K4-thr-C gồm cả tác động của doc/chunk thêm lẫn tác động của việc cắt body.
+
+### Đo riêng vế doc: K4-thr-C-extD, K4-free-D (`python -m r2ai.s31.mix`, CPU, chưa nộp)
+
+Hai bản cắt body ở trên (K4-thr-C-ext, K4-free) **không nộp** (Vu, 22/10), vì thay đổi cả doc lẫn chunk cùng lúc nên không tách được tác động. `r2ai.s31.mix` ghép `relevant_docs` của một ZIP với `relevant_chunks` của ZIP khác. Chunk được giữ nguyên thứ tự và text, chỉ bỏ chunk mà doc không còn được chọn. Bố cục JSON và cách nén giống builder S29.
+
+Kiểm writer: mix K4-thr-C với chính nó ra đúng JSON `d771c4f9…` của K4-thr-C. ZIP dài hơn 14 B, đúng phần tên file thêm "Mcheck-" ghi ở hai header ZIP.
+
+| Bản | Doc | Chunk | Chunk/query P10 / P50 / P90 | Query có chunk giống hệt K4-thr-C | ZIP B | ZIP SHA256 |
+|---|---:|---:|---|---:|---:|---|
+| K4-thr-C (LB 0,4183) | 195.147 | 175.148 | 47 / 140 / 251 | 1.200 | 100.471.357 | `31980453…5a87` |
+| **K4-thr-C-extD** | 226.791 (= K4-thr-C-ext) | 175.148 | 47 / 140 / 251 | **1.200** | 100.581.430 | `8e39eaab70ae2675bc0c17e3a729e438cccd8d4a2a3b0290505274f648a5640a` |
+| **K4-free-D** | 229.062 (= K4-free) | 168.899 | 45 / 134 / 248 | 918 (282 khác) | 97.099.536 | `8e7421174db97bdc7eb969743b4368a74f8dfe5ecdf6a6f8bbd9c74baebbc97a` |
+
+- K4-thr-C-extD: chunk JSON trùng K4-thr-C ở cả 1.200 query; doc thêm không mang chunk; nguyên body, dưới trần.
+- K4-free-D: chunk là chunk của K4-thr-C, chỉ giữ ở doc mà K4-free còn chọn. Số chunk mỗi query không vượt số chunk K4-thr-C của query đó, text nguyên body. Mất 6.249 chunk vì doc của chúng bị K4-free bỏ, ở 282 query.
+- Mọi doc mang chunk của K4-thr-C đều có P4B ≥ 0,07056 (theo cách dựng), nên quy tắc "t_c = 0,0706" được thoả. Có một điểm khác: 63 doc của K4-thr-C có P4B đúng bằng t_c nhưng không nhận chunk vì cắt hoà ở mức 175.148; các doc này vẫn không có chunk ở K4-free-D.
+- Validator S26 báo `ok` cả hai. Output ở `out/runs/s31-strong-judge/build-mix/`.

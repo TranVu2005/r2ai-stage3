@@ -400,3 +400,15 @@ def test_free_adaptive_deepens_only_when_211th_doc_passes(monkeypatch):
     assert report["queries_last_scored_doc_still_at_or_above_t_ids"] == [3]
     assert b.variant_k_mode("K4-thr-C-ext", "J4") == "thr-ext" and b.variant_k_mode("K4-free", "J4") == "free"
     assert b.variant_chunk_mode("K4-free", "J4") == "fixed"
+
+
+def test_mix_rows_keeps_chunk_order_and_drops_unselected_docs():
+    from r2ai.s31.mix import mix_rows
+
+    docs = [{"id": 1, "relevant_docs": [3, 1, 2], "relevant_chunks": []}, {"id": 2, "relevant_docs": [5], "relevant_chunks": []}]
+    chunks = [{"id": 1, "relevant_docs": [1, 2], "relevant_chunks": [{"doc_id": 2, "chunk_text": "b"}, {"doc_id": 1, "chunk_text": "a"}]},
+              {"id": 2, "relevant_docs": [6], "relevant_chunks": [{"doc_id": 6, "chunk_text": "x"}]}]
+    rows, stats = mix_rows(docs, chunks)
+    assert rows[0] == {"id": 1, "relevant_docs": [3, 1, 2], "relevant_chunks": chunks[0]["relevant_chunks"]}
+    assert rows[1]["relevant_chunks"] == []
+    assert stats["chunks_dropped_doc_not_selected"] == 1 and stats["queries_chunks_differ_from_chunk_source"] == 1

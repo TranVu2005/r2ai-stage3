@@ -1,8 +1,8 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-22 13:15 (UTC+7)
+- Cập nhật: 2026-10-22 18:35 (UTC+7)
 - Model thực hiện: Claude Opus 5.5
-- Commit HEAD đã kiểm trước cập nhật này: `79180f5`, nhánh `feat/s31-strong-judge`
+- Commit HEAD đã kiểm trước cập nhật này: `c2ce09f`, nhánh `feat/s33-btc-baseline`
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - **Best mới đã đo: R1m 0,2673** (Qwen3-Reranker-0,6B + RRF trên phía zh, D16; người dùng cung cấp 15/10). **R1m chưa tích hợp vào repo này**: chờ phía vi (S15, sáng 16/10) rồi tích hợp một lần, kèm pin model Qwen3 (revision `e61197ed…`) và cache điểm. Trong repo, best tái tạo được vẫn là **C1 0,2655**. **C3 (S6-f + zh đợt 3) đã vào `main` local theo S14b: replay JSON `6cf9284d…3436` và ZIP `1c2472d1…1af9` khớp, chưa có điểm LB.** Chi tiết mục 5 (S14b).
 - **S14 (14/10, nhánh `feat/integrate`, chưa push): tái tạo C1 bằng một lệnh.** Best đã đo: **C1 Final 0,2655** (người dùng cung cấp) = base S6-f-K150 + doc zh đợt 2 (τ_doc tuyệt đối −0,87255859375, trần 30) + chunk zh ZL (τ 0,96, ≤ 3 doc/query, mỗi ID v2 một chunk, chỉ doc đã chọn) + LZMA dict 256 MiB; ZIP 82.047.434 B, ZIP SHA256 `e7c84e2c37c996fe3d046bf22a4d25b2fd9e8e1c2568d928fa45797108720c13`, JSON `83375428b79957b1580299f97b05299bb292957826bd4cb8bdc602a83b8dd5f3`. `python -m r2ai.compose replay --manifest configs/best-c1.yaml` (pin đủ input trong `configs/best-c1.yaml`, thiếu pin thì dừng) dựng lại **JSON SHA và ZIP SHA đều khớp**, validator native 0 lỗi / 1.200 query / 126.208 chunk. Replay S6-f JSON `d0da38b1…dca1` khớp; A1-115 JSON `4ffbba8b…2c82` khớp (ZIP khác 8 byte do mtime, gate là JSON); VS-append JSON và ZIP khớp. `submission-best.yaml` vẫn mặc định A1-115. Chi tiết mục 5 (S14) và `submissions/LOG.md`.
@@ -262,6 +262,8 @@ Cả hai: doc/query 136,48, 0 doc thêm do bảo vệ, chunk CC/query 9,34 (h1) 
 **Chưa làm (chờ Vu):** `feat/zh-v2` có thêm 6 commit mới (trích xuất lại, supersede) và `feat/en-pubmed`, `feat/reranker-trial` chưa được merge vào `main`; C3 không cần chúng (nguồn zh được pin theo SHA). Gộp R1m: xem đầu file.
 
 ## 6. Lệch so với `R2AI_STAGE3_CONTEXT.md`
+
+Cập nhật 2026-10-22 18:35 (UTC+7), Claude Opus 5.5, HEAD kiểm trước cập nhật `c2ce09f`, nhánh `feat/s33-btc-baseline` (S31 `e3f49e7` + merge S32 `410e54e`). S33 Pha A (chi tiết `reports/s33-btc-baseline.md`): kiểm giả thuyết gold = baseline BTC (BGE-M3 + bge-reranker-v2-m3). Lưu ý: repo **đã dùng** bge-reranker-v2-m3 ở sub02–RD150 (03–06/10, index cũ; RD150 Doc P 0,143 @K150). Chấm bge-reranker-v2-m3 (revision `953dc6f6…`, fp16, max_length 512, `only_second`) trên pool cosine top-211 của J4-K40 (253.200 cặp; 186 cặp hoà cosine ở hạng 211 không có trong `pool211_index` được chấm riêng): R-doc 47,4 cặp/s pilot, 5.615,7 s GPU; R-chk (top-3 chunk t256 cách S32, cổng chọn lại 2.000 cặp 0 lệch, 3.742 cặp fallback R-doc) 737.254 dòng, 97,9 cặp/s pilot, 7.191,9 s GPU, RTX 3050 local. Spearman toàn cục / TB query: R-doc~R-chk 0,879/0,743; R-doc~4B 0,690/0,610; R-doc~cosine 0,627/0,430; R-chk~4B 0,653/0,542. Dựng trên CPU, chưa nộp, validator S26 ok 0 lỗi: **BGR-K40-doc** ZIP `be362e5e…50de` 30.614.714 B (khác J4-K40 17,04 doc/query, zh 11,8%); **BGR-K40-chk** ZIP `de2bac96…78c3` 32.857.489 B (khác J4-K40 20,18 doc/query, zh 11,5%); hai bản khác nhau 15,44 doc/query. Hồi quy Check-J4-K40 qua đường S33 ra đúng JSON `e464bbd1…cafc`. Pha B chờ LB (cổng Doc P ≥ 0,55). Pha C (en) chưa làm, chờ Vu: E1 15/10 đã cho thấy en không có lời. 56 test S29–S33 qua.
 
 Cập nhật 2026-10-22 13:15 (UTC+7), Claude Opus 5.5, HEAD kiểm trước cập nhật `79180f5`, nhánh `feat/s31-strong-judge`. Baseline BTC (Vu cung cấp): Doc F2 0,5587, P 0,8805 / R 0,5146, khoảng 38 doc/query. Dựng top-K cố định (pool cosine top-211, không K_q, không n_c, chunk nguyên body cho mọi doc có text, không cắt; CPU, chưa nộp, validator ok cả 4): COS-K40 ZIP 30.547.782 B; J4-K20 16.585.921 B; J4-K40 30.091.475 B; J4-K60 42.416.459 B. Tỉ lệ zh của doc lần lượt 15,7% / 14,1% / 17,1% / 18,6%. P4B TB theo hạng RRF 1–10 / 11–20 / 21–40 / 41–60 = 0,852 / 0,740 / 0,647 / 0,552; với COS-K40 theo hạng cosine 1–10 / 11–20 / 21–40 = 0,683 / 0,581 / 0,503. K4-thr-C-extD, K4-free-D giữ sẵn để nộp sau; 63 doc hoà t_c giữ nguyên.
 
@@ -537,6 +539,7 @@ Cập nhật 2026-10-17 20:25 (UTC+7), GPT-6 (Codex, S24 recovery): D21 bỏ qua
 
 | Thời gian (UTC+7) | Ai | Thay đổi |
 |---|---|---|
+| 2026-10-22 18:35 | Claude Opus 5.5 | S33: bge-reranker-v2-m3 chấm pool211 (R-doc 253.200 cặp, R-chk 737.254 chunk, local RTX 3050); dựng BGR-K40-doc / BGR-K40-chk, validator ok, Check-J4-K40 khớp JSON; chưa nộp. |
 | 2026-10-22 13:15 | Claude Opus 5.5 | S31: biến thể top-K cố định `COS-K<K>` / `J4-K<K>` (pool 211, chunk nguyên body cho mọi doc); dựng COS-K40, J4-K20/40/60, validator ok; chưa nộp. |
 | 2026-10-22 12:50 | Claude Opus 5.5 | S31: `r2ai.s31.mix`; dựng K4-thr-C-extD (chunk = K4-thr-C ở 1.200 query) và K4-free-D (168.899 chunk, 282 query khác), nguyên body, dưới trần; chưa nộp. |
 | 2026-10-22 03:35 | Claude Opus 5.5 | S31: LB K4-thr-C 0,4183 (tốt nhất); dựng K4-thr-C-ext và K4-free (đào sâu thích ứng) bằng điểm pool-extra, t_c cố định 0,0706; cả hai vượt trần nên cắt body, N ≈ 37,8 nghìn; chưa nộp. |

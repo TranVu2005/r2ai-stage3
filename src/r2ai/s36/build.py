@@ -38,7 +38,7 @@ from r2ai.s31 import build as s31_build
 from r2ai.s36 import fuse
 
 # t_c of FUSE4-free, calibrated once (Cal-FUSE4-free) so that its chunks equal those of FUSE4-thrC; fixed afterwards.
-FUSE4_FREE_T_C: float | None = None
+FUSE4_FREE_T_C: float | None = 0.2030746281894702  # Cal-FUSE4-free, 23/10: chunks = 175,548 (FUSE4-thrC) on the FUSE4-free docs
 K4_THR_C_FX_JSON_SHA256 = s31_build.K4_THR_C_FX_JSON_SHA256
 K4_THR_C_JSON_SHA256 = s31_build.K4_THR_C_JSON_SHA256
 K4_FREE_JSON_SHA256 = "896ffcbb6b6aaa3c3dcd319b7f2dd56d94186c6857df0b3bce0688df51f6bbba"  # build-ext/K4-free.s31.json (pre-fix builder)

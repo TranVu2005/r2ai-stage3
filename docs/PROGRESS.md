@@ -1,8 +1,8 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-22 21:40 (UTC+7)
+- Cập nhật: 2026-10-23 16:30 (UTC+7)
 - Model thực hiện: Claude Sonnet 5.5
-- Commit HEAD đã kiểm trước cập nhật này: `20fd5e4`, nhánh `feat/s35-part-jina`
+- Commit HEAD đã kiểm trước cập nhật này: `51e0457`, nhánh `feat/s36-fuse4`
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - **Best mới đã đo: R1m 0,2673** (Qwen3-Reranker-0,6B + RRF trên phía zh, D16; người dùng cung cấp 15/10). **R1m chưa tích hợp vào repo này**: chờ phía vi (S15, sáng 16/10) rồi tích hợp một lần, kèm pin model Qwen3 (revision `e61197ed…`) và cache điểm. Trong repo, best tái tạo được vẫn là **C1 0,2655**. **C3 (S6-f + zh đợt 3) đã vào `main` local theo S14b: replay JSON `6cf9284d…3436` và ZIP `1c2472d1…1af9` khớp, chưa có điểm LB.** Chi tiết mục 5 (S14b).
 - **S14 (14/10, nhánh `feat/integrate`, chưa push): tái tạo C1 bằng một lệnh.** Best đã đo: **C1 Final 0,2655** (người dùng cung cấp) = base S6-f-K150 + doc zh đợt 2 (τ_doc tuyệt đối −0,87255859375, trần 30) + chunk zh ZL (τ 0,96, ≤ 3 doc/query, mỗi ID v2 một chunk, chỉ doc đã chọn) + LZMA dict 256 MiB; ZIP 82.047.434 B, ZIP SHA256 `e7c84e2c37c996fe3d046bf22a4d25b2fd9e8e1c2568d928fa45797108720c13`, JSON `83375428b79957b1580299f97b05299bb292957826bd4cb8bdc602a83b8dd5f3`. `python -m r2ai.compose replay --manifest configs/best-c1.yaml` (pin đủ input trong `configs/best-c1.yaml`, thiếu pin thì dừng) dựng lại **JSON SHA và ZIP SHA đều khớp**, validator native 0 lỗi / 1.200 query / 126.208 chunk. Replay S6-f JSON `d0da38b1…dca1` khớp; A1-115 JSON `4ffbba8b…2c82` khớp (ZIP khác 8 byte do mtime, gate là JSON); VS-append JSON và ZIP khớp. `submission-best.yaml` vẫn mặc định A1-115. Chi tiết mục 5 (S14) và `submissions/LOG.md`.
@@ -262,6 +262,8 @@ Cả hai: doc/query 136,48, 0 doc thêm do bảo vệ, chunk CC/query 9,34 (h1) 
 **Chưa làm (chờ Vu):** `feat/zh-v2` có thêm 6 commit mới (trích xuất lại, supersede) và `feat/en-pubmed`, `feat/reranker-trial` chưa được merge vào `main`; C3 không cần chúng (nguồn zh được pin theo SHA). Gộp R1m: xem đầu file.
 
 ## 6. Lệch so với `R2AI_STAGE3_CONTEXT.md`
+
+Cập nhật 2026-10-23 16:30 (UTC+7), Claude Sonnet 5.5, HEAD kiểm trước cập nhật `51e0457`, nhánh `feat/s36-fuse4` (S35 + merge S31 `bd5cc8d` có bản sửa lỗi Pharmacity). S36 (chi tiết `docs/s36-fuse4.md`), chưa nộp bản nào. BTC đổi metric chunk 23/10 (LCS ≥ 0,4 cả hai chiều) nên chunk nguyên body mất ý nghĩa: sản phẩm chính là `out/runs/s36-fuse4/docsel/docsel-<tên>.parquet` cho S38; ZIP có hậu tố `-docread` (chunk nguyên body, chỉ đọc Doc F2). Dựng FUSE4-thrC, FUSE4w-thrC (4B ×2), FUSE4-free (RRF k=60: cosine, 4B, Jina, C-max; free = pool 211 + đào sâu, hằng số t_c 0,2031 hiệu chỉnh một lần), EF2-cut-p4b, EF2-cut-avg, LANG-thr-avg; validator S26 ok, không cắt body, ZIP dưới trần (FUSE4-free 102.471.046 B). Chấm bù khung free: Jina 33.307 cặp, C-max 53.347 cặp (154.927 dòng, 0,6B), 0 cặp xếp hạng cuối; khung thrC không thiếu điểm. Hồi quy: RRF(cosine, 4B) qua đường FUSE4-thrC ra đúng JSON K4-thr-C-fx (`c105b78d…`); Check-FUSE4-free-id xem `docs/s36-fuse4.md`. Hiệu chỉnh p_cal khớp Doc P LB (sai số ≤ 0,00015 với P4B, 0,0029 với TB(P4B, Jina)); EF2-cut 193.879 / 192.849 doc, LANG-thr-avg 190.323 doc (ngưỡng P4B vi 0,0759 / zh 0,1859). Mô hình dự đoán F2 cao hơn J3-thrC chỉ khoảng +0,005 (EF2-cut) và không cao hơn (LANG-thr).
 
 Cập nhật 2026-10-22 21:40 (UTC+7), Claude Sonnet 5.5, HEAD kiểm trước cập nhật `20fd5e4`, nhánh `feat/s35-part-jina` (base S33 `81dad2a`). S35 (chi tiết `docs/s35-part-jina.md`), chưa nộp bản nào, theo quyết định của Vu: dựng y hệt K4-thr-C, chỉ đổi nguồn hạng trong RRF. Phần 1: `cos_doc2 = max(cos_doc512, max cosine chunk t256)`, 0 chunk embed thêm; 81,56% cặp có chunk có cos_part > cos_doc512; Spearman cos_doc2~P4B 0,528 (cos_doc512~P4B 0,499). **PART-thrC** ZIP 101.507.086 B, 17,03 doc/query khác K4-thr-C, `t_c` hiệu chỉnh 0,0759 (tổng chunk 175.148, Vu xác nhận), validator ok; hồi quy cos_doc2 := cos_doc512 ra đúng JSON K4-thr-C `d771c4f9…c9b0`. Phần 2: Jina Reranker v3.5 (revision `e8a93f33…`, commit 30/07/2026, CC-BY-NC-4.0, 0,6B) chấm 302.086 cặp (pool 211 ∪ pool13), lô 10 doc xáo trộn, điểm gộp bằng vector query chung, ≈ 7 h RTX 3050, VRAM 1,7 GiB; Spearman Jina~4B 0,719, ~cosine 0,472, ~bge R-doc 0,726. **JINA-K40** ZIP 32.437.433 B (17,40 doc/query khác J4-K40; vi 92,6% / zh 7,4%); **J3-thrC** ZIP 101.181.680 B (9,35 doc/query khác K4-thr-C); Check-J4-K40 khớp JSON `e464bbd1…cafc`; validator S26 ok cả ba. 52 test S31–S35 qua (gồm 11 test S35).
 
@@ -542,6 +544,7 @@ Cập nhật 2026-10-17 20:25 (UTC+7), GPT-6 (Codex, S24 recovery): D21 bỏ qua
 
 | Thời gian (UTC+7) | Ai | Thay đổi |
 |---|---|---|
+| 2026-10-23 16:30 | Claude Sonnet 5.5 | S36: FUSE4-thrC / FUSE4w-thrC / FUSE4-free, EF2-cut-p4b / EF2-cut-avg / LANG-thr-avg (ZIP `-docread`, docsel cho S38), chấm bù Jina 33.307 + C-max 53.347 cặp, hiệu chỉnh p_cal; validator ok; chưa nộp. |
 | 2026-10-22 21:40 | Claude Sonnet 5.5 | S35: cos_doc2 (encode theo phần) và PART-thrC (hồi quy khớp K4-thr-C); Jina Reranker v3.5 chấm pool 211 ∪ pool13; dựng JINA-K40 và J3-thrC, validator ok; chưa nộp. |
 | 2026-10-22 19:25 | Claude Opus 5.5 | S33: bỏ Pha C (en) theo quyết định của Vu; giữ dừng probe en (E1 15/10). |
 | 2026-10-22 18:35 | Claude Opus 5.5 | S33: bge-reranker-v2-m3 chấm pool211 (R-doc 253.200 cặp, R-chk 737.254 chunk, local RTX 3050); dựng BGR-K40-doc / BGR-K40-chk, validator ok, Check-J4-K40 khớp JSON; chưa nộp. |

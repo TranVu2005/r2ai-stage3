@@ -98,6 +98,33 @@ Token = BGE-M3 thô của từng chunk (chunk giữ nguyên tính bằng độ d
 
 **CH-clean** (`python -m r2ai.s38.clean discover|apply`, `build --variant CH-clean`): nguyên body, cắt đuôi boilerplate theo marker đếm trên toàn host (≥ 30% doc, trong 30% cuối body). 25.391 carrier bị cắt (tamanhhospital 2.320, baophutho 77, a-hospital 462, nhathuoclongchau 21.128, youmed 1.404; **medlatec 0**: đoạn quảng cáo diễn đạt khác nhau theo bài, không khoá dòng nào đạt 30% doc). Token bỏ trung vị theo doc: tamanhhospital 394, baophutho 379, a-hospital 19, nhathuoclongchau 55, youmed 189. Carrier còn lại giữ nguyên byte J3-thrC (149.757). ZIP 100.650.275 B, SHA256 `9c29f885528209bd07a346c86d4a1f8f2d04baca2feaf245d0d672d513535721`, JSON `51b89803…a620`; validator S26 ok, 0 lỗi. Marker, số doc bị cắt và 2 ví dụ trước/sau mỗi host: `reports/s38-clean.md`.
 
+## Ghép cuối: docsel bất kỳ + quy tắc chunk (`r2ai.s38.compose`, chuẩn bị cho sáng 24/10)
+
+Vu (23/10): mọi bản ghép cuối dựng trên docsel EF2 (S36), không phải J3-thrC; CH-full+w768 phải đo lại ZIP và hiệu chỉnh lại T.
+
+```bash
+scripts/s38/compose.sh EF2-cut-avg clean        # hoặc EF2-cut-p4b; RULE = clean | cap2048 | full+w768
+```
+
+= `python -m r2ai.s38.compose run --name <DOCSEL>-<RULE> --base-zip out/runs/s36-fuse4/build-docread/<DOCSEL>-docread.zip --docsel out/runs/s36-fuse4/docsel/docsel-<DOCSEL>.parquet --rule <RULE>` → `out/runs/s38-chunk-metric-v2/compose/`.
+
+- Nền = ZIP `-docread` của S36 (chunk nguyên body, dựng sau bản sửa Pharmacity). Script kiểm `relevant_docs` (thứ tự `rank`) và tập doc mang chunk khớp docsel, lệch thì dừng.
+- `clean`: marker đuôi đếm trên J3-thrC (`scores/clean_markers.json`) + **marker base64 cho baophutho.vn** (dòng ≥ 200 ký tự `[A-Za-z0-9+/=]`, cắt từ đó trở đi; `--no-base64` để tắt). `cap2048` / `full+w768`: cửa sổ quanh chunk t256 tốt nhất, chọn như CH-t256-1 (judge S32 → cosine; doc Pharmacity dùng chunk lô của nó).
+- `full+w768`: script tự chọn T. Ước lượng T từ ngân sách (102.600.000 − ZIP nền) / 94,3 B mỗi chunk thứ 2 (đo ở CH-full+w768-t1849), dựng song song 3 ứng viên, rồi chia đôi giữa T vượt trần cao nhất và T dưới trần thấp nhất cho tới khi cách nhau 1 token (tối đa `--rounds 3`). Kết quả trong `<name>.threshold.json`. **Tên file trong ZIP đổi độ dài thì ZIP đổi vài byte** (gate-full-t1849 102.599.146 B so với CH-full+w768-t1849 102.599.152 B), nên T được đo với đúng tên sẽ nộp.
+- Thời gian: `prepare` (đọc nền, chọn chunk t256, token hoá body) ~1 phút cho clean, ~16 phút cho cap2048 / full+w768; mỗi ZIP (LZMA dict 256) ~10–15 phút; full+w768 thêm 1–3 vòng dựng song song. **Cache prepare của cả 6 cặp (2 docsel EF2 × 3 quy tắc) đã chạy sẵn**, nên sáng mai chỉ còn bước ghi ZIP.
+- **Cổng hồi quy** (trên J3-thrC + docsel-J3-thrC, đã chạy): JSON SHA khớp đúng CH-clean (`--no-base64`) `51b89803…a620`, CH-cap2048 `1884a6ca…a3c2`, CH-full+w768-t1849 `559396d2…6a55`; ước lượng T trên J3-thrC ra đúng 1.849.
+
+| Cache | Carrier | Carrier đổi | prepare | Ghi chú |
+|---|---:|---:|---:|---|
+| EF2-cut-avg-cap2048 | 175.548 | 8.552 | 838 s | |
+| EF2-cut-avg-clean | 175.548 | 25.428 | 92 s | nhathuoclongchau.com.vn 21.198, tamanhhospital.vn 2.293, youmed.vn 1.406, a-hospital.com 454, baophutho.vn 77 |
+| EF2-cut-avg-full+w768 | 175.548 | 37.536 | 883 s | T ước lượng 1.955 (ứng viên 1.946, 1.955, 1.964; ngân sách 1.041.951 B) |
+| EF2-cut-p4b-cap2048 | 175.548 | 8.525 | 801 s | |
+| EF2-cut-p4b-clean | 175.548 | 25.248 | 74 s | nhathuoclongchau.com.vn 21.020, tamanhhospital.vn 2.302, youmed.vn 1.389, a-hospital.com 460, baophutho.vn 77 |
+| EF2-cut-p4b-full+w768 | 175.548 | 37.373 | 830 s | T ước lượng 1.918 (ứng viên 1.909, 1.918, 1.930; ngân sách 1.155.104 B) |
+
+**baophutho.vn, marker base64 (Vu 23/10).** Khối base64 có ở 21/61 doc, bắt đầu ở 0,1–0,4% body và chiếm 79–95% body. Đó là trang lỗi trích xuất: body = `{title}\n\n{publish}\n\n{head}` (placeholder) + base64 + khung bình luận + tin khác, không có bài viết. Cắt từ base64 trở đi còn lại đúng chuỗi `{title}\n\n{publish}\n\n{head}`. Đã cài theo yêu cầu (bật mặc định khi ghép); chunk của 21 doc này sai dù cắt hay không.
+
 ## Bước 5: judge 0,6B chunk-level cho chunk t256 chưa chấm (chuẩn bị; Vu hoãn hẳn, không chạy)
 
 `python -m r2ai.s38.judge_prep` → `out/runs/s38-chunk-metric-v2/judge-pool/` (layout shard S32, prompt/instruction S29). Doc nhận chunk có 1.260.431 chunk t256 (mọi field), S32 đã chấm 519.343 → còn 741.088; chỉ xuất answer/body: **670.779 cặp** (body 663.310, answer 7.469; vi 631.573, zh 39.206) ở 138.533 carrier (TB 4,8 cặp/carrier), prompt TB 334 token (S32: 285), 2 chunk cắt về 512 token. **ETA GPU local (RTX 3050 6 GB, HF bf16, 25,5 cặp/s đo ở S32): 7,3 h; quy theo độ dài prompt 8,6 h**, nếu GPU không chia với job khác. Lệnh: `python -m r2ai.s31.judge_score score --pool out/runs/s38-chunk-metric-v2/judge-pool --out out/runs/s38-chunk-metric-v2/judge-gpu --model qwen3-reranker-0.6b --subset all`.

@@ -11,6 +11,10 @@
   the host's docs (unique doc_id), both thresholds from Vu.
 * chunk = the body up to the start of the first marker line that lies in the last 30% of that body, trailing
   whitespace removed; a body without such a line keeps its J3 chunk byte for byte. Other hosts: unchanged.
+* ``BASE64_HOSTS`` (Vu, 23/10, for the composed builds; not in CH-clean): the start of the first base64 line
+  (>= 200 chars of [A-Za-z0-9+/=], anywhere in the body) is also a cut point. On baophutho.vn it hits 21 of 61 docs,
+  at 0.1-0.4% of the body (the base64 is 79-95% of it): those pages hold template placeholders, the base64 blob, the
+  comment box and other news, no article.
 """
 from __future__ import annotations
 
@@ -36,6 +40,8 @@ DOC_SHARE = 0.30
 MIN_KEY_CHARS = 10
 KEY_CHARS = 80
 DIGITS = re.compile(r"\d")
+BASE64_LINE = re.compile(r"^[A-Za-z0-9+/=]{200,}$")
+BASE64_HOSTS = ("baophutho.vn",)
 
 
 def line_key(line: str) -> str:
@@ -96,6 +102,26 @@ def cut_point(body: str, markers: set[str]) -> int | None:
         if start >= limit and key in markers:
             return start
     return None
+
+
+def base64_start(body: str) -> int | None:
+    """Start of the first base64 line of ``body``, or None."""
+    pos = 0
+    for raw in body.split("\n"):
+        if BASE64_LINE.match(raw.strip()):
+            return pos
+        pos += len(raw) + 1
+    return None
+
+
+def clean_cut(body: str, markers: set[str], base64: bool) -> str | None:
+    """The cut chunk (prefix of ``body`` before the first cut point, trailing whitespace removed), or None."""
+    points = [x for x in (cut_point(body, markers) if markers else None, base64_start(body) if base64 else None)
+              if x is not None]
+    if not points:
+        return None
+    text = body[:min(points)].rstrip()
+    return text if text.strip() else None
 
 
 def load_carriers() -> pd.DataFrame:

@@ -247,3 +247,35 @@ def test_cut_point_is_first_marker_in_tail():
     assert body[:at].rstrip().endswith('làm thân bài.') and 'Hotline' not in body[:at]
     assert CL.cut_point(_body(1, extra_tail=False), markers) is None
     assert CL.cut_point('Hotline: 024 3872 3872 – cơ sở 12\n' + _body(2, extra_tail=False), markers) is None
+
+
+def test_clean_cut_base64_anywhere_and_markers():
+    blob = 'QUJD' * 80
+    body = '{title}\n\n{publish}\n\n' + blob + '\n\nÝ kiến của bạn sẽ được biên tập trước khi đăng.'
+    assert CL.base64_start(body) == body.index(blob)
+    assert CL.clean_cut(body, set(), True) == '{title}\n\n{publish}'
+    assert CL.clean_cut(body, set(), False) is None
+    assert CL.base64_start('ngắn QUJD\n' + 'QUJD' * 10) is None          # < 200 chars, or not a whole line
+
+
+# ---- compose --------------------------------------------------------------------------------------------------
+from r2ai.s38 import compose as CO
+
+
+def test_check_docsel_counts_differences():
+    rows = [{'id': 1, 'relevant_docs': [5, 6, 7], 'relevant_chunks': [{'doc_id': 5, 'chunk_text': 'a'}]},
+            {'id': 2, 'relevant_docs': [8], 'relevant_chunks': []}]
+    ds = pd.DataFrame({'query_id': [1, 1, 1, 2], 'doc_id': [5, 6, 7, 8], 'rank': [1, 2, 3, 1],
+                       'chunk': [True, False, False, False]})
+    rep = CO.check_docsel(rows, ds)
+    assert rep['queries_docs_differ'] == 0 and rep['carriers_only_base'] == 0 and rep['carriers_only_docsel'] == 0
+    ds2 = ds.assign(rank=[2, 1, 3, 1], chunk=[True, True, False, False])
+    rep = CO.check_docsel(rows, ds2)
+    assert rep['queries_docs_differ'] == 1 and rep['carriers_only_docsel'] == 1
+
+
+def test_estimate_thresholds_fits_budget():
+    frame = pd.DataFrame({'rank': [1] * 5 + [2] * 5, 'body_tokens': [0] * 5 + [1600, 1700, 1800, 1900, 2000]})
+    est = CO.estimate_thresholds(frame, CO.CEILING - int(2.5 * CO.RATE_FULL))
+    assert est['k_estimate'] == 2 and est['t_estimate'] == 1800              # bodies 1900, 2000 keep the window
+    assert CO.estimate_thresholds(frame, CO.CEILING - 10 ** 6)['t_estimate'] == CO.FULL_MIN_T

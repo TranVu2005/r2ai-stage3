@@ -8,8 +8,15 @@
   ``clean``      cut the tail before the first host marker (``scores/clean_markers.json``, counted on J3-thrC) and,
                  for baophutho.vn, at the first base64 line (``--no-base64`` turns that off; CH-clean had it off);
   ``cap2048``    body > 2,048 tokens -> 2,048-token window around the best t256 chunk;
-  ``full+w768``  body > T tokens -> base chunk + 768-token window around the best t256 chunk (2 chunks).
+  ``full+w768``  body > T tokens -> base chunk + 768-token window around the best t256 chunk (2 chunks);
+  ``clean+cap2048``  clean first (same markers), then cap2048 on the cleaned body.
   Carriers the rule leaves alone keep the base chunk byte for byte; docs never change.
+* thin (Vu, 24/10; on unless ``--no-thin``, needs the docsel): a baophutho.vn carrier whose base chunk is only
+  template placeholders (``{title}`` ...) before a base64 line is thin: it loses its chunk, and the chunk goes to the
+  next doc of the global S31 order (P4B descending, then query, then rank) that has no chunk and has a chunk source
+  as in the S29 builder (P1 chunk of the query, else first P1 chunk of the doc, else the body span of a doc with
+  canonical chunks or of a Pharmacity lot doc), not empty and not itself thin. The new chunk sits at its rank
+  among the query's chunks and then goes through the rule like any carrier. Kept in ``<name>.swap.json``.
 * best t256 chunk (CH-t256-1 rule): the S32 chunk judge on the scored answer/body chunks of the canonical owner
   (Pharmacity lots: their own chunks), else cosine(S29 query vector, chunk vector); ties: file order.
 * ``full+w768`` picks T itself: the ZIP grows by about ``RATE_FULL`` bytes per second chunk (S38, J3-thrC), so the
@@ -27,6 +34,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -46,7 +54,9 @@ from r2ai.s38.sources import (CANONICAL, _atomic_json, _atomic_parquet, _sha256,
                               load_owner_map, owner_of, read_bundle, run_root)
 from r2ai.s38.window import _body_span, pieces_for
 
-RULES = {"clean": None, "cap2048": ("window", 2048, 2048), "full+w768": ("full+window", 768, 1536)}
+RULES = {"clean": None, "cap2048": ("window", 2048, 2048), "full+w768": ("full+window", 768, 1536),
+         "clean+cap2048": ("window", 2048, 2048)}
+PLACEHOLDERS = re.compile(r"^(?:\{\w+\}\s*)*$")
 CEILING = 102_600_000
 RATE_FULL = 94.3        # B per 768 window: (102,599,152 - 101,181,680) / 15,026 (CH-full+w768-t1849 on J3-thrC)
 FULL_MIN_T = 1536
@@ -71,6 +81,120 @@ def check_docsel(rows: list[dict[str, Any]], docsel: pd.DataFrame) -> dict[str, 
     return {"queries": len(rows), "queries_docs_differ": bad_docs, "docsel_queries": len(docs),
             "carriers_base": len(base_car), "carriers_docsel": len(carriers),
             "carriers_only_base": len(base_car - carriers), "carriers_only_docsel": len(carriers - base_car)}
+
+
+def is_thin_base64(body: str) -> bool:
+    """Only template placeholders ({title}, {publish}, ...) before the first base64 line."""
+    at = cl.base64_start(body)
+    return at is not None and bool(PLACEHOLDERS.match(body[:at].strip()))
+
+
+def host_map(keys: set[int]) -> dict[int, str]:
+    hosts = pq.read_table(paths.DATA_DIR / CANONICAL / "docs.parquet", columns=["doc_id", "host"],
+                          filters=[("doc_id", "in", sorted(keys))]).to_pandas()
+    return dict(zip(hosts.doc_id.astype(int), hosts.host))
+
+
+def load_markers() -> dict[str, set[str]]:
+    return {h: {m["key"] for m in v["markers"]} for h, v in json.loads(
+        (scores_dir() / "clean_markers.json").read_text(encoding="utf-8"))["hosts"].items()}
+
+
+def apply_swap(rows: list[dict[str, Any]], swap: dict[str, Any]) -> list[dict[str, Any]]:
+    """Rows with the thin carriers' chunks removed and the replacement chunks inserted at their rank."""
+    removed = {(int(q), int(d)) for q, d in swap.get("removed", [])}
+    added: dict[int, list[dict[str, Any]]] = {}
+    for a in swap.get("added", []):
+        added.setdefault(int(a["query_id"]), []).append(a)
+    out = []
+    for r in rows:
+        qid = int(r["id"])
+        chunks = [c for c in r["relevant_chunks"] if (qid, int(c["doc_id"])) not in removed]
+        if qid in added:
+            pos = {int(d): k for k, d in enumerate(r["relevant_docs"])}
+            chunks += [{"doc_id": int(a["doc_id"]), "chunk_text": a["body"]} for a in added[qid]]
+            chunks.sort(key=lambda c: pos[int(c["doc_id"])])
+        out.append({"id": r["id"], "relevant_docs": r["relevant_docs"], "relevant_chunks": chunks})
+    return out
+
+
+def s29_chunk_texts(pairs: pd.DataFrame) -> dict[tuple[int, int], tuple[str | None, str]]:
+    """Whole-body chunk of each (query, doc) as the S29 builder makes it: the P1 chunk of the same query, else the
+    first P1 chunk of the doc, else (doc with canonical chunks, or a Pharmacity lot doc) its body span; a doc with
+    none of these has no chunk source (``(None, "")``)."""
+    from r2ai.s29.build import _load_extra_docs
+    from r2ai.s29.qwen_judge import _inputs, _load_submission
+
+    inputs = _inputs()
+    p1_rows = _load_submission(inputs["p1"], with_chunks=True)
+    own = {(int(r["id"]), int(c["doc_id"])): c["chunk_text"] for r in p1_rows for c in r["relevant_chunks"]}
+    first: dict[int, str] = {}
+    for r in p1_rows:
+        for c in r["relevant_chunks"]:
+            first.setdefault(int(c["doc_id"]), str(c["chunk_text"]))
+    canonical = paths.DATA_DIR / CANONICAL
+    owners, cid_to_doc = load_owner_map(canonical)
+    extra, extra_spans = _load_extra_docs(inputs)
+    docs = set(pairs.doc_id.astype(int))
+    owner = {d: owner_of(d, owners, cid_to_doc) for d in docs}
+    need = {d for d in docs if d not in extra and owner[d] in owners}
+    rows = load_doc_rows(canonical, need | {owner[d] for d in need})
+    text = dict(zip(rows.doc_id.astype(int), rows.doc_text))
+    lang = dict(zip(rows.doc_id.astype(int), rows.lang))
+    spans = pq.read_table(canonical / "chunks_t256.parquet", columns=["doc_id", "field", "char_start", "char_end"],
+                          filters=[("doc_id", "in", sorted({owner[d] for d in need}))]).to_pandas() if need else None
+    by_owner = {int(o): g for o, g in spans.groupby("doc_id")} if spans is not None else {}
+    empty = pd.DataFrame({"field": [], "char_start": [], "char_end": []})
+    out: dict[tuple[int, int], tuple[str | None, str]] = {}
+    for q, d in zip(pairs.query_id.astype(int), pairs.doc_id.astype(int)):
+        if (q, d) in own:
+            out[(q, d)] = ("p1_row", own[(q, d)])
+        elif d in first:
+            out[(q, d)] = ("p1_any", first[d])
+        elif d in extra:
+            sp = extra_spans.get(d, {})
+            a, b = sp.get("answer") or sp.get("body") or (0, len(extra[d] or ""))
+            out[(q, d)] = ("body", (extra[d] or "")[a:b])
+        elif owner[d] in owners:
+            k = d if d in text else owner[d]
+            t = text.get(k) or ""
+            g = by_owner.get(owner[d], empty)
+            a, b = _body_span(t, str(lang.get(k, "vi")), g[g.field.isin(SUBMITTABLE)] if len(g) else empty)
+            out[(q, d)] = ("body", t[a:b])
+        else:
+            out[(q, d)] = (None, "")
+    return out
+
+
+def thin_swap(rows: list[dict[str, Any]], docsel: pd.DataFrame) -> dict[str, Any]:
+    """Thin base64 carriers of ``cl.BASE64_HOSTS`` and their replacements in the global S31 order."""
+    car = [(int(r["id"]), int(c["doc_id"]), c["chunk_text"]) for r in rows for c in r["relevant_chunks"]]
+    docs = {d for _, d, _ in car}
+    _, _, _, _, key = doc_texts(docs)
+    hosts = host_map(set(key.values()))
+    thin = [(q, d) for q, d, body in car if hosts.get(key[d]) in cl.BASE64_HOSTS and is_thin_base64(body)]
+    thin_docs = {d for _, d in thin}
+    if not thin:
+        return {"removed": [], "added": [], "thin_docs": []}
+    cand = docsel[~docsel.chunk & ~docsel.doc_id.isin(thin_docs)].copy()
+    cand["pos"] = cand["rank"] - 1
+    cand = cand.sort_values(["p4b", "query_id", "pos"], ascending=[False, True, True], kind="stable").head(200 * len(thin))
+    texts = s29_chunk_texts(cand[["query_id", "doc_id"]])
+    added = []
+    for q, d, p4b, rank in zip(cand.query_id.astype(int), cand.doc_id.astype(int), cand.p4b, cand["rank"].astype(int)):
+        src, body = texts.get((q, d), (None, ""))
+        if src is None or not body.strip() or is_thin_base64(body):
+            continue
+        added.append({"query_id": q, "doc_id": d, "rank": rank, "p4b": float(p4b), "source": src, "body": body})
+        if len(added) == len(thin):
+            break
+    if len(added) < len(thin):
+        raise ValueError(f"only {len(added)} replacement carriers for {len(thin)} thin ones")
+    thin_p4b = docsel.set_index(["query_id", "doc_id"]).p4b
+    return {"removed": [[q, d] for q, d in thin], "thin_docs": sorted(thin_docs),
+            "removed_p4b": [float(thin_p4b.loc[(q, d)]) for q, d in thin], "added": added,
+            "t_c_before": float(docsel[docsel.chunk].p4b.min()),
+            "t_c_after": float(min(docsel[docsel.chunk & ~docsel.doc_id.isin(thin_docs)].p4b.min(), min(a["p4b"] for a in added)))}
 
 
 def doc_texts(doc_ids: set[int]) -> tuple[dict[int, str], dict[int, str], dict[int, int], set[int], dict[int, int]]:
@@ -183,18 +307,29 @@ def best_t256(carriers: pd.DataFrame, text: dict[int, str], owner: dict[int, int
 # ------------------------------------------------------------------------------------------ prepare
 
 def prepare(out: Path, name: str, base_zip: Path, docsel_path: Path | None, rule: str, base64: bool,
-            skip_check: bool) -> dict[str, Any]:
+            skip_check: bool, thin: bool = True) -> dict[str, Any]:
     started = time.monotonic()
     rows = read_bundle(base_zip)
     report: dict[str, Any] = {"name": name, "rule": rule, "base_zip": str(base_zip), "base_zip_bytes": base_zip.stat().st_size,
                               "base_zip_sha256": _sha256(base_zip), "docsel": str(docsel_path) if docsel_path else None,
-                              "base64_baophutho": base64 if rule == "clean" else None}
+                              "base64_baophutho": base64 if rule.startswith("clean") else None, "thin": thin}
+    swap: dict[str, Any] = {"removed": [], "added": []}
     if docsel_path is not None:
         report["docsel_sha256"] = _sha256(docsel_path)
-        check = check_docsel(rows, pd.read_parquet(docsel_path, columns=["query_id", "doc_id", "rank", "chunk"]))
+        docsel = pd.read_parquet(docsel_path, columns=["query_id", "doc_id", "rank", "chunk", "p4b"])
+        check = check_docsel(rows, docsel)
         report["docsel_check"] = check
         if not skip_check and (check["queries_docs_differ"] or check["carriers_only_base"] or check["carriers_only_docsel"]):
             raise ValueError(f"base bundle differs from the docsel: {check}")
+        if thin:
+            swap = thin_swap(rows, docsel)
+    elif thin:
+        raise ValueError("thin needs the docsel (or pass --no-thin)")
+    _atomic_json(out / f"{name}.swap.json", swap)
+    rows = apply_swap(rows, swap)
+    report["thin"] = {"removed": len(swap["removed"]), "added": len(swap["added"]),
+                      "thin_docs": len(swap.get("thin_docs", [])), "t_c_before": swap.get("t_c_before"),
+                      "t_c_after": swap.get("t_c_after")} if thin else None
     car = pd.DataFrame([(int(r["id"]), int(c["doc_id"]), c["chunk_text"]) for r in rows for c in r["relevant_chunks"]],
                        columns=["query_id", "doc_id", "body"])
     del rows
@@ -205,23 +340,25 @@ def prepare(out: Path, name: str, base_zip: Path, docsel_path: Path | None, rule
     tok = load_tokenizer()
     out_rows: list[dict[str, Any]] = []
     stats = {"located": 0, "fallback_body": 0, "no_t256_choice": 0, "chunk_outside_body": 0, "not_verbatim_skipped": 0}
+    markers = load_markers() if rule.startswith("clean") else {}
+    host_of = host_map(set(key.values())) if rule.startswith("clean") else {}
+    cut_by_host: dict[str, int] = {}
+
+    def cleaned(d: int, body: str) -> str | None:
+        host = host_of.get(key[d])
+        b64 = base64 and host in cl.BASE64_HOSTS
+        if host not in markers and not b64:
+            return None
+        return cl.clean_cut(body, markers.get(host, set()), b64)
+
     if rule == "clean":
-        markers = {h: {m["key"] for m in v["markers"]} for h, v in json.loads(
-            (scores_dir() / "clean_markers.json").read_text(encoding="utf-8"))["hosts"].items()}
-        canonical = paths.DATA_DIR / CANONICAL
-        hosts = pq.read_table(canonical / "docs.parquet", columns=["doc_id", "host"],
-                              filters=[("doc_id", "in", sorted(set(key.values())))]).to_pandas()
-        host_of = dict(zip(hosts.doc_id.astype(int), hosts.host))
-        cut_by_host: dict[str, int] = {}
         for q, d, body in zip(car.query_id.astype(int), car.doc_id.astype(int), car.body):
-            host = host_of.get(key[d])
-            t = None
-            if host in markers or (base64 and host in cl.BASE64_HOSTS):
-                t = cl.clean_cut(body, markers.get(host, set()), base64 and host in cl.BASE64_HOSTS)
-                if t is not None and t not in text[d]:
-                    stats["not_verbatim_skipped"] += 1
-                    t = None
+            t = cleaned(d, body)
+            if t is not None and t not in text[d]:
+                stats["not_verbatim_skipped"] += 1
+                t = None
             if t is not None:
+                host = host_of.get(key[d])
                 cut_by_host[host] = cut_by_host.get(host, 0) + 1
             out_rows.append({"query_id": q, "doc_id": d, "rank": 1, "text": t, "mode": "clean" if t is not None else "base",
                              "body_tokens": -1})
@@ -233,10 +370,23 @@ def prepare(out: Path, name: str, base_zip: Path, docsel_path: Path | None, rule
         _log(f"best t256 chunks={len(best)}")
         for begin in range(0, len(car), 5_000):
             part = car.iloc[begin:begin + 5_000]
-            bodies, base = [], []
+            bodies, base, cut = [], [], []
             for d, body in zip(part.doc_id.astype(int), part.body):
                 t = text[d]
                 at = t.find(body)
+                c = cleaned(d, body) if rule == "clean+cap2048" else None
+                if c is not None:                                    # clean first: the cut body is the body
+                    at_c = at if at >= 0 else t.find(c)
+                    if at_c >= 0:
+                        stats["located"] += 1
+                        bodies.append(c)
+                        base.append((at_c, True))
+                        cut.append(True)
+                        host = host_of.get(key[d])
+                        cut_by_host[host] = cut_by_host.get(host, 0) + 1
+                        continue
+                    stats["not_verbatim_skipped"] += 1
+                cut.append(False)
                 if at >= 0:
                     stats["located"] += 1
                     bodies.append(body)
@@ -247,8 +397,8 @@ def prepare(out: Path, name: str, base_zip: Path, docsel_path: Path | None, rule
                     bodies.append(t[s:e])
                     base.append((s, False))
             enc = tok(bodies, add_special_tokens=False, return_offsets_mapping=True)
-            for k, (q, d, body, (b0, located)) in enumerate(zip(part.query_id.astype(int), part.doc_id.astype(int),
-                                                                 bodies, base)):
+            for k, (q, d, body, (b0, located), was_cut) in enumerate(zip(part.query_id.astype(int), part.doc_id.astype(int),
+                                                                          bodies, base, cut)):
                 offsets = enc["offset_mapping"][k]
                 chunk = None
                 span = best.get((q, d))
@@ -261,13 +411,18 @@ def prepare(out: Path, name: str, base_zip: Path, docsel_path: Path | None, rule
                     else:
                         chunk = (max(cs, 0), min(ce, len(body)))
                 for rank, piece in enumerate(pieces_for(*spec, body, offsets, chunk), 1):
-                    if piece is None or (piece[0] == "whole" and located):
+                    if was_cut and (piece is None or piece[0] == "whole"):
+                        out_rows.append({"query_id": q, "doc_id": d, "rank": rank, "text": body, "mode": "clean",
+                                         "body_tokens": len(offsets)})
+                    elif piece is None or (piece[0] == "whole" and located):
                         out_rows.append({"query_id": q, "doc_id": d, "rank": rank, "text": None, "mode": "base",
                                          "body_tokens": len(offsets)})
                     else:
                         out_rows.append({"query_id": q, "doc_id": d, "rank": rank, "text": body[piece[1]:piece[2]],
                                          "mode": piece[0], "body_tokens": len(offsets)})
             _log(f"carriers {begin + len(part)}/{len(car)}")
+        if rule == "clean+cap2048":
+            report["carriers_cut_by_host"] = cut_by_host
     frame = pd.DataFrame(out_rows)
     target = out / f"{name}.cache.parquet"
     _atomic_parquet(frame, target)
@@ -301,6 +456,8 @@ def write(out: Path, name: str, threshold: int | None, validate: bool = True) ->
     rows = read_bundle(Path(prep["base_zip"]))
     if _sha256(Path(prep["base_zip"])) != prep["base_zip_sha256"]:
         raise ValueError("base ZIP changed since prepare")
+    swap_path = out / f"{name}.swap.json"
+    rows = apply_swap(rows, json.loads(swap_path.read_text(encoding="utf-8"))) if swap_path.exists() else rows
     new_rows = [replace_chunks(r, chosen) for r in rows]
     target = out / f"{label}.zip"
     paths.assert_writable(target)
@@ -398,6 +555,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--rule", choices=list(RULES))
     parser.add_argument("--no-base64", action="store_true", help="clean: no base64 cut on baophutho.vn")
     parser.add_argument("--skip-docsel-check", action="store_true")
+    parser.add_argument("--no-thin", action="store_true", help="keep the placeholder+base64 baophutho carriers")
     parser.add_argument("--threshold", type=int, action="append", default=None, help="full+w768: body tokens above which the window is added")
     parser.add_argument("--rounds", type=int, default=3, help="full+w768 run: parallel build rounds")
     parser.add_argument("--no-validate", action="store_true")
@@ -412,7 +570,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.error("prepare needs --base-zip and --rule (and normally --docsel)")
         rep = prepare(out, args.name, paths.resolve_path(args.base_zip),
                       paths.resolve_path(args.docsel) if args.docsel else None, args.rule, not args.no_base64,
-                      args.skip_docsel_check)
+                      args.skip_docsel_check, not args.no_thin)
         print(json.dumps(rep, ensure_ascii=False, indent=1))
     if args.command == "prepare":
         return 0

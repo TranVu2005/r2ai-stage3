@@ -2,7 +2,8 @@
 # S38 composed bundle: docsel <NAME> (S36) + chunk rule -> ZIP + validator S26.
 # Usage (from the S38 worktree): scripts/s38/compose.sh <DOCSEL> <RULE> [extra compose args]
 #   DOCSEL: a docsel of out/runs/s36-fuse4/docsel (e.g. EF2-cut-avg); its S36 "-docread" ZIP is the whole-body base.
-#   RULE:   clean | cap2048 | full+w768   (full+w768 picks the lowest T under 102,600,000 B by itself)
+#   RULE:   clean | cap2048 | full+w768 | clean+cap2048   (full+w768 picks the lowest T under 102,600,000 B)
+# Thin placeholder+base64 baophutho carriers pass their chunk on (global P4B order); --no-thin keeps them.
 # Outputs in out/runs/s38-chunk-metric-v2/compose/<DOCSEL>-<RULE>*; a prepared cache is reused.
 set -eu
 DOCSEL="$1"; RULE="$2"; shift 2

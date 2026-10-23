@@ -279,3 +279,23 @@ def test_estimate_thresholds_fits_budget():
     est = CO.estimate_thresholds(frame, CO.CEILING - int(2.5 * CO.RATE_FULL))
     assert est['k_estimate'] == 2 and est['t_estimate'] == 1800              # bodies 1900, 2000 keep the window
     assert CO.estimate_thresholds(frame, CO.CEILING - 10 ** 6)['t_estimate'] == CO.FULL_MIN_T
+
+
+def test_is_thin_base64_needs_placeholders_only():
+    blob = 'QUJD' * 80
+    assert CO.is_thin_base64('{title}\n\n{publish}\n\n{head}\n\n' + blob + '\n\n{name} - {time}')
+    assert not CO.is_thin_base64('Bài viết thật về cúm.\n\n' + blob)
+    assert not CO.is_thin_base64('{title}\n\nkhông có base64')
+
+
+def test_apply_swap_removes_and_inserts_at_rank():
+    rows = [{'id': 1, 'relevant_docs': [5, 6, 7, 8], 'relevant_chunks': [{'doc_id': 5, 'chunk_text': 'a'},
+                                                                        {'doc_id': 6, 'chunk_text': 'thin'},
+                                                                        {'doc_id': 8, 'chunk_text': 'd'}]},
+            {'id': 2, 'relevant_docs': [9], 'relevant_chunks': [{'doc_id': 9, 'chunk_text': 'x'}]}]
+    swap = {'removed': [[1, 6]], 'added': [{'query_id': 1, 'doc_id': 7, 'body': 'c'}]}
+    out = CO.apply_swap(rows, swap)
+    assert [c['doc_id'] for c in out[0]['relevant_chunks']] == [5, 7, 8]
+    assert out[0]['relevant_chunks'][1]['chunk_text'] == 'c' and out[1] == rows[1]
+    assert out[0]['relevant_docs'] == [5, 6, 7, 8]
+    assert CO.apply_swap(rows, {'removed': [], 'added': []}) == rows

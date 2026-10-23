@@ -111,19 +111,26 @@ scripts/s38/compose.sh EF2-cut-avg clean        # hoặc EF2-cut-p4b; RULE = cle
 - Nền = ZIP `-docread` của S36 (chunk nguyên body, dựng sau bản sửa Pharmacity). Script kiểm `relevant_docs` (thứ tự `rank`) và tập doc mang chunk khớp docsel, lệch thì dừng.
 - `clean`: marker đuôi đếm trên J3-thrC (`scores/clean_markers.json`) + **marker base64 cho baophutho.vn** (dòng ≥ 200 ký tự `[A-Za-z0-9+/=]`, cắt từ đó trở đi; `--no-base64` để tắt). `cap2048` / `full+w768`: cửa sổ quanh chunk t256 tốt nhất, chọn như CH-t256-1 (judge S32 → cosine; doc Pharmacity dùng chunk lô của nó).
 - `full+w768`: script tự chọn T. Ước lượng T từ ngân sách (102.600.000 − ZIP nền) / 94,3 B mỗi chunk thứ 2 (đo ở CH-full+w768-t1849), dựng song song 3 ứng viên, rồi chia đôi giữa T vượt trần cao nhất và T dưới trần thấp nhất cho tới khi cách nhau 1 token (tối đa `--rounds 3`). Kết quả trong `<name>.threshold.json`. **Tên file trong ZIP đổi độ dài thì ZIP đổi vài byte** (gate-full-t1849 102.599.146 B so với CH-full+w768-t1849 102.599.152 B), nên T được đo với đúng tên sẽ nộp.
-- Thời gian: `prepare` (đọc nền, chọn chunk t256, token hoá body) ~1 phút cho clean, ~16 phút cho cap2048 / full+w768; mỗi ZIP (LZMA dict 256) ~10–15 phút; full+w768 thêm 1–3 vòng dựng song song. **Cache prepare của cả 6 cặp (2 docsel EF2 × 3 quy tắc) đã chạy sẵn**, nên sáng mai chỉ còn bước ghi ZIP.
+- Thời gian: `prepare` (đọc nền, chọn chunk t256, token hoá body) ~1–2 phút cho clean, 7–15 phút cho quy tắc cửa sổ; mỗi ZIP (LZMA dict 256) ~10–15 phút; full+w768 thêm 1–3 vòng dựng song song.
 - **Cổng hồi quy** (trên J3-thrC + docsel-J3-thrC, đã chạy): JSON SHA khớp đúng CH-clean (`--no-base64`) `51b89803…a620`, CH-cap2048 `1884a6ca…a3c2`, CH-full+w768-t1849 `559396d2…6a55`; ước lượng T trên J3-thrC ra đúng 1.849.
 
-| Cache | Carrier | Carrier đổi | prepare | Ghi chú |
-|---|---:|---:|---:|---|
-| EF2-cut-avg-cap2048 | 175.548 | 8.552 | 838 s | |
-| EF2-cut-avg-clean | 175.548 | 25.428 | 92 s | nhathuoclongchau.com.vn 21.198, tamanhhospital.vn 2.293, youmed.vn 1.406, a-hospital.com 454, baophutho.vn 77 |
-| EF2-cut-avg-full+w768 | 175.548 | 37.536 | 883 s | T ước lượng 1.955 (ứng viên 1.946, 1.955, 1.964; ngân sách 1.041.951 B) |
-| EF2-cut-p4b-cap2048 | 175.548 | 8.525 | 801 s | |
-| EF2-cut-p4b-clean | 175.548 | 25.248 | 74 s | nhathuoclongchau.com.vn 21.020, tamanhhospital.vn 2.302, youmed.vn 1.389, a-hospital.com 460, baophutho.vn 77 |
-| EF2-cut-p4b-full+w768 | 175.548 | 37.373 | 830 s | T ước lượng 1.918 (ứng viên 1.909, 1.918, 1.930; ngân sách 1.155.104 B) |
+### Quyết định 24/10 (Vu) và cache sẵn
 
-**baophutho.vn, marker base64 (Vu 23/10).** Khối base64 có ở 21/61 doc, bắt đầu ở 0,1–0,4% body và chiếm 79–95% body. Đó là trang lỗi trích xuất: body = `{title}\n\n{publish}\n\n{head}` (placeholder) + base64 + khung bình luận + tin khác, không có bài viết. Cắt từ base64 trở đi còn lại đúng chuỗi `{title}\n\n{publish}\n\n{head}`. Đã cài theo yêu cầu (bật mặc định khi ghép); chunk của 21 doc này sai dù cắt hay không.
+- **Nền ghép: EF2-cut-p4b** (đã có LB). Không dựng EF2-cut-avg; cache EF2 cũ (chưa có thin) dời sang `compose/superseded-nothin-20261024/`.
+- **Thin** (bật mặc định, `--no-thin` để tắt): carrier baophutho.vn có chunk chỉ gồm placeholder (`{title}`…) trước dòng base64 thì mất chunk, chunk chuyển cho doc kế tiếp theo **thứ tự toàn cục của bộ chọn t_c S31** (P4B giảm dần, rồi query, rồi rank; Vu chọn 24/10) trong số doc chưa mang chunk mà có nguồn chunk như builder S29 (chunk P1 của query → chunk P1 đầu tiên của doc → body span của doc có chunk canonical / doc lô Pharmacity). Kiểm độ trung thực: dựng lại nguồn S29 cho 175.548 carrier của EF2-cut-p4b ra **trùng từng byte cả 175.548** (body 79.844, P1 cùng query 57.052, P1 bất kỳ 38.652); 749/772 doc có P4B ≥ t_c mà không mang chunk đúng là không có nguồn, 23 còn lại hoà đúng t_c.
+- Trên EF2-cut-p4b: 24 carrier thin (20 doc) bị bỏ chunk; 24 doc nhận thay (23 doc hoà đúng t_c 0,087564, 1 doc P4B 0,086942), nguồn: P1 bất kỳ 10, body 9, P1 cùng query 5 (chi tiết `compose/EF2-cut-p4b-<rule>.swap.json`). t_c thực tế 0,087564 → 0,086942; tổng chunk giữ 175.548.
+- **Quy tắc kết hợp `clean+cap2048`** (chuẩn bị, chờ Vu): clean trước (cùng marker), rồi cap2048 trên body đã cắt (cửa sổ 2.048 quanh chunk t256 tốt nhất khi body đã cắt vẫn > 2.048 token).
+- **Chưa chạy ghép**: chờ Vu báo quy tắc thắng. Khi có: `scripts/s38/compose.sh EF2-cut-p4b <clean|cap2048|full+w768|clean+cap2048>` (cache có sẵn, chỉ còn ghi ZIP + validator; full+w768 thêm các vòng tìm T).
+- **Cổng hồi quy sau khi thêm thin / clean+cap2048** (`--no-thin`, J3-thrC): cache clean và cap2048 trùng hệt cache cổng trước (đã khớp JSON SHA CH-clean, CH-cap2048), nên JSON không đổi.
+
+| Cache (EF2-cut-p4b, có thin) | Carrier | Carrier đổi | prepare | Ghi chú |
+|---|---:|---:|---:|---|
+| EF2-cut-p4b-clean | 175.548 | 25.232 | 93 s | nhathuoclongchau 21.028, tamanhhospital 2.302, youmed 1.389, a-hospital 460, baophutho 53 |
+| EF2-cut-p4b-cap2048 | 175.548 | 8.501 | 506 s | |
+| EF2-cut-p4b-full+w768 | 175.548 | 37.355 | 435 s | T ước lượng 1.917 (ứng viên 1.908, 1.917, 1.929; ngân sách 1.155.104 B theo ZIP nền) |
+| EF2-cut-p4b-clean+cap2048 | 175.548 | 31.142 | 419 s | cắt như clean; mọi body tamanhhospital không định vị được đều định vị được sau khi cắt |
+
+**baophutho.vn, marker base64 (Vu 23/10).** Khối base64 có ở 21/61 doc, bắt đầu ở 0,1–0,4% body và chiếm 79–95% body. Đó là trang lỗi trích xuất: body = `{title}\n\n{publish}\n\n{head}` (placeholder) + base64 + khung bình luận + tin khác, không có bài viết. Cắt từ base64 trở đi còn lại đúng chuỗi `{title}\n\n{publish}\n\n{head}`. Ngày 24/10 Vu chọn coi các doc này là thin (xem trên); cắt base64 vẫn còn trong clean nhưng không còn chạm doc nào của EF2-cut-p4b.
 
 ## Bước 5: judge 0,6B chunk-level cho chunk t256 chưa chấm (chuẩn bị; Vu hoãn hẳn, không chạy)
 

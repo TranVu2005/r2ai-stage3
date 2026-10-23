@@ -1,18 +1,25 @@
-"""S38 CH-win<W>: one contiguous window of at most W BGE-M3 tokens of the body around the best t256 chunk.
+"""S38 body-cut variants: windows / prefixes of the J3-thrC body (BGE-M3 tokens), see ``SPECS``.
 
-``python -m r2ai.s38.window [--width 384 --width 768]`` (CPU, after ``score select --variant CH-t256-1``)
--> ``out/runs/s38-chunk-metric-v2/scores/windows.parquet`` + ``windows.json``
+``python -m r2ai.s38.window --variant CH-pre1024 --variant CH-cap2048 --variant CH-full+w768`` (CPU, after
+``score select --variant CH-t256-1``) -> ``out/runs/s38-chunk-metric-v2/scores/windows.parquet`` (rows of other
+variants kept; ``text`` null = the J3 chunk unchanged), ``windows.json``, ``bodies.parquet``, ``host_bodies.json``.
 
-Per J3-thrC carrier (Vu, 23/10):
+Per J3-thrC carrier:
 * body = the J3-thrC chunk text of the carrier (the whole body it shipped); located verbatim in the carrier's
   canonical doc_text. Not found (old P1 text): the canonical body span (answer span, else body span; zh: doc_text).
-* body <= W tokens (raw BGE-M3, no special tokens): the J3 chunk text unchanged.
-* longer: W consecutive tokens centred on the CH-t256-1 chunk (clamped inside the body), then cut on sentence
-  boundaries when possible: the start moves forward to the next sentence start and the end back to the last
-  sentence end, each by at most W/4 tokens and never into the chunk. Boundaries: after . ! ? … ; : followed by
-  whitespace (the chunker's rule), after 。！？；, and at line breaks. Leading/trailing whitespace is stripped,
-  so a window never exceeds W tokens.
-Also reports the body length distribution of the carriers (share <= 384, <= 768, > 768 tokens).
+  Body length = raw BGE-M3 tokens, no special tokens.
+* CH-win<W>: body <= W tokens keeps its J3 chunk, else a W-token window around the best t256 chunk.
+* CH-pre1024: body <= 1,024 tokens keeps its J3 chunk, else its first 1,024 tokens, the end moved back to the
+  last sentence end (at most 256 tokens).
+* CH-cap2048: body <= 2,048 tokens keeps its J3 chunk, else a 2,048-token window around the best t256 chunk.
+* CH-full+w768: body <= 1,536 tokens keeps its J3 chunk; else two chunks: the J3 chunk and a 768-token window
+  around the best t256 chunk.
+Window: W consecutive tokens centred on the CH-t256-1 chunk (clamped inside the body), then cut on sentence
+boundaries when possible: the start moves forward to the next sentence start and the end back to the last
+sentence end, each by at most W/4 tokens and never into the chunk. Boundaries: after . ! ? … ; : followed by
+whitespace (the chunker's rule), after 。！？；, and at line breaks. Leading/trailing whitespace is stripped.
+``--hosts`` (offline report): body length per host and, for the 10 hosts with the longest median body, the
+last 300 characters of one median-length body.
 """
 from __future__ import annotations
 
@@ -30,9 +37,19 @@ from r2ai import paths
 from r2ai.s38.score import scores_dir
 from r2ai.s38.sources import J3_JSON_SHA256, J3_ZIP, _atomic_json, _atomic_parquet, describe, read_bundle, run_root
 
-WIDTHS = (384, 768)
 SENT_END = re.compile(r"[.!?…;:](?=\s)|[。！？；]")
 BREAK = re.compile(r"\n+")
+# variant -> (rule, width W, threshold T): a body of <= T tokens keeps its J3 chunk
+SPECS = {
+    "CH-win384": ("window", 384, 384),
+    "CH-win768": ("window", 768, 768),
+    "CH-pre1024": ("prefix", 1024, 1024),
+    "CH-cap2048": ("window", 2048, 2048),
+    "CH-full+w768": ("full+window", 768, 1536),
+}
+TOP_HOSTS = 10
+TAIL_CHARS = 300
+HOST_MIN_CARRIERS = 50
 
 
 def boundaries(text: str) -> tuple[np.ndarray, np.ndarray]:
@@ -90,6 +107,31 @@ def window(text: str, offsets: Sequence[tuple[int, int]], chunk: tuple[int, int]
     return {"start": a2, "end": b2, "mode": "window", "tokens": None, "snap_start": bool(snap_a), "snap_end": bool(snap_b)}
 
 
+def prefix(text: str, offsets: Sequence[tuple[int, int]], width: int) -> dict[str, Any]:
+    """The first ``width`` tokens of ``text``; the end moves back to the last sentence end (at most width/4 tokens)."""
+    n = len(offsets)
+    if n <= width:
+        return {"start": 0, "end": len(text), "mode": "whole", "snap_start": False, "snap_end": False}
+    ends_tok = np.array([e for _, e in offsets])
+    b = int(ends_tok[width - 1])
+    b_min = int(ends_tok[max(width - 1 - width // 4, 0)])
+    _, sent_ends = boundaries(text)
+    e_ok = sent_ends[(sent_ends <= b) & (sent_ends >= b_min)]
+    b2 = int(e_ok[-1]) if len(e_ok) else b
+    piece = text[:b2]
+    return {"start": len(piece) - len(piece.lstrip()), "end": len(piece.rstrip()), "mode": "prefix",
+            "snap_start": False, "snap_end": bool(len(e_ok))}
+
+
+def pieces_for(rule: str, width: int, threshold: int, body: str, offsets, chunk) -> list[tuple | None]:
+    """Chunks of one carrier: ``None`` = the J3 chunk unchanged, else (mode, start, end, snap_start, snap_end)."""
+    if len(offsets) <= threshold:
+        return [None]
+    res = prefix(body, offsets, width) if rule == "prefix" else window(body, offsets, chunk, width)
+    span = (res["mode"], res["start"], res["end"], res["snap_start"], res["snap_end"])
+    return [None, span] if rule == "full+window" else [span]
+
+
 def _body_span(doc_text: str, lang: str, spans: pd.DataFrame) -> tuple[int, int]:
     """Canonical body span as ``r2ai.s29.build._body_span`` (answer span, else body span; zh: the doc_text)."""
     if lang == "zh" or spans.empty:
@@ -101,14 +143,19 @@ def _body_span(doc_text: str, lang: str, spans: pd.DataFrame) -> tuple[int, int]
     return 0, len(doc_text)
 
 
-def build_windows(out: Path, widths: Sequence[int]) -> dict[str, Any]:
+def _changed_share(frame: pd.DataFrame, key: str) -> dict[str, dict[str, float]]:
+    g = frame.groupby(key).changed.agg(["mean", "size"])
+    return {str(k): {"changed": float(r["mean"]), "carriers": int(r["size"])} for k, r in g.iterrows()}
+
+
+def build_windows(out: Path, variants: Sequence[str]) -> dict[str, Any]:
     started = time.monotonic()
     rows = read_bundle(paths.OUT_DIR / J3_ZIP, J3_JSON_SHA256)
     src = run_root() / "sources"
-    docs = pd.read_parquet(src / "docs.parquet", columns=["doc_id", "owner", "text_doc", "lang"])
+    docs = pd.read_parquet(src / "docs.parquet", columns=["doc_id", "owner", "text_doc", "lang", "host"])
     pieces = pd.read_parquet(src / "pieces.parquet", columns=["doc_id", "kind", "field", "char_start", "char_end"])
     sel = pd.read_parquet(scores_dir() / "selection.parquet")
-    best = sel[sel.variant == "CH-t256-1"].set_index(["query_id", "doc_id"]).piece_row
+    best = sel[sel.variant == "CH-t256-1"].set_index(["query_id", "doc_id"]).piece_row.to_dict()
     t256 = pieces[pieces.kind == "t256"]
     canonical = paths.DATA_DIR / "canonical-20261018"
     import pyarrow.parquet as pq
@@ -118,7 +165,9 @@ def build_windows(out: Path, widths: Sequence[int]) -> dict[str, Any]:
     doc_text = dict(zip(dt["doc_id"].to_pylist(), dt["doc_text"].to_pylist()))
     del dt
     info = docs.set_index("doc_id")
+    text_doc, lang_of, host_of = info.text_doc.to_dict(), info.lang.to_dict(), info.host.to_dict()
     spans_by_doc = {d: g for d, g in t256.groupby("doc_id", sort=False)}
+    p_start, p_end = pieces.char_start.to_numpy(), pieces.char_end.to_numpy()
 
     from r2ai.gold_check.gold_check_common import load_tokenizer
 
@@ -126,13 +175,13 @@ def build_windows(out: Path, widths: Sequence[int]) -> dict[str, Any]:
     carriers = [(int(r["id"]), int(c["doc_id"]), c["chunk_text"]) for r in rows for c in r["relevant_chunks"]]
     del rows
     out_rows: list[dict[str, Any]] = []
+    body_rows: list[dict[str, Any]] = []
     stats = {"located": 0, "fallback_body": 0, "chunk_outside_body": 0, "no_t256_choice": 0}
-    body_tokens = np.zeros(len(carriers), dtype=np.int64)
     for begin in range(0, len(carriers), 5_000):
         part = carriers[begin:begin + 5_000]
         bodies, base = [], []
         for qid, d, j3 in part:
-            text = doc_text[int(info.at[d, "text_doc"])] or ""
+            text = doc_text[int(text_doc[d])] or ""
             at = text.find(j3)
             if at >= 0:
                 stats["located"] += 1
@@ -140,70 +189,124 @@ def build_windows(out: Path, widths: Sequence[int]) -> dict[str, Any]:
                 base.append((at, True))
             else:
                 stats["fallback_body"] += 1
-                s, e = _body_span(text, str(info.at[d, "lang"]), spans_by_doc.get(d, t256.iloc[:0]))
+                s, e = _body_span(text, str(lang_of[d]), spans_by_doc.get(d, t256.iloc[:0]))
                 bodies.append(text[s:e])
                 base.append((s, False))
         enc = tok(bodies, add_special_tokens=False, return_offsets_mapping=True)
         for k, ((qid, d, j3), body, (b0, located)) in enumerate(zip(part, bodies, base)):
             offsets = enc["offset_mapping"][k]
-            body_tokens[begin + k] = len(offsets)
-            key = (qid, d)
             chunk = None
-            if key in best.index:
-                pr = int(best.at[key])
-                cs, ce = int(pieces.char_start.iat[pr]) - b0, int(pieces.char_end.iat[pr]) - b0
+            pr = best.get((qid, d))
+            if pr is not None:
+                cs, ce = int(p_start[pr]) - b0, int(p_end[pr]) - b0
                 if ce <= 0 or cs >= len(body):
                     stats["chunk_outside_body"] += 1
                 else:
                     chunk = (max(cs, 0), min(ce, len(body)))
             else:
                 stats["no_t256_choice"] += 1
-            for w in widths:
-                res = window(body, offsets, chunk, w)
-                text_w = j3 if res["mode"] == "whole" and located else body[res["start"]:res["end"]]
-                out_rows.append({"variant": f"CH-win{w}", "query_id": qid, "doc_id": d, "text": text_w,
-                                 "mode": res["mode"], "located": located, "snap_start": res["snap_start"],
-                                 "snap_end": res["snap_end"], "body_tokens": len(offsets)})
+            body_rows.append({"query_id": qid, "doc_id": d, "lang": lang_of[d], "host": host_of[d],
+                              "body_tokens": len(offsets), "body_chars": len(j3), "located": located,
+                              "tail": j3[-TAIL_CHARS:]})
+            for name in variants:
+                rule, width, threshold = SPECS[name]
+                for rank, span in enumerate(pieces_for(rule, width, threshold, body, offsets, chunk), 1):
+                    if span is None or (span[0] == "whole" and located):
+                        out_rows.append({"variant": name, "query_id": qid, "doc_id": d, "rank": rank, "text": None,
+                                         "mode": "j3", "snap_start": False, "snap_end": False})
+                    else:
+                        mode, a, b, sa, sb = span
+                        out_rows.append({"variant": name, "query_id": qid, "doc_id": d, "rank": rank,
+                                         "text": body[a:b], "mode": mode, "snap_start": sa, "snap_end": sb})
     frame = pd.DataFrame(out_rows)
-    lens = []
-    texts = frame.text.tolist()
-    for begin in range(0, len(texts), 20_000):
-        lens += [len(x) for x in tok(texts[begin:begin + 20_000], add_special_tokens=False)["input_ids"]]
-    frame["tokens"] = np.array(lens, dtype=np.int32)
-    _atomic_parquet(frame, out / "windows.parquet")
-    bt = body_tokens
-    report = {"carriers": len(carriers), **stats,
-              "body_tokens": describe(bt),
-              "body_share_le_384": float((bt <= 384).mean()), "body_share_le_768": float((bt <= 768).mean()),
-              "body_share_gt_768": float((bt > 768).mean()),
-              "body_share_by_lang": {lang: {"le_384": float((bt[m] <= 384).mean()), "le_768": float((bt[m] <= 768).mean()),
-                                            "n": int(m.sum())}
-                                     for lang in ("vi", "zh")
-                                     for m in [np.array([info.at[d, "lang"] == lang for _, d, _ in carriers])]},
-              "variants": {}}
-    for w in widths:
-        sub = frame[frame.variant == f"CH-win{w}"]
-        win = sub[sub["mode"] == "window"]
-        report["variants"][f"CH-win{w}"] = {
-            "chunks": len(sub), "whole_body": int((sub["mode"] == "whole").sum()), "windowed": len(win),
-            "tokens": describe(sub.tokens), "tokens_windowed": describe(win.tokens),
-            "over_width": int((sub.tokens > w).sum()),
-            "snap_start_share": float(win.snap_start.mean()) if len(win) else None,
-            "snap_end_share": float(win.snap_end.mean()) if len(win) else None}
+    bodies_f = pd.DataFrame(body_rows)
+    has = frame.text.notna().to_numpy()
+    texts = frame.text[has].tolist()
+    got: list[int] = []
+    for b in range(0, len(texts), 20_000):
+        got += [len(x) for x in tok(texts[b:b + 20_000], add_special_tokens=False)["input_ids"]]
+    frame = frame.merge(bodies_f[["query_id", "doc_id", "body_tokens", "located", "lang", "host"]], on=["query_id", "doc_id"], how="left")
+    tokens = frame.body_tokens.to_numpy().copy()
+    has = frame.text.notna().to_numpy()                      # same rows, merge keeps the left order
+    tokens[has] = got
+    frame["tokens"] = tokens.astype(np.int32)
+
+    report = json.loads((out / "windows.json").read_text(encoding="utf-8")) if (out / "windows.json").exists() else {}
+    bt = bodies_f.body_tokens.to_numpy()
+    report.update({"carriers": len(carriers), **stats, "body_tokens": describe(bt),
+                   "body_share_le": {str(w): float((bt <= w).mean()) for w in (384, 768, 1024, 1536, 2048)}})
+    report.setdefault("variants", {})
+    top_hosts = bodies_f.host.value_counts().head(TOP_HOSTS).index.tolist()
+    for name in variants:
+        sub = frame[frame.variant == name]
+        rule, width, threshold = SPECS[name]
+        sub = sub.assign(new=sub["mode"] != "j3")
+        per = sub.groupby(["query_id", "doc_id"], sort=False).agg(changed=("new", "any"), lang=("lang", "first"),
+                                                                  host=("host", "first")).reset_index()
+        new = sub[sub.new]
+        report["variants"][name] = {
+            "rule": rule, "width": width, "threshold_tokens": threshold, "chunks": len(sub),
+            "carriers_changed": int(per.changed.sum()), "carriers_changed_share": float(per.changed.mean()),
+            "docs_changed_share": float(per.groupby("doc_id").changed.max().mean()),
+            "changed_by_lang": _changed_share(per, "lang"),
+            "changed_top_hosts": _changed_share(per[per.host.isin(top_hosts)], "host"),
+            "tokens_all": describe(sub.tokens), "tokens_new_chunks": describe(new.tokens),
+            "over_width": int((new.tokens > width).sum()),
+            "snap_end_share": float(new.snap_end.mean()) if len(new) else None,
+            "new_chunks_from_fallback_body": int((~new.located).sum()),
+        }
+    target = out / "windows.parquet"
+    keep = ["variant", "query_id", "doc_id", "rank", "text", "mode", "snap_start", "snap_end", "tokens", "body_tokens"]
+    frame = frame[keep]
+    if target.exists():
+        old = pd.read_parquet(target)
+        frame = pd.concat([old[~old.variant.isin(variants)], frame], ignore_index=True)
+    _atomic_parquet(frame, target)
+    _atomic_parquet(bodies_f, out / "bodies.parquet")
     report["seconds"] = round(time.monotonic() - started, 1)
     _atomic_json(out / "windows.json", report)
     return report
 
 
+def host_report(out: Path) -> dict[str, Any]:
+    """Body length per host for the carriers; the TOP_HOSTS hosts (>= HOST_MIN_CARRIERS carriers) with the longest
+    median body, each with the last TAIL_CHARS characters of its median-length body."""
+    bodies = pd.read_parquet(out / "bodies.parquet")
+    g = bodies.groupby("host").body_tokens
+    table = pd.DataFrame({"carriers": g.size(), "docs": bodies.groupby("host").doc_id.nunique(),
+                          "p10": g.quantile(0.1), "median": g.median(), "p90": g.quantile(0.9), "max": g.max(),
+                          "share_gt_1024": g.apply(lambda x: float((x > 1024).mean())),
+                          "lang": bodies.groupby("host").lang.agg(lambda x: x.mode().iat[0])})
+    table = table.sort_values("carriers", ascending=False)
+    longest = table[table.carriers >= HOST_MIN_CARRIERS].sort_values("median", ascending=False).head(TOP_HOSTS)
+    examples = {}
+    for host, row in longest.iterrows():
+        sub = bodies[bodies.host == host].drop_duplicates("doc_id")
+        pick = sub.iloc[int(np.argmin(np.abs(sub.body_tokens.to_numpy() - row["median"])))]
+        examples[host] = {"doc_id": int(pick.doc_id), "body_tokens": int(pick.body_tokens), "tail": str(pick["tail"])}
+    report = {"hosts": int(len(table)), "min_carriers_for_longest": HOST_MIN_CARRIERS,
+              "top_hosts_by_carriers": json.loads(table.head(20).reset_index().to_json(orient="records")),
+              "longest_median": json.loads(longest.reset_index().to_json(orient="records")), "tail_examples": examples}
+    _atomic_parquet(table.reset_index(), out / "host_bodies.parquet")
+    _atomic_json(out / "host_bodies.json", report)
+    return report
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--width", type=int, action="append", default=None)
+    parser.add_argument("--variant", action="append", choices=list(SPECS), default=None)
+    parser.add_argument("--hosts", action="store_true", help="only the per-host body report (needs bodies.parquet)")
     args = parser.parse_args(argv)
     out = scores_dir()
-    for name in ("windows.parquet", "windows.parquet.tmp", "windows.json", "windows.json.tmp"):
+    for name in ("windows.parquet", "windows.json", "bodies.parquet", "host_bodies.parquet", "host_bodies.json"):
         paths.assert_writable(out / name)
-    report = build_windows(out, args.width or list(WIDTHS))
-    print(json.dumps(report, ensure_ascii=False, indent=1))
+        paths.assert_writable(out / (name + ".tmp"))
+    if not args.hosts:
+        variants = args.variant or ["CH-win768", "CH-win384"]
+        report = build_windows(out, variants)
+        print(json.dumps({k: v for k, v in report.items() if k != "variants"}, ensure_ascii=False, indent=1))
+        print(json.dumps({k: report["variants"][k] for k in variants}, ensure_ascii=False, indent=1))
+    print(json.dumps(host_report(out), ensure_ascii=False, indent=1))
     return 0
 
 

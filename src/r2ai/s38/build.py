@@ -26,21 +26,23 @@ import pandas as pd
 from r2ai import paths
 from r2ai.compose.base_io import lzma_dictionary
 from r2ai.s38.score import VARIANTS, scores_dir
+from r2ai.s38.window import SPECS
 from r2ai.s38.sources import (J3_JSON_SHA256, J3_ZIP, J3_ZIP_SHA256, _atomic_json, _sha256, describe, read_bundle,
                               run_root)
 
 CEILING = 102_600_000
-WINDOW_VARIANTS = ("CH-win768", "CH-win384")
+WINDOW_VARIANTS = tuple(SPECS)
 ALL_VARIANTS = (*WINDOW_VARIANTS, *VARIANTS)
 MEMBER_DATE = (2026, 10, 23, 0, 0, 0)
 
 
 def replace_chunks(row: dict[str, Any], chosen: dict[tuple[int, int], list[str]]) -> dict[str, Any]:
-    """J3 row with every chunk replaced by the chosen texts of its (query, doc); a carrier without choice (no
-    submittable piece) keeps its J3 chunk, so the chunk-carrying docs stay those of J3-thrC."""
+    """J3 row with every chunk replaced by the chosen texts of its (query, doc); ``None`` in the list, or a carrier
+    without choice (no submittable piece), keeps its J3 chunk, so the chunk-carrying docs stay those of J3-thrC."""
     qid = int(row["id"])
     chunks = [{"doc_id": int(c["doc_id"]), "chunk_text": t}
-              for c in row["relevant_chunks"] for t in chosen.get((qid, int(c["doc_id"])), [c["chunk_text"]])]
+              for c in row["relevant_chunks"]
+              for t in (x if x is not None else c["chunk_text"] for x in chosen.get((qid, int(c["doc_id"])), [None]))]
     return {"id": qid, "relevant_docs": [int(d) for d in row["relevant_docs"]], "relevant_chunks": chunks}
 
 
@@ -84,8 +86,12 @@ def build(out: Path, variants: Sequence[str], lengths_full: bool) -> dict[str, A
     rows = read_bundle(zip_path, J3_JSON_SHA256)
     sel = pd.read_parquet(scores_dir() / "selection.parquet")
     pieces = pd.read_parquet(run_root() / "sources" / "pieces.parquet", columns=["text"])
-    windows = (pd.read_parquet(scores_dir() / "windows.parquet", columns=["variant", "query_id", "doc_id", "text"])
-               if any(v in WINDOW_VARIANTS for v in variants) else None)
+    windows = None
+    if any(v in WINDOW_VARIANTS for v in variants):
+        windows = pd.read_parquet(scores_dir() / "windows.parquet")
+        windows = windows[windows.variant.isin(variants)]
+        windows["rank"] = windows["rank"].fillna(1) if "rank" in windows else 1
+        windows = windows.sort_values(["variant", "query_id", "doc_id", "rank"], kind="stable")
     from r2ai.gold_check.gold_check_common import load_tokenizer
 
     tok = load_tokenizer()
@@ -102,7 +108,7 @@ def build(out: Path, variants: Sequence[str], lengths_full: bool) -> dict[str, A
         if name in WINDOW_VARIANTS:
             win = windows[windows.variant == name]
             for qid, did, t in zip(win.query_id.astype(int), win.doc_id.astype(int), win.text):
-                chosen.setdefault((qid, did), []).append(t)
+                chosen.setdefault((qid, did), []).append(None if t is None or t != t else t)
         else:
             pick = sel[sel.variant == name].sort_values(["query_id", "doc_id", "rank"])
             text = pieces.text.to_numpy()
@@ -120,9 +126,14 @@ def build(out: Path, variants: Sequence[str], lengths_full: bool) -> dict[str, A
         entry = {"zip": str(target), "zip_bytes": target.stat().st_size, "zip_sha256": _sha256(target), **res,
                  "docs": sum(len(r["relevant_docs"]) for r in new_rows), "chunks": len(texts),
                  "carriers_j3": carriers, "carriers_kept_j3_chunk": carriers - len(chosen),
+                 "carriers_changed": sum(any(t is not None for t in v) for v in chosen.values()),
                  "chunks_per_query": describe([len(r["relevant_chunks"]) for r in new_rows]),
                  "docs_equal_j3": all(a["relevant_docs"] == b["relevant_docs"] for a, b in zip(rows, new_rows)),
-                 "under_ceiling": target.stat().st_size < CEILING, **length_report(texts, tok)}
+                 "under_ceiling": target.stat().st_size < CEILING}
+        if name in WINDOW_VARIANTS:     # token counts from r2ai.s38.window (raw BGE-M3), no re-tokenisation
+            entry.update({"chars": describe([len(t) for t in texts]), "tokens_raw": describe(win.tokens)})
+        else:
+            entry.update(length_report(texts, tok))
         report["variants"][name] = entry
         print(json.dumps({name: {k: entry[k] for k in ("chunks", "zip_bytes", "zip_sha256")}}), flush=True)
     report["seconds"] = round(time.monotonic() - started, 1)

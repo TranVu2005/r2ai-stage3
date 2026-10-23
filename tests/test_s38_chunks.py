@@ -134,7 +134,7 @@ def test_replace_chunks_keeps_docs_and_order():
 # ---- CH-win ---------------------------------------------------------------------------------------------------
 import re as _re
 
-from r2ai.s38.window import boundaries, window
+from r2ai.s38.window import boundaries, pieces_for, prefix, window
 
 
 def ws_offsets(text):
@@ -186,3 +186,30 @@ def test_window_without_boundaries_keeps_token_cut():
 def test_boundaries_zh_and_breaks():
     s, e = boundaries('甲乙。丙丁！\n戊')
     assert 3 in s and 3 in e and 7 in s and 6 in e
+
+
+def test_prefix_cuts_head_on_sentence_end():
+    text = sentences(40)
+    offs = ws_offsets(text)
+    res = prefix(text, offs, 64)
+    piece = text[res['start']:res['end']]
+    assert res['start'] == 0 and piece.endswith('end.') and 48 <= len(piece.split()) <= 64 and res['snap_end']
+    assert prefix(text, offs, 400)['mode'] == 'whole'
+
+
+def test_pieces_for_rules():
+    text = sentences(40)
+    offs = ws_offsets(text)
+    chunk = (text.index('s20w0'), text.index('s21end.') + 7)
+    assert pieces_for('window', 64, 400, text, offs, chunk) == [None]          # body <= threshold
+    one = pieces_for('window', 64, 64, text, offs, chunk)
+    assert len(one) == 1 and one[0][0] == 'window'
+    two = pieces_for('full+window', 64, 150, text, offs, chunk)
+    assert two[0] is None and two[1][0] == 'window' and (two[1][1], two[1][2]) != (0, len(text))
+    assert pieces_for('full+window', 64, 400, text, offs, chunk) == [None]
+
+
+def test_replace_chunks_none_keeps_j3_chunk():
+    row = {'id': 5, 'relevant_docs': [9, 3], 'relevant_chunks': [{'doc_id': 3, 'chunk_text': 'whole 3'}]}
+    out = replace_chunks(row, {(5, 3): [None, 'w']})
+    assert out['relevant_chunks'] == [{'doc_id': 3, 'chunk_text': 'whole 3'}, {'doc_id': 3, 'chunk_text': 'w'}]

@@ -57,7 +57,33 @@ Validator S26 (`scripts/s26/validate_pa3.py`): thêm `--max-chunks-per-doc N` (m
 
 **Thứ tự nộp (Vu):** CH-win768 → CH-win384 → CH-sec-1 → CH-t256-1. Mốc 0,3594.
 
-## Bước 5: judge 0,6B chunk-level cho chunk t256 chưa chấm (chuẩn bị, chưa chạy)
+## Điểm LB lượt 1 (Vu, 23/10, metric mới, doc J3-thrC)
+
+Chunk F2: **CH-win768 0,3433 · CH-win384 0,1805 · CH-sec-1 0,0904**; nguyên body (K4-thr-C) 0,3594. Kết luận của Vu: gold chunk dài (phần lớn > ~1.000 token), nguyên body tốt nhất; bỏ chunk ngắn (CH-t256-*, CH-t128-1 không nộp), **hoãn hẳn bước 5** (job judge giữ ở dạng chuẩn bị, không chạy).
+
+## Lượt 2: cắt body dài (CPU, chưa nộp)
+
+`python -m r2ai.s38.window --variant CH-pre1024 --variant CH-cap2048 --variant CH-full+w768` rồi `python -m r2ai.s38.build` cùng ba tên. Carrier không đổi giữ nguyên chunk J3-thrC (byte), nên phần còn lại giống CH-full.
+
+- **CH-pre1024**: body > 1.024 token → 1.024 token đầu body, cuối lùi về cuối câu (tối đa 256 token; cắt theo câu ở 99,9% bản bị cắt); còn lại nguyên body.
+- **CH-cap2048**: body > 2.048 token → cửa sổ 2.048 token quanh chunk t256 tốt nhất (cách cắt như CH-win); còn lại nguyên body.
+- **CH-full+w768**: body > 1.536 token → 2 chunk: nguyên body + cửa sổ 768 quanh chunk t256 tốt nhất (luôn khác body); còn lại 1 chunk nguyên body. Validator `--max-chunks-per-doc 2`.
+
+Body của carrier: ≤ 1.024 51,1% · ≤ 1.536 78,6% · ≤ 2.048 95,1%.
+
+| Bản | Chunk | Carrier đổi | % carrier đổi (vi / zh) | % doc đổi | Token TB / median / max | ZIP B | ZIP SHA256 | JSON SHA256 | Validator S26 |
+|---|---:|---:|---|---:|---|---:|---|---|---|
+| **CH-pre1024** | 175.148 | 85.622 | 48,9% (56,1% / 11,9%) | 47,0% | 767 / 973 / 1.025 | 71.823.922 | `5e827c71fdce15e71ff6b161b780df029daf320127f7e68d76b69536954d21d6` | `c699214b…9e3c` | ok, 0 lỗi |
+| **CH-cap2048** | 175.148 | 8.500 | 4,9% (5,3% / 2,6%) | 4,8% | 1.019 / 999 / 2.049 | 97.778.445 | `113f9a28ec0a307600e88f336ea86c892d3159c3bba2c16c5c097a23a07e04e3` | `1884a6ca…a3c2` | ok, 0 lỗi |
+| CH-full+w768 | 212.582 | 37.434 | 21,4% (24,6% / 4,9%) | 20,6% | 1.001 / 780 / 23.442 | **104.802.138** | `20a9a78c…fd96` | `bf82d6c2…f335` | **lỗi `zip_over_ceiling`** (trần nội bộ 102.600.000 B; dưới trần BTC 104.857.600 B 55.462 B) |
+
+Token = BGE-M3 thô của từng chunk (chunk giữ nguyên tính bằng độ dài body). Vượt W đúng 1 token khi token hoá lại: pre1024 13, cap2048 7, full+w768 12 chunk. Carrier có body không định vị được trong doc_text (1.842) mà bị cắt thì lấy đoạn từ span body canonical: pre1024 1.814, cap2048 243, full+w768 983 chunk.
+
+**% carrier đổi theo 10 host nhiều carrier nhất** (pre1024 / cap2048 / full+w768): suckhoedoisong.vn 47,1 / 2,4 / 11,3 · nhathuoclongchau.com.vn 90,3 / 7,4 / 53,7 · thanhnien.vn 12,4 / 0,4 / 1,5 · medlatec.vn 99,1 / 2,3 / 34,0 · vinmec.com 56,2 / 10,9 / 30,7 · ask.39.net 0,6 / 0,1 / 0,2 · suckhoecongdongonline.vn 25,6 / 2,1 / 6,9 · tiemchunglongchau.com.vn 97,5 / 17,1 / 64,2 · 120ask.com 6,2 / 1,3 / 2,7 · cnkang.com 16,6 / 2,9 / 6,8.
+
+Độ dài body theo host (offline) và đuôi 300 ký tự của 10 host có body trung vị dài nhất: `reports/s38-host-bodies.md` (`python -m r2ai.s38.window --hosts`).
+
+## Bước 5: judge 0,6B chunk-level cho chunk t256 chưa chấm (chuẩn bị; Vu hoãn hẳn, không chạy)
 
 `python -m r2ai.s38.judge_prep` → `out/runs/s38-chunk-metric-v2/judge-pool/` (layout shard S32, prompt/instruction S29). Doc nhận chunk có 1.260.431 chunk t256 (mọi field), S32 đã chấm 519.343 → còn 741.088; chỉ xuất answer/body: **670.779 cặp** (body 663.310, answer 7.469; vi 631.573, zh 39.206) ở 138.533 carrier (TB 4,8 cặp/carrier), prompt TB 334 token (S32: 285), 2 chunk cắt về 512 token. **ETA GPU local (RTX 3050 6 GB, HF bf16, 25,5 cặp/s đo ở S32): 7,3 h; quy theo độ dài prompt 8,6 h**, nếu GPU không chia với job khác. Lệnh: `python -m r2ai.s31.judge_score score --pool out/runs/s38-chunk-metric-v2/judge-pool --out out/runs/s38-chunk-metric-v2/judge-gpu --model qwen3-reranker-0.6b --subset all`.
 

@@ -75,14 +75,15 @@ Rồi chạy pipeline local (mục 6).
 ## 6. Pipeline local cho mỗi lô
 
 ```bash
-python -m r2ai.s37.ingest batch out/runs/s37/pulled/batch-0001.tar      # CPU: sha256 -> extract -> segment -> chunk t256; xong ở trạng thái waiting_gpu
+python -m r2ai.s37.ingest batch out/runs/s37/pulled/batch-0001.tar      # CPU: sha256 -> extract -> segment -> chunk; xong ở trạng thái waiting_gpu
 python -m r2ai.s37.ingest status                                         # lô nào đang chờ GPU, GPU có rảnh không
-python -m r2ai.s37.ingest embed                                          # khi GPU rảnh: BGE-M3 doc-level + báo cặp lọt top-211
+python -m r2ai.s37.ingest embed                                          # CHỈ khi Vu duyệt và GPU rảnh: vector doc + chunk, cặp lọt pool, C-max
 ```
 
-- `batch` mặc định `--device defer`: extract (extractor 120ask hiện có, giữ doc ≥ 50 chữ Hán), segment `seg37NNN` trong `data/s37_120ask/`, chunk t256 bằng chunker canonical (CPU, để C-max chấm được sau này). Không nhúng.
-- `embed` (cuda) từ chối chạy khi GPU bận (util > 10% hoặc < 3.072 MiB trống), segment giữ `waiting_gpu`. `--device cpu` chỉ để kiểm thông lô đầu.
-- Kết quả: `out/runs/s37/pairs_new.parquet` (cặp cần chấm 4B / Jina / C-max), `docs_need_scoring.parquet`, `report.json`. Chưa chấm gì; điểm chấm sẽ gộp ở bước dựng FUSE cuối.
+- `batch` (mặc định `--device defer`) giữ cấu trúc hỏi–đáp: `doc_text` = title + question + các answer theo thứ tự trang. Doc dưới ngưỡng (< 200 code point và < 50 chữ Hán) gắn `thin`, vẫn ghi vào docs.
+- Segment canonical riêng `data/s37_120ask/seg37NNN-s37-bNNNN-120ask.com/`: `docs.parquet`, `provenance.parquet`, `chunks_t256.parquet` (chunker canonical), `chunks_struct.parquet` (question + một answer mỗi chunk), `manifest.json` (SHA256). Không sửa canonical-20261018, không ghi index chung.
+- `embed` (cuda) từ chối khi GPU bận (util > 10% hoặc < 3.072 MiB trống); S35/S38 dùng GPU nên hỏi Vu trước. `--device cpu` chỉ để kiểm thông lô đầu. Ra: `vectors.npz` (doc), `chunk_vectors.npz` (t256 + struct), `cmax_top3.parquet`, và trong `out/runs/s37/`: `pairs_new.parquet` (schema S31 + `in_top211`, `in_pool13`, `pair_id` ≥ 1.000.000), `report.json` (số cặp theo pool top-211 / pool13 / hợp, số query bị ảnh hưởng, ETA 4B / Jina / C-max).
+- Chưa chấm gì. Điểm chấm gộp ở bước dựng FUSE cuối.
 
 ## Lưu ý vận hành
 

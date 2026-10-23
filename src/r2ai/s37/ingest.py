@@ -31,6 +31,8 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
+from r2ai.s37 import qa
+
 RUN = RUNS_DIR / 's37'
 STORE = DATA_DIR / 's37_120ask'
 CANONICAL = DATA_DIR / 'canonical-20261018' / 'docs.parquet'
@@ -43,12 +45,9 @@ URLS = RUN / 'urls.tsv'
 POOL = RUN / 'pool.npz'
 TOP = 211
 KEEP = 400                      # cosine scores kept per query in the reference pool (>= max pool13 size)
-MIN_HAN = 50
 HOST = '120ask.com'
 FIRST_SEGMENT = 37001
 EMBED_CHARS, EMBED_LEN = 4096, 512
-HAN = re.compile(r'[㐀-䶿一-鿿豈-﫿\U00020000-\U0003134f]')
-WS = re.compile(r'\s+')
 
 
 def sha256_file(p: Path) -> str:
@@ -197,14 +196,10 @@ def url_groups(path: Path = URLS) -> dict[str, list[int]]:
 
 def extract_record(rec: dict) -> dict:
     from r2ai.index.chunk import doc_layout
-    from r2ai.zh_full_ingest.extract import extract
-    doc = extract(rec['html'], HOST)
-    body = doc.body
-    r = {'title': doc.title, 'question': doc.question, 'answer': doc.answer, 'body': body, 'paragraphs': doc.paragraphs}
-    doc_text = doc_layout(r)[0]
-    clean = WS.sub(' ', body).strip()
-    return {'title': doc.title, 'doc_text': doc_text, 'body_cp': len(clean), 'han': len(HAN.findall(clean)),
-            'extractor': doc.extractor, 'layout_src': r}
+    e = qa.extract(rec['html'])
+    r = {k: e[k] for k in ('title', 'question', 'answer', 'answers', 'body', 'paragraphs')}
+    return {'title': e['title'], 'doc_text': doc_layout(r)[0], 'body_cp': e['body_cp'], 'han': e['han'], 'quality': e['quality'],
+            'extractor': e['extractor'], 'layout_src': r}
 
 
 def existing_ids() -> set[int]:
@@ -214,8 +209,10 @@ def existing_ids() -> set[int]:
     return have
 
 
-def build_docs(records: list[dict], groups: dict[str, list[int]], have: set[int], segment: str, min_han: int = MIN_HAN):
-    rows, srcs, drop = [], {}, {'no_group': 0, 'already_have': 0, 'thin': 0, 'suspect_thin': 0}
+def build_docs(records: list[dict], groups: dict[str, list[int]], have: set[int], segment: str, shards: dict | None = None,
+               tar_sha: str = ''):
+    """-> docs rows, provenance rows, drop counts, layout sources by text sha. Thin docs (< 200 cp and < 50 Han) are kept."""
+    rows, prov, srcs, drop = [], [], {}, {'no_group': 0, 'already_have': 0, 'thin_kept': 0, 'empty_body': 0}
     for rec in records:
         ids = groups.get(rec['doc_id'])
         if not ids:
@@ -226,16 +223,19 @@ def build_docs(records: list[dict], groups: dict[str, list[int]], have: set[int]
             drop['already_have'] += 1
             continue
         e = extract_record(rec)
-        if e['han'] < min_han:
-            drop['thin'] += 1
-            continue
+        drop['thin_kept'] += e['quality'] == 'thin'
+        drop['empty_body'] += e['body_cp'] == 0
         sha = hashlib.sha256(e['doc_text'].encode('utf-8')).hexdigest()
         srcs[sha] = (todo, e['layout_src'])
         for i in todo:
             rows.append({'doc_id': i, 'lang': 'zh', 'host': HOST, 'url': rec['url'], 'phys_id': todo[0], 'doc_text': e['doc_text'],
-                         'body_cp': e['body_cp'], 'han': e['han'], 'quality': 'good', 'rule': 's37', 'text_sha256': sha,
+                         'body_cp': e['body_cp'], 'han': e['han'], 'quality': e['quality'], 'rule': 's37', 'text_sha256': sha,
                          'segment': segment, 'source_path': rec['final_url']})
-    return rows, drop, srcs
+            prov.append({'doc_id': i, 'phys_id': todo[0], 'url': rec['url'], 'final_url': rec['final_url'], 'http': rec['http'],
+                         'fetched_at': float(rec['fetched_at']), 'encoding': rec['encoding'], 'extractor': e['extractor'],
+                         'n_answers': len(e['layout_src']['answers']), 'quality': e['quality'], 'text_sha256': sha,
+                         'raw_shard': (shards or {}).get(rec['doc_id']), 'tar_sha256': tar_sha, 'source': 's37-vps-sydney'})
+    return rows, prov, drop, srcs
 
 
 # ---- chunk t256 -------------------------------------------------------------------------------------------------------
@@ -243,9 +243,15 @@ def build_docs(records: list[dict], groups: dict[str, list[int]], have: set[int]
 CHUNK_TARGET = 256
 
 
-def chunk_segment(srcs: dict, segment: str, target: int = CHUNK_TARGET) -> pl.DataFrame:
-    """t256 chunks of the new docs with the canonical chunker (r2ai.index.chunk: doc_layout + chunk_paragraphs, same blob
-    filter, verbatim check). One doc per distinct text; doc_id = first id of the group, doc_ids = whole group. CPU only."""
+CHUNK_SCHEMA = {'chunk_id': pl.Int64, 'doc_id': pl.Int64, 'doc_ids': pl.List(pl.Int64), 'field': pl.String,
+                'char_start': pl.Int32, 'char_end': pl.Int32, 'text': pl.String, 'n_tokens': pl.Int32, 'segment': pl.String,
+                'has_vector': pl.Boolean}
+
+
+def chunk_segment(srcs: dict, segment: str, target: int = CHUNK_TARGET) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """-> (t256, struct). t256: the canonical chunker (r2ai.index.chunk: doc_layout + chunk_paragraphs, min body tokens 1, same
+    blob filter, verbatim check). struct: question + one answer per chunk (r2ai.s37.qa.struct_chunks). One doc per distinct text;
+    doc_id = first id of the group, doc_ids = whole group. CPU only."""
     from r2ai.gold_check.gold_check_common import load_tokenizer
     from r2ai.index.chunk import chunk_paragraphs, doc_layout, _token_counts
     tok = load_tokenizer()
@@ -257,26 +263,34 @@ def chunk_segment(srcs: dict, segment: str, target: int = CHUNK_TARGET) -> pl.Da
             v = cache[x] = len(tok(x, add_special_tokens=False)['input_ids'])
         return v
 
-    rows = []
+    t_rows, s_rows, texts = [], [], {}
     for ids, r in srcs.values():
         doc_text, spans, paras = doc_layout(r)
+        texts[ids[0]] = doc_text
         ptoks = _token_counts(tok, [doc_text[s:e] for _, s, e in paras])
         for f, s, e in list(spans) + chunk_paragraphs(doc_text, paras, ptoks, target, ntok):
-            rows.append((ids[0], ids, f, s, e, doc_text[s:e]))
-    ntoks = _token_counts(tok, [x[5] for x in rows])
-    keep = [not (nt > 1.5 * target and not any(ch.isspace() for ch in x[5])) for x, nt in zip(rows, ntoks)]
-    rows = [x for x, k in zip(rows, keep) if k]
-    ntoks = [nt for nt, k in zip(ntoks, keep) if k]
-    texts = {ids[0]: layout[0] for ids, r in srcs.values() for layout in [doc_layout(r)]}
-    bad = sum(texts[d][s:e] != t or not t.strip() for d, _, _, s, e, t in rows)
-    if bad:
-        raise AssertionError(f'{bad} chunks are not verbatim substrings')
-    return pl.DataFrame({'chunk_id': list(range(len(rows))), 'doc_id': [x[0] for x in rows], 'doc_ids': [x[1] for x in rows],
-                         'field': [x[2] for x in rows], 'char_start': [x[3] for x in rows], 'char_end': [x[4] for x in rows],
-                         'text': [x[5] for x in rows], 'n_tokens': ntoks, 'segment': segment, 'has_vector': False},
-                        schema={'chunk_id': pl.Int64, 'doc_id': pl.Int64, 'doc_ids': pl.List(pl.Int64), 'field': pl.String,
-                                'char_start': pl.Int32, 'char_end': pl.Int32, 'text': pl.String, 'n_tokens': pl.Int32,
-                                'segment': pl.String, 'has_vector': pl.Boolean})
+            t_rows.append((ids[0], ids, f, s, e, doc_text[s:e], -1))
+        for f, s, e, k in qa.struct_chunks(doc_text, r, paras, ntok, target):
+            s_rows.append((ids[0], ids, f, s, e, doc_text[s:e], k))
+
+    def frame(rows, extra=False):
+        ntoks = _token_counts(tok, [x[5] for x in rows])
+        keep = [not (nt > 1.5 * target and not any(ch.isspace() for ch in x[5])) for x, nt in zip(rows, ntoks)]
+        rows = [x for x, k in zip(rows, keep) if k]
+        ntoks = [nt for nt, k in zip(ntoks, keep) if k]
+        bad = sum(texts[d][s:e] != t or not t.strip() for d, _, _, s, e, t, _ in rows)
+        if bad:
+            raise AssertionError(f'{bad} chunks are not verbatim substrings')
+        cols = {'chunk_id': list(range(len(rows))), 'doc_id': [x[0] for x in rows], 'doc_ids': [x[1] for x in rows],
+                'field': [x[2] for x in rows], 'char_start': [x[3] for x in rows], 'char_end': [x[4] for x in rows],
+                'text': [x[5] for x in rows], 'n_tokens': ntoks, 'segment': segment, 'has_vector': False}
+        schema = dict(CHUNK_SCHEMA)
+        if extra:
+            cols['answer_idx'] = [x[6] for x in rows]
+            schema['answer_idx'] = pl.Int32
+        return pl.DataFrame(cols, schema=schema)
+
+    return frame(t_rows), frame(s_rows, extra=True)
 
 
 # ---- embed ------------------------------------------------------------------------------------------------------------
@@ -314,12 +328,42 @@ def pair_rows(pool: dict, q: np.ndarray, doc_ids: np.ndarray, vecs: np.ndarray, 
                          'segment': segment, 'batch': batch})
 
 
+PAIR_ID_BASE = 1_000_000          # S31 pair_ids are 0..433,731; S37 pairs start well above
+# measured throughputs (docs/PROGRESS.md S29/S31/S35): 4B Kaggle T4 2.87 pair/s per T4, 4B local RTX 3050 ~1.7 pair/s,
+# 0.6B local 10.9 pair/s, Jina v3.5 b10s0 17.1 s/query (~250 docs per query list)
+RATES = {'4b_kaggle_t4': 2.87, '4b_local': 1.7, 'cmax_06b_local': 10.9, 'jina_s_per_query': 17.1}
+CMAX_TOP = 3
+
+
+def eta(pairs_union: int, queries_union: int) -> dict:
+    h = lambda x: round(x / 3600, 2)
+    return {'4b_pairs': pairs_union, '4b_local_hours': h(pairs_union / RATES['4b_local']),
+            '4b_kaggle_hours_per_t4': h(pairs_union / RATES['4b_kaggle_t4']),
+            '4b_local_ok_under_15k_pairs': pairs_union < 15_000,
+            'jina_queries_to_rescore': queries_union, 'jina_hours': h(queries_union * RATES['jina_s_per_query']),
+            'cmax_chunk_pairs': pairs_union * CMAX_TOP, 'cmax_hours': h(pairs_union * CMAX_TOP / RATES['cmax_06b_local']),
+            'note': 'ETA from earlier measured rates, not re-measured on S37 pairs; no GPU job started'}
+
+
+def assign_pair_ids(pairs: pl.DataFrame) -> pl.DataFrame:
+    """Append-only (query_id, doc_id) -> pair_id registry, so ids stay stable when later batches add pairs."""
+    path = RUN / 'pair_ids.parquet'
+    reg = pl.read_parquet(path) if path.exists() else pl.DataFrame(schema={'query_id': pl.Int64, 'doc_id': pl.Int64, 'pair_id': pl.Int64})
+    new = (pairs.select('query_id', 'doc_id').join(reg.select('query_id', 'doc_id'), on=['query_id', 'doc_id'], how='anti')
+           .unique().sort('query_id', 'doc_id'))
+    if new.height:
+        start = int(reg['pair_id'].max()) + 1 if reg.height else PAIR_ID_BASE
+        reg = pl.concat([reg, new.with_columns(pl.Series('pair_id', range(start, start + new.height), dtype=pl.Int64))])
+        atomic_parquet(reg, path)
+    return pairs.join(reg, on=['query_id', 'doc_id'], how='left')
+
+
 def report(pool: dict | None = None) -> dict:
     pool = pool or build_pool()
     q_ids, q = load_queries()
     if not np.array_equal(q_ids, pool['q_ids']):
         raise ValueError('query order differs from the cached pool')
-    frames, docs, per_seg = [], [], {}
+    frames, per_seg = [], {}
     for seg_dir in sorted(STORE.glob('seg*')):
         meta = seg_meta(seg_dir)
         if meta['state'] != 'embedded':
@@ -328,19 +372,32 @@ def report(pool: dict | None = None) -> dict:
         df = pair_rows(pool, q, z['doc_id'].astype(np.int64), z['dense'], seg_dir.name, meta['batch'])
         frames.append(df)
         per_seg[seg_dir.name] = {'docs': int(len(z['doc_id'])), 'pairs': df.height, 'docs_in_pairs': int(df['doc_id'].n_unique()),
-                                 'queries_hit': int(df['query_id'].n_unique()), 'in_top211': int(df['in_top211'].sum())}
+                                 'queries_hit': int(df['query_id'].n_unique()), 'in_top211': int(df['in_top211'].sum()),
+                                 'in_pool13': int(df['in_pool13'].sum())}
     pairs = pl.concat(frames) if frames else pl.DataFrame()
     summary = {'segments': per_seg, 'reference': {'top': TOP, 'parity': parity(pool),
                                                   'pool13_sizes': [int(pool['size13'].min()), int(pool['size13'].max())]}}
     if pairs.height:
-        atomic_parquet(pairs.sort(['query_id', 'cosine'], descending=[False, True]), RUN / 'pairs_new.parquet')
+        # rank among the old list plus the new pairs that beat it (the new list a scorer will see)
+        pairs = pairs.with_columns((pl.col('entry_rank') + pl.col('cosine').rank('ordinal', descending=True).over('query_id') - 1)
+                                   .alias('cosine_rank'))
+        pairs = assign_pair_ids(pairs).rename({'cosine': 'cosine_score'}).with_columns(
+            pl.lit('zh').alias('lang'), pl.lit(None, dtype=pl.Int32).alias('shard'))
+        pairs = pairs.select('query_id', 'doc_id', 'cosine_rank', 'cosine_score', 'in_pool13', 'lang', 'pair_id', 'shard',
+                             'in_top211', 'entry_rank', 'segment', 'batch').sort('query_id', 'cosine_rank')
+        atomic_parquet(pairs, RUN / 'pairs_new.parquet')
         need = pairs.select('doc_id', 'segment').unique().sort('doc_id')
         atomic_parquet(need, RUN / 'docs_need_scoring.parquet')
         by_q = pairs.group_by('query_id').agg(pl.len().alias('pairs'), pl.col('in_top211').sum().alias('top211'),
-                                              pl.col('cosine').max().alias('best_cosine')).sort('pairs', descending=True)
+                                              pl.col('in_pool13').sum().alias('pool13'),
+                                              pl.col('cosine_score').max().alias('best_cosine')).sort('pairs', descending=True)
         atomic_parquet(by_q, RUN / 'pairs_new_by_query.parquet')
-        summary.update({'pairs': pairs.height, 'pairs_top211': int(pairs['in_top211'].sum()), 'docs': need.height,
-                        'queries_hit': by_q.height, 'top_queries': by_q.head(10).to_dicts()})
+        top, p13 = pairs.filter(pl.col('in_top211')), pairs.filter(pl.col('in_pool13'))
+        summary.update({'docs': need.height, 'queries_hit': by_q.height, 'top_queries': by_q.head(10).to_dicts(),
+                        'pools': {'top211': {'pairs': top.height, 'queries': top['query_id'].n_unique(), 'docs': top['doc_id'].n_unique()},
+                                  'pool13': {'pairs': p13.height, 'queries': p13['query_id'].n_unique(), 'docs': p13['doc_id'].n_unique()},
+                                  'union': {'pairs': pairs.height, 'queries': by_q.height, 'docs': need.height}},
+                        'pairs': pairs.height, 'pairs_top211': top.height, 'eta': eta(pairs.height, by_q.height)})
     else:
         summary.update({'pairs': 0, 'docs': 0, 'queries_hit': 0})
     atomic_json(RUN / 'report.json', summary)
@@ -370,8 +427,12 @@ def gpu_free(min_free_mib: int = 3072, max_util: int = 10) -> tuple[bool, str]:
     return (total - used >= min_free_mib and util <= max_util), f'used {used}/{total} MiB, util {util}%'
 
 
-def run_batch(tar: Path, device: str, min_han: int = MIN_HAN, urls: Path = URLS) -> dict:
-    """Phase 1 (CPU): verify -> extract -> segment docs + t256 chunks. device != 'defer' also runs phase 2 (embed + report)."""
+SEGMENT_FILES = ('docs.parquet', 'chunks_t256.parquet', 'chunks_struct.parquet', 'provenance.parquet')
+
+
+def run_batch(tar: Path, device: str, urls: Path = URLS) -> dict:
+    """Phase 1 (CPU): verify -> extract -> segment (docs, provenance, t256 + structural chunks, manifest).
+    device != 'defer' also runs phase 2 (embed + report); the default leaves the segment `waiting_gpu`."""
     t0 = time.time()
     batch = re.sub(r'\.tar$', '', tar.name).replace('batch-', 'b')
     tar_sha = sha256_file(tar)
@@ -380,22 +441,30 @@ def run_batch(tar: Path, device: str, min_han: int = MIN_HAN, urls: Path = URLS)
             return {'status': 'already_extracted', 'segment': f.parent.name, 'state': seg_meta(f.parent)['state']}
     manifest, log, records = read_tar(tar)
     segment = next_segment(batch)
-    rows, drop, srcs = build_docs(records, url_groups(urls), existing_ids(), segment, min_han)
+    shards = {r['doc_id']: r['shard'] for r in log if r.get('shard')}
+    rows, prov, drop, srcs = build_docs(records, url_groups(urls), existing_ids(), segment, shards, tar_sha)
     stats = {'batch': batch, 'tar_sha256': tar_sha, 'urls_in_log': len(log), 'ok': manifest['ok'], 'suspect_in_log': manifest['suspect'],
              'failed_in_log': manifest['failed'], 'status_counts': dict(pl.Series([r['status'] for r in log]).value_counts().iter_rows()),
-             'records': len(records), 'docs_kept': len(rows), 'dropped': drop, 'min_han': min_han}
+             'records': len(records), 'docs_written': len(rows), 'dropped': drop,
+             'quality_rule': f'good = body >= {qa.GOOD_CP} code points OR >= {qa.GOOD_HAN} Han; else thin (kept)'}
     if not rows:
         atomic_json(RUN / 'batches' / f'{batch}.json', {**stats, 'status': 'no_docs'})
         return {**stats, 'status': 'no_docs'}
     df = pl.DataFrame(rows)
-    chunks = chunk_segment(srcs, segment)
+    t256, struct = chunk_segment(srcs, segment)
     seg_dir = STORE / segment
     atomic_parquet(df, seg_dir / 'docs.parquet')
-    atomic_parquet(chunks, seg_dir / 'chunks_t256.parquet')
-    stats.update({'segment': segment, 'han_p50': int(df['han'].median()), 'chunks_t256': chunks.height,
-                  'chunk_docs': chunks['doc_id'].n_unique(), 'state': 'waiting_gpu',
-                  'docs_sha256': sha256_file(seg_dir / 'docs.parquet'), 'chunks_sha256': sha256_file(seg_dir / 'chunks_t256.parquet'),
+    atomic_parquet(t256, seg_dir / 'chunks_t256.parquet')
+    atomic_parquet(struct, seg_dir / 'chunks_struct.parquet')
+    atomic_parquet(pl.DataFrame(prov), seg_dir / 'provenance.parquet')
+    stats.update({'segment': segment, 'state': 'waiting_gpu', 'docs_good': int((df['quality'] == 'good').sum()),
+                  'docs_thin': int((df['quality'] == 'thin').sum()), 'han_p50': int(df['han'].median()),
+                  'chunks_t256': t256.height, 'chunks_struct': struct.height,
+                  'struct_fields': dict(struct['field'].value_counts().iter_rows()),
+                  'files_sha256': {n: sha256_file(seg_dir / n) for n in SEGMENT_FILES},
                   'extract_seconds': round(time.time() - t0, 1), 'created_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())})
+    atomic_json(seg_dir / 'manifest.json', {'schema': 'r2ai.s37.segment.v1', 'segment': segment, 'canonical_base': 'canonical-20261018 (unchanged)',
+                                            'files_sha256': stats['files_sha256'], 'tar_sha256': tar_sha, 'chunks_has_vector': False})
     atomic_json(seg_dir / 'segment.json', stats)
     atomic_json(RUN / 'batches' / f'{batch}.json', {**stats, 'status': 'extracted'})
     if device != 'defer':
@@ -403,8 +472,52 @@ def run_batch(tar: Path, device: str, min_han: int = MIN_HAN, urls: Path = URLS)
     return {**stats, 'status': 'extracted'}
 
 
+def embed_chunks(seg_dir: Path, device: str) -> dict:
+    """Chunk-level vectors (t256 and structural; identical texts embedded once) -> chunk_vectors.npz."""
+    out, info = {}, {}
+    for kind, name in (('t256', 'chunks_t256.parquet'), ('struct', 'chunks_struct.parquet')):
+        ch = pl.read_parquet(seg_dir / name, columns=['chunk_id', 'text'])
+        uniq = ch['text'].unique(maintain_order=True).to_list()
+        vec = embed_texts(uniq, device)
+        pos = {t: i for i, t in enumerate(uniq)}
+        out[f'{kind}_chunk_id'] = ch['chunk_id'].to_numpy().astype(np.int64)
+        out[f'{kind}_dense'] = vec[[pos[t] for t in ch['text'].to_list()]]
+        info[kind] = {'chunks': ch.height, 'unique_texts': len(uniq)}
+    atomic_npz(seg_dir / 'chunk_vectors.npz', **out)
+    return info
+
+
+def cmax_top3(seg_dir: Path, pairs: pl.DataFrame, q_ids: np.ndarray, q: np.ndarray) -> int:
+    """For every new pair of this segment: the 3 chunks (t256 body/answer, and structural qa/answer) with the highest cosine."""
+    seg_pairs = pairs.filter(pl.col('segment') == seg_dir.name)
+    if not seg_pairs.height:
+        return 0
+    qpos = {int(x): i for i, x in enumerate(q_ids)}
+    z = np.load(seg_dir / 'chunk_vectors.npz')
+    rows = []
+    for kind, name, fields in (('t256', 'chunks_t256.parquet', ('body', 'answer')), ('struct', 'chunks_struct.parquet', ('qa', 'answer', 'question'))):
+        ch = pl.read_parquet(seg_dir / name, columns=['chunk_id', 'doc_id', 'doc_ids', 'field'])
+        dense = z[f'{kind}_dense'].astype(np.float32)
+        by_doc = {}
+        for i, (d, ids, f) in enumerate(zip(ch['doc_id'].to_list(), ch['doc_ids'].to_list(), ch['field'].to_list())):
+            if f in fields:
+                for x in ids:
+                    by_doc.setdefault(x, []).append(i)
+        for qid, did, pid in seg_pairs.select('query_id', 'doc_id', 'pair_id').iter_rows():
+            idx = by_doc.get(did, [])
+            if not idx:
+                continue
+            cos = dense[idx] @ q[qpos[qid]].astype(np.float32)
+            for rank, j in enumerate(np.argsort(-cos, kind='stable')[:CMAX_TOP], 1):
+                rows.append({'pair_id': pid, 'kind': kind, 'rank': rank, 'chunk_id': int(ch['chunk_id'][idx[j]]), 'chunk_cosine': float(cos[j])})
+    atomic_parquet(pl.DataFrame(rows, schema={'pair_id': pl.Int64, 'kind': pl.String, 'rank': pl.Int32, 'chunk_id': pl.Int64,
+                                              'chunk_cosine': pl.Float64}), seg_dir / 'cmax_top3.parquet')
+    return len(rows)
+
+
 def embed_pending(device: str) -> dict:
-    """Phase 2: BGE-M3 doc-level vectors + pair report for every segment still `waiting_gpu`. cuda waits for a free GPU."""
+    """Phase 2: BGE-M3 doc + chunk vectors, pair report and C-max chunk picks for every segment still `waiting_gpu`.
+    cuda refuses while the GPU is busy (ask Vu before taking it: S35/S38 use it)."""
     todo = [d for d in sorted(STORE.glob('seg*')) if seg_meta(d)['state'] == 'waiting_gpu']
     if not todo:
         return {'status': 'nothing_waiting'}
@@ -423,21 +536,28 @@ def embed_pending(device: str) -> dict:
         by_sha = {x: vec[i] for i, x in enumerate(uniq['text_sha256'].to_list())}
         dense = np.stack([by_sha[x] for x in df['text_sha256'].to_list()])
         atomic_npz(seg_dir / 'vectors.npz', doc_id=df['doc_id'].to_numpy().astype(np.int64), dense=dense)
+        meta['chunk_vectors'] = embed_chunks(seg_dir, device)
         meta.update({'state': 'embedded', 'embed_device': device, 'embed_seconds': round(time.time() - t0, 1),
-                     'vectors_sha256': sha256_file(seg_dir / 'vectors.npz')})
+                     'vectors_sha256': sha256_file(seg_dir / 'vectors.npz'),
+                     'chunk_vectors_sha256': sha256_file(seg_dir / 'chunk_vectors.npz')})
         atomic_json(seg_dir / 'segment.json', meta)
         done.append(seg_dir.name)
     summary = report(pool)
+    q_ids, q = load_queries()
+    pairs = pl.read_parquet(RUN / 'pairs_new.parquet') if summary.get('pairs') else None
     for name in done:
         meta = seg_meta(STORE / name)
         meta['report'] = summary['segments'][name]
+        if pairs is not None:
+            meta['cmax_rows'] = cmax_top3(STORE / name, pairs, q_ids, q)
         atomic_json(STORE / name / 'segment.json', meta)
         atomic_json(RUN / 'batches' / f"{meta['batch']}.json", {**meta, 'status': 'embedded'})
-    return {'status': 'embedded', 'segments': done, 'cumulative': {k: summary.get(k) for k in ('pairs', 'pairs_top211', 'docs', 'queries_hit')}}
+    return {'status': 'embedded', 'segments': done,
+            'cumulative': {k: summary.get(k) for k in ('pairs', 'pairs_top211', 'docs', 'queries_hit', 'pools', 'eta')}}
 
 
 def status() -> dict:
-    segs = {d.name: {k: seg_meta(d).get(k) for k in ('state', 'batch', 'docs_kept', 'chunks_t256', 'embed_device', 'report')}
+    segs = {d.name: {k: seg_meta(d).get(k) for k in ('state', 'batch', 'docs_written', 'docs_thin', 'chunks_t256', 'chunks_struct', 'embed_device', 'report')}
             for d in sorted(STORE.glob('seg*'))}
     ok, why = gpu_free()
     return {'segments': segs, 'waiting_gpu': [n for n, m in segs.items() if m['state'] == 'waiting_gpu'], 'gpu_free': ok, 'gpu': why}
@@ -452,7 +572,6 @@ def main(argv=None) -> int:
     b.add_argument('tar', type=Path)
     b.add_argument('--device', default='defer', choices=['defer', 'cuda', 'cpu'],
                    help='defer (default): extract + chunk only, segment waits for the GPU; cpu only to smoke-test the first batch')
-    b.add_argument('--min-han', type=int, default=MIN_HAN)
     b.add_argument('--urls', type=Path, default=URLS)
     e = sub.add_parser('embed')
     e.add_argument('--device', default='cuda', choices=['cuda', 'cpu'])
@@ -464,7 +583,7 @@ def main(argv=None) -> int:
         out = {'queries': len(pool['q_ids']), 'thr211_min_max': [float(pool['thr211'].min()), float(pool['thr211'].max())],
                'pool13_sizes': [int(pool['size13'].min()), int(pool['size13'].max())], 'parity': parity(pool)}
     elif a.cmd == 'batch':
-        out = run_batch(a.tar, a.device, a.min_han, a.urls)
+        out = run_batch(a.tar, a.device, a.urls)
     elif a.cmd == 'embed':
         out = embed_pending(a.device)
     elif a.cmd == 'status':

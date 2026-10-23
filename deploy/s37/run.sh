@@ -22,5 +22,5 @@ tmux new-session -d -s s37 "cd '$PWD' && for i in \$(seq 1 20); do
   echo \"\$(date -u +%FT%TZ) crawler rc=\$rc\" >> $OUT.run.log
   [ \$rc -eq 0 ] || [ \$rc -eq 3 ] || [ \$rc -eq 4 ] && break
   sleep 60
-done; echo finished; sleep 3600"
+done; echo finished"
 echo "started in tmux session s37 -> $OUT (log: $OUT.run.log)"

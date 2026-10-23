@@ -33,7 +33,7 @@ Cài `python3-venv`, `tmux`, venv `.venv` với `requests`; in số dòng `urls.
 ## 3. Pilot 50 URL
 
 ```bash
-cd ~/s37 && ./run.sh pilot     # ~1–2 phút; xong thì tmux tự thoát sau 1 giờ nghỉ, không cần attach
+cd ~/s37 && ./run.sh pilot     # ~1–2 phút; xong thì tmux tự thoát
 ./status.sh pilot
 ```
 

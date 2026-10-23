@@ -158,6 +158,6 @@ def test_batch_defers_embed_then_embeds_when_gpu_free(tmp_path, monkeypatch):
     assert pairs['query_id'].to_list() == [1, 1] and pairs['pair_id'].min() >= I.PAIR_ID_BASE and pairs['in_top211'].all()
     assert sorted(pairs['cosine_rank'].to_list()) == [1, 2]
     cm = pl.read_parquet(seg / 'cmax_top3.parquet')
-    assert set(cm['kind']) == {'t256', 'struct'} and cm['rank'].max() <= 3
+    assert set(cm['kind']) == {'t256'} and cm['rank'].max() <= 3          # C-max = t256 body/answer only (S32)
     again = I.report(pool)                                                      # registry keeps pair ids stable
     assert pl.read_parquet(tmp_path / 'run' / 'pairs_new.parquet')['pair_id'].to_list() == pairs['pair_id'].to_list() and again['pairs'] == 2

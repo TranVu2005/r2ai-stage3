@@ -82,7 +82,7 @@ python -m r2ai.s37.ingest embed                                          # CHỈ
 
 - `batch` (mặc định `--device defer`) giữ cấu trúc hỏi–đáp: `doc_text` = title + question + các answer theo thứ tự trang. Doc dưới ngưỡng (< 200 code point và < 50 chữ Hán) gắn `thin`, vẫn ghi vào docs.
 - Segment canonical riêng `data/s37_120ask/seg37NNN-s37-bNNNN-120ask.com/`: `docs.parquet`, `provenance.parquet`, `chunks_t256.parquet` (chunker canonical), `chunks_struct.parquet` (question + một answer mỗi chunk), `manifest.json` (SHA256). Không sửa canonical-20261018, không ghi index chung.
-- `embed` (cuda) từ chối khi GPU bận (util > 10% hoặc < 3.072 MiB trống); S35/S38 dùng GPU nên hỏi Vu trước. `--device cpu` chỉ để kiểm thông lô đầu. Ra: `vectors.npz` (doc), `chunk_vectors.npz` (t256 + struct), `cmax_top3.parquet`, và trong `out/runs/s37/`: `pairs_new.parquet` (schema S31 + `in_top211`, `in_pool13`, `pair_id` ≥ 1.000.000), `report.json` (số cặp theo pool top-211 / pool13 / hợp, số query bị ảnh hưởng, ETA 4B / Jina / C-max).
+- `embed` (cuda) từ chối khi GPU bận (util > 10% hoặc < 3.072 MiB trống); S35/S38 dùng GPU nên hỏi Vu trước. `--device cpu` chỉ để kiểm thông lô đầu. Ra: `vectors.npz` (doc), `chunk_vectors.npz` (t256 + struct), `cmax_top3.parquet` (chỉ chunk t256 body/answer, như S32; chunk cấu trúc chỉ nhúng sẵn cho S38), và trong `out/runs/s37/`: `pairs_new.parquet` (schema S31 + `in_top211`, `in_pool13`, `pair_id` ≥ 1.000.000), `report.json` (số cặp theo pool top-211 / pool13 / hợp, số query bị ảnh hưởng, ETA 4B / Jina / C-max).
 - Chưa chấm gì. Điểm chấm gộp ở bước dựng FUSE cuối.
 
 ## Lưu ý vận hành

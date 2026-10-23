@@ -475,7 +475,8 @@ def run_batch(tar: Path, device: str, urls: Path = URLS) -> dict:
 
 
 def embed_chunks(seg_dir: Path, device: str) -> dict:
-    """Chunk-level vectors (t256 and structural; identical texts embedded once) -> chunk_vectors.npz."""
+    """Chunk-level vectors (t256 for C-max; structural qa/answer/question/span_qa only for S38's chunk choice, never judged here;
+    identical texts embedded once) -> chunk_vectors.npz."""
     out, info = {}, {}
     for kind, name in (('t256', 'chunks_t256.parquet'), ('struct', 'chunks_struct.parquet')):
         ch = pl.read_parquet(seg_dir / name, columns=['chunk_id', 'text'])
@@ -490,14 +491,15 @@ def embed_chunks(seg_dir: Path, device: str) -> dict:
 
 
 def cmax_top3(seg_dir: Path, pairs: pl.DataFrame, q_ids: np.ndarray, q: np.ndarray) -> int:
-    """For every new pair of this segment: the 3 chunks (t256 body/answer, and structural qa/answer) with the highest cosine."""
+    """C-max as in S32: for every new pair of this segment the 3 t256 chunks of field body/answer with the highest cosine.
+    Structural chunks (qa/answer/question/span_qa) are never used here: another chunk unit would skew the RRF scale."""
     seg_pairs = pairs.filter(pl.col('segment') == seg_dir.name)
     if not seg_pairs.height:
         return 0
     qpos = {int(x): i for i, x in enumerate(q_ids)}
     z = np.load(seg_dir / 'chunk_vectors.npz')
     rows = []
-    for kind, name, fields in (('t256', 'chunks_t256.parquet', ('body', 'answer')), ('struct', 'chunks_struct.parquet', ('qa', 'answer', 'question'))):
+    for kind, name, fields in (('t256', 'chunks_t256.parquet', ('body', 'answer')),):
         ch = pl.read_parquet(seg_dir / name, columns=['chunk_id', 'doc_id', 'doc_ids', 'field'])
         dense = z[f'{kind}_dense'].astype(np.float32)
         by_doc = {}

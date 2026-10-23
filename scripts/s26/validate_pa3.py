@@ -2,12 +2,13 @@
 
 Format: single JSON file in a ZIP_LZMA dict 256 MiB under 102,600,000 B; exactly the 1,200 query ids, ints, once each;
 relevant_docs ints in links_corpus_vi_en_zh, no duplicates; chunks {doc_id, chunk_text}, non-empty, doc_id in the row's
-relevant_docs, at most 1 chunk per doc_id per row.
+relevant_docs, at most --max-chunks-per-doc chunks per doc_id per row (default 1; internal rule, not in the BTC spec) and
+never two chunks of one doc_id equal after the metric normalisation (NFKC, html.unescape, lowercase, whitespace).
 Verbatim: a chunk passes if its (doc_id, chunk_text) pair is shipped by P1-vi+10 (natively validated when P1 passed),
 or if chunk_text is a substring of the canonical doc_text of that ID (its own docs.parquet row, else the owner of its
 alias group; canonical-20261018, S25-verified).
 Extra S15 lot roots (e.g. S27 pharmacity handoff) after the ZIP add their doc_text as verbatim source.
-Usage: validate_pa3.py <zip> [extra_dir ...]
+Usage: validate_pa3.py [--max-chunks-per-doc N] <zip> [extra_dir ...]
 """
 import hashlib, json, os, sys, zipfile
 from pathlib import Path
@@ -16,9 +17,15 @@ import pandas as pd, pyarrow.parquet as pq, numpy as np
 os.chdir(os.environ.get('R2AI_ROOT', 'D:/GitHub/r2ai-stage3'))  # data/ and src/ of the main checkout
 sys.path.insert(0, 'src')
 from r2ai.compose.archive import compression_profile  # noqa: E402
+from r2ai.eval.scorer import normalize_metric  # noqa: E402
 
 CEIL, ZP, CAN = 102_600_000, 'out/runs/reranker-trial/release/P1-vi+10.zip', 'data/canonical-20261018'
-zp = sys.argv[1]; err = Counter()
+args = sys.argv[1:]; max_per_doc = 1
+if args[:1] == ['--max-chunks-per-doc']:
+    max_per_doc = int(args[1]); args = args[2:]
+    if max_per_doc < 1:
+        sys.exit('--max-chunks-per-doc must be >= 1')
+zp, extra_dirs = args[0], args[1:]; err = Counter()
 z = zipfile.ZipFile(zp); names = z.namelist()
 err['zip_not_single_file'] += len(names) != 1
 cp = compression_profile(zp)
@@ -55,8 +62,10 @@ for r in stream_rows():
     err['doc_not_int'] += sum(type(d) is not int for d in docs)
     err['doc_not_in_corpus'] += sum(d not in corpus for d in docs)
     err['doc_dup'] += len(docs) - len(ds)
-    cids = [c['doc_id'] for c in r['relevant_chunks']]
-    err['chunk_dup_doc'] += len(cids) - len(set(cids))
+    per_doc = Counter(c['doc_id'] for c in r['relevant_chunks'])
+    err['chunk_dup_doc'] += sum(n - max_per_doc for n in per_doc.values() if n > max_per_doc)
+    keys = [(c['doc_id'], normalize_metric(c['chunk_text'])) for c in r['relevant_chunks']]
+    err['chunk_dup_text_doc'] += len(keys) - len(set(keys))
     for c in r['relevant_chunks']:
         err['chunk_bad_keys'] += set(c) != {'doc_id', 'chunk_text'}
         err['chunk_doc_not_int'] += type(c['doc_id']) is not int
@@ -67,12 +76,12 @@ for r in stream_rows():
         else:
             todo.append((c['doc_id'], c['chunk_text']))
 in_docs = set(pq.read_table(f'{CAN}/docs.parquet', columns=['doc_id'])['doc_id'].to_pylist())
-xids = {int(d) for x in sys.argv[2:] for f in Path(x).glob('lots/*/chunks/docs.parquet') for d in pd.read_parquet(f, columns=['doc_id']).doc_id}
+xids = {int(d) for x in extra_dirs for f in Path(x).glob('lots/*/chunks/docs.parquet') for d in pd.read_parquet(f, columns=['doc_id']).doc_id}
 todo = [(d if d in in_docs or d in xids else cid2doc.get(d), t) for d, t in todo]   # own text, else its group owner
 need = sorted({d for d, _ in todo if d is not None})
 txt = dict(zip(*[pq.read_table(f'{CAN}/docs.parquet', columns=['doc_id', 'doc_text'], filters=[('doc_id', 'in', need)])[k].to_pylist()
                  for k in ('doc_id', 'doc_text')]))
-for x in sys.argv[2:]:                                  # extra S15 lots: <dir> holding lots/<lot>/chunks/docs.parquet
+for x in extra_dirs:                                    # extra S15 lots: <dir> holding lots/<lot>/chunks/docs.parquet
     for f in sorted(Path(x).glob('lots/*/chunks/docs.parquet')):
         xd = pd.read_parquet(f, columns=['doc_id', 'doc_text'])
         txt.update(zip(xd.doc_id.astype(int), xd.doc_text)); cid2doc.update({int(d): int(d) for d in xd.doc_id})
@@ -84,7 +93,7 @@ for d, t in todo:
     else:
         err['chunk_not_verbatim'] += 1
 err['ids_mismatch'] += sorted(ids) != sorted(q.id.tolist()) or len(set(ids)) != len(ids)
-rep = {'zip': zp, 'zip_bytes': os.path.getsize(zp), 'zip_sha256': hashlib.sha256(open(zp, 'rb').read()).hexdigest(),
+rep = {'zip': zp, 'max_chunks_per_doc': max_per_doc, 'zip_bytes': os.path.getsize(zp), 'zip_sha256': hashlib.sha256(open(zp, 'rb').read()).hexdigest(),
        'lzma_props': cp['properties_hex'], 'rows': len(ids), 'docs_total': sum(nd), 'chunks_total': sum(nc),
        'docs_per_query_mean': float(np.mean(nd)), 'chunks_per_query_mean': float(np.mean(nc)), 'chunk_check': dict(src),
        'errors': {k: v for k, v in err.items()}, 'ok': sum(err.values()) == 0}

@@ -519,14 +519,14 @@ def cmax_top3(seg_dir: Path, pairs: pl.DataFrame, q_ids: np.ndarray, q: np.ndarr
     return len(rows)
 
 
-def embed_pending(device: str) -> dict:
+def embed_pending(device: str, max_util: int = 10) -> dict:
     """Phase 2: BGE-M3 doc + chunk vectors, pair report and C-max chunk picks for every segment still `waiting_gpu`.
     cuda refuses while the GPU is busy (ask Vu before taking it: S35/S38 use it)."""
     todo = [d for d in sorted(STORE.glob('seg*')) if seg_meta(d)['state'] == 'waiting_gpu']
     if not todo:
         return {'status': 'nothing_waiting'}
     if device == 'cuda':
-        ok, why = gpu_free()
+        ok, why = gpu_free(max_util=max_util)
         if not ok:
             return {'status': 'gpu_busy', 'detail': why, 'waiting': [d.name for d in todo]}
     pool = build_pool()
@@ -579,6 +579,8 @@ def main(argv=None) -> int:
     b.add_argument('--urls', type=Path, default=URLS)
     e = sub.add_parser('embed')
     e.add_argument('--device', default='cuda', choices=['cuda', 'cpu'])
+    e.add_argument('--max-util', type=int, default=10,
+                   help='GPU util %% ceiling for cuda; raise only when Vu confirms no compute job (desktop apps alone idle at 15-50%%)')
     sub.add_parser('report')
     sub.add_parser('status')
     a = ap.parse_args(argv)
@@ -589,7 +591,7 @@ def main(argv=None) -> int:
     elif a.cmd == 'batch':
         out = run_batch(a.tar, a.device, a.urls)
     elif a.cmd == 'embed':
-        out = embed_pending(a.device)
+        out = embed_pending(a.device, a.max_util)
     elif a.cmd == 'status':
         out = status()
     else:

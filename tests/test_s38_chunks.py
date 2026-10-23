@@ -213,3 +213,37 @@ def test_replace_chunks_none_keeps_j3_chunk():
     row = {'id': 5, 'relevant_docs': [9, 3], 'relevant_chunks': [{'doc_id': 3, 'chunk_text': 'whole 3'}]}
     out = replace_chunks(row, {(5, 3): [None, 'w']})
     assert out['relevant_chunks'] == [{'doc_id': 3, 'chunk_text': 'whole 3'}, {'doc_id': 3, 'chunk_text': 'w'}]
+
+
+# ---- CH-clean -------------------------------------------------------------------------------------------------
+from r2ai.s38 import clean as CL
+
+
+def _body(k, extra_tail=True):
+    head = '\n\n'.join(f'Đoạn nội dung {"abcdefgh"[i]} của bài {"klmnopqrstuv"[k]} khá dài để làm thân bài.'
+                       for i in range(8))                          # lines differ by letters (digits are masked)
+    tail = '\n\nHotline: 024 3872 3872 – cơ sở 12\n\nCập nhật lần cuối: 05:01 10/07/2026' if extra_tail else ''
+    return head + tail
+
+
+def test_line_key_masks_digits_and_case():
+    assert CL.line_key('  Cập nhật lần cuối: 05:01 10/07/2026 ') == CL.line_key('cập nhật  lần cuối: 11:22 01/01/2025')
+
+
+def test_discover_needs_doc_share_and_tail_position():
+    bodies = {k: _body(k, extra_tail=k < 4) for k in range(10)}       # tail lines in 40% of docs
+    keys = {m['key'] for m in CL.discover(bodies)}
+    assert CL.line_key('Hotline: 024 3872 3872 – cơ sở 12') in keys
+    bodies = {k: _body(k, extra_tail=k < 2) for k in range(10)}       # 20% < 30%
+    assert not CL.discover(bodies)
+    early = {k: 'Hotline: 024 3872 3872 – cơ sở 12\n\n' + _body(k, extra_tail=False) for k in range(10)}
+    assert not CL.discover(early)                                      # not in the last 30%
+
+
+def test_cut_point_is_first_marker_in_tail():
+    body = _body(1)
+    markers = {CL.line_key('Hotline: 024 3872 3872 – cơ sở 12'), CL.line_key('Cập nhật lần cuối: 05:01 10/07/2026')}
+    at = CL.cut_point(body, markers)
+    assert body[:at].rstrip().endswith('làm thân bài.') and 'Hotline' not in body[:at]
+    assert CL.cut_point(_body(1, extra_tail=False), markers) is None
+    assert CL.cut_point('Hotline: 024 3872 3872 – cơ sở 12\n' + _body(2, extra_tail=False), markers) is None

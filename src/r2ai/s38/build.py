@@ -5,7 +5,10 @@
 * ``relevant_docs`` and the chunk-carrying docs are J3-thrC's, row by row; only ``chunk_text`` changes. A carrier
   with two chosen pieces (CH-t256-2) gets two chunks of its doc_id, in score order, at the place of its J3 chunk.
 * writer = the S29 one (one compact JSON row per line, ZIP_LZMA dict 256 MiB, fixed member date).
-* ``CH-win384`` / ``CH-win768`` take their texts from ``scores/windows.parquet`` (``r2ai.s38.window``).
+* window variants (``r2ai.s38.window.SPECS``) take their texts from ``scores/windows.parquet``; a null text keeps the
+  J3 chunk. ``--full-threshold T`` builds ``CH-full+w768-t<T>``: the second chunk (768 window) only for bodies of
+  more than T tokens (the rows exist for T >= 1,536).
+* ``CH-clean`` takes the cut bodies of ``scores/clean.parquet`` (``r2ai.s38.clean``); other carriers keep their J3 chunk.
 * ``CH-full`` is J3-thrC itself (no rebuild); ``--lengths`` adds its chunk lengths to the report.
 * per variant: chunks, chunk length (chars, raw BGE-M3 tokens, metric tokens = BGE-M3 ids of the
   metric-normalised text), ZIP bytes / SHA256, JSON SHA256. Run validator S26 on every ZIP afterwards.
@@ -32,7 +35,9 @@ from r2ai.s38.sources import (J3_JSON_SHA256, J3_ZIP, J3_ZIP_SHA256, _atomic_jso
 
 CEILING = 102_600_000
 WINDOW_VARIANTS = tuple(SPECS)
-ALL_VARIANTS = (*WINDOW_VARIANTS, *VARIANTS)
+CLEAN_VARIANT = "CH-clean"
+ALL_VARIANTS = (*WINDOW_VARIANTS, CLEAN_VARIANT, *VARIANTS)
+FULL_W768 = "CH-full+w768"
 MEMBER_DATE = (2026, 10, 23, 0, 0, 0)
 
 
@@ -78,7 +83,7 @@ def length_report(texts: list[str], tok) -> dict[str, Any]:
     return {"chars": describe([len(t) for t in texts]), "tokens_raw": describe(raw), "tokens_metric": describe(met)}
 
 
-def build(out: Path, variants: Sequence[str], lengths_full: bool) -> dict[str, Any]:
+def build(out: Path, variants: Sequence[str], lengths_full: bool, full_threshold: int | None = None) -> dict[str, Any]:
     started = time.monotonic()
     zip_path = paths.OUT_DIR / J3_ZIP
     if _sha256(zip_path) != J3_ZIP_SHA256:
@@ -103,19 +108,29 @@ def build(out: Path, variants: Sequence[str], lengths_full: bool) -> dict[str, A
                                          "docs": sum(len(r["relevant_docs"]) for r in rows), "chunks": len(texts),
                                          **length_report(texts, tok)}
         del texts
-    for name in variants:
+    for variant in variants:
+        name = variant
         chosen: dict[tuple[int, int], list[str]] = {}
-        if name in WINDOW_VARIANTS:
-            win = windows[windows.variant == name]
+        if variant in WINDOW_VARIANTS:
+            win = windows[windows.variant == variant]
+            if variant == FULL_W768 and full_threshold is not None:
+                if full_threshold < SPECS[FULL_W768][2]:
+                    raise ValueError(f"--full-threshold below {SPECS[FULL_W768][2]}: windows not computed")
+                win = win[(win["rank"] == 1) | (win.body_tokens > full_threshold)]
+                name = f"{FULL_W768}-t{full_threshold}"
             for qid, did, t in zip(win.query_id.astype(int), win.doc_id.astype(int), win.text):
                 chosen.setdefault((qid, did), []).append(None if t is None or t != t else t)
+        elif variant == CLEAN_VARIANT:
+            win = pd.read_parquet(scores_dir() / "clean.parquet")
+            for qid, did, t in zip(win.query_id.astype(int), win.doc_id.astype(int), win.text):
+                chosen.setdefault((qid, did), []).append(t)
         else:
             pick = sel[sel.variant == name].sort_values(["query_id", "doc_id", "rank"])
             text = pieces.text.to_numpy()
             for qid, did, row in zip(pick.query_id.astype(int), pick.doc_id.astype(int), pick.piece_row.astype(int)):
                 chosen.setdefault((qid, did), []).append(text[row])
         if not chosen:
-            raise ValueError(f"{name}: no chosen chunk (run score select / window first)")
+            raise ValueError(f"{name}: no chosen chunk (run score select / window / clean first)")
         new_rows = [replace_chunks(r, chosen) for r in rows]
         target = out / f"{name}.zip"
         paths.assert_writable(target)
@@ -130,8 +145,13 @@ def build(out: Path, variants: Sequence[str], lengths_full: bool) -> dict[str, A
                  "chunks_per_query": describe([len(r["relevant_chunks"]) for r in new_rows]),
                  "docs_equal_j3": all(a["relevant_docs"] == b["relevant_docs"] for a, b in zip(rows, new_rows)),
                  "under_ceiling": target.stat().st_size < CEILING}
-        if name in WINDOW_VARIANTS:     # token counts from r2ai.s38.window (raw BGE-M3), no re-tokenisation
-            entry.update({"chars": describe([len(t) for t in texts]), "tokens_raw": describe(win.tokens)})
+        if variant in WINDOW_VARIANTS or variant == CLEAN_VARIANT:   # token counts already known, no re-tokenisation
+            entry["chars"] = describe([len(t) for t in texts])
+            if variant in WINDOW_VARIANTS:
+                entry["tokens_raw"] = describe(win.tokens)
+                if variant == FULL_W768:
+                    entry["full_threshold"] = full_threshold or SPECS[FULL_W768][2]
+                    entry["second_chunks"] = int((win["rank"] == 2).sum())
         else:
             entry.update(length_report(texts, tok))
         report["variants"][name] = entry
@@ -144,6 +164,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--variant", action="append", choices=list(ALL_VARIANTS), default=None)
     parser.add_argument("--lengths", action="store_true", help="also report the chunk lengths of CH-full (J3-thrC)")
+    parser.add_argument("--full-threshold", type=int, default=None, help="CH-full+w768: body tokens above which the window is added")
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args(argv)
     out = paths.resolve_path(args.out or run_root() / "build")
@@ -153,7 +174,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     paths.assert_writable(out / "build.json")
     paths.assert_writable(out / "build.json.tmp")
     out.mkdir(parents=True, exist_ok=True)
-    report = build(out, args.variant or list(ALL_VARIANTS), args.lengths)
+    report = build(out, args.variant or list(ALL_VARIANTS), args.lengths, args.full_threshold)
     previous = json.loads((out / "build.json").read_text(encoding="utf-8")) if (out / "build.json").exists() else {}
     previous.setdefault("variants", {}).update(report.pop("variants"))
     previous.update(report)

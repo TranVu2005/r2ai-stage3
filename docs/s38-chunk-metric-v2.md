@@ -83,6 +83,21 @@ Token = BGE-M3 thô của từng chunk (chunk giữ nguyên tính bằng độ d
 
 Độ dài body theo host (offline) và đuôi 300 ký tự của 10 host có body trung vị dài nhất: `reports/s38-host-bodies.md` (`python -m r2ai.s38.window --hosts`).
 
+## Lượt 3 (CPU, chưa nộp; mốc Chunk F2 0,3594)
+
+**CH-full+w768 dưới trần (Vu: nâng ngưỡng body, giữ cửa sổ 768, không cắt body).** Cửa sổ của mọi body > 1.536 token đã có từ lượt 2, nên chỉ lọc chunk thứ 2 theo ngưỡng T (`python -m r2ai.s38.build --variant CH-full+w768 --full-threshold T`, ZIP tên `CH-full+w768-t<T>.zip`). Ước lượng tuyến tính (96,7 B/chunk thứ 2) cho T ≈ 1.858; dựng thật:
+
+| T | Chunk thứ 2 | ZIP B | So với trần 102.600.000 |
+|---:|---:|---:|---|
+| 1.848 | 15.083 | 102.602.464 | vượt 2.464 B |
+| **1.849** | **15.026** | **102.599.152** | **dưới 848 B** |
+| 1.850 | 14.979 | 102.596.108 | dưới 3.892 B |
+| 1.870 | 14.132 | 102.541.183 | dưới 58.817 B |
+
+**Ngưỡng thấp nhất T = 1.849 token**: 15.026 carrier nhận chunk 2 (cửa sổ 768), 190.174 chunk; ZIP `out/runs/s38-chunk-metric-v2/build/full-search/t1849/CH-full+w768-t1849.zip` SHA256 `393b15acf79c672fe4444ea3b77803fbbe9a3958a9ab36d39a2b6517a7961be6`, JSON `559396d2…6a55`; validator S26 (`--max-chunks-per-doc 2`) ok, 0 lỗi. Ngưỡng chính xác tới 1 token theo ZIP thực (kích thước ZIP gần như đơn điệu theo T ở vùng này, đo 4 điểm).
+
+**CH-clean** (`python -m r2ai.s38.clean discover|apply`, `build --variant CH-clean`): nguyên body, cắt đuôi boilerplate theo marker đếm trên toàn host (≥ 30% doc, trong 30% cuối body). 25.391 carrier bị cắt (tamanhhospital 2.320, baophutho 77, a-hospital 462, nhathuoclongchau 21.128, youmed 1.404; **medlatec 0**: đoạn quảng cáo diễn đạt khác nhau theo bài, không khoá dòng nào đạt 30% doc). Token bỏ trung vị theo doc: tamanhhospital 394, baophutho 379, a-hospital 19, nhathuoclongchau 55, youmed 189. Carrier còn lại giữ nguyên byte J3-thrC (149.757). ZIP 100.650.275 B, SHA256 `9c29f885528209bd07a346c86d4a1f8f2d04baca2feaf245d0d672d513535721`, JSON `51b89803…a620`; validator S26 ok, 0 lỗi. Marker, số doc bị cắt và 2 ví dụ trước/sau mỗi host: `reports/s38-clean.md`.
+
 ## Bước 5: judge 0,6B chunk-level cho chunk t256 chưa chấm (chuẩn bị; Vu hoãn hẳn, không chạy)
 
 `python -m r2ai.s38.judge_prep` → `out/runs/s38-chunk-metric-v2/judge-pool/` (layout shard S32, prompt/instruction S29). Doc nhận chunk có 1.260.431 chunk t256 (mọi field), S32 đã chấm 519.343 → còn 741.088; chỉ xuất answer/body: **670.779 cặp** (body 663.310, answer 7.469; vi 631.573, zh 39.206) ở 138.533 carrier (TB 4,8 cặp/carrier), prompt TB 334 token (S32: 285), 2 chunk cắt về 512 token. **ETA GPU local (RTX 3050 6 GB, HF bf16, 25,5 cặp/s đo ở S32): 7,3 h; quy theo độ dài prompt 8,6 h**, nếu GPU không chia với job khác. Lệnh: `python -m r2ai.s31.judge_score score --pool out/runs/s38-chunk-metric-v2/judge-pool --out out/runs/s38-chunk-metric-v2/judge-gpu --model qwen3-reranker-0.6b --subset all`.

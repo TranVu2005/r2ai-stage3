@@ -17,13 +17,16 @@ def add_judge_rank(rows: Sequence[dict[str, Any]], score_key: str, rank_key: str
 
 
 def select_rrf(
-    rows: Sequence[dict[str, Any]], keep: int, rank_keys: Sequence[str], rrf_k: int = RRF_K
+    rows: Sequence[dict[str, Any]], keep: int, rank_keys: Sequence[str], rrf_k: int = RRF_K,
+    weights: Sequence[float] | None = None,
 ) -> list[dict[str, Any]]:
     """Keep the top ``keep`` by sum of 1/(k + rank) over ``rank_keys`` (first key is the cosine-like rank:
     ``cosine_rank``, or ``cos2_rank`` in S35).
 
     With ``("cosine_rank", "qwen_rank")`` this is exactly ``r2ai.s29.qwen_judge.select_qrrf``:
     same summation order and tie order (cosine rank, judge rank(s), doc_id).
+
+    ``weights`` (S36, one per rank key) gives ``sum w / (k + rank)``; ``None`` is the unweighted sum above.
     """
     if rrf_k <= 0:
         raise ValueError("rrf_k must be positive")
@@ -31,11 +34,13 @@ def select_rrf(
         raise ValueError("rank_keys must start with cosine_rank (or cos2_rank)")
     if not 0 <= keep <= len(rows):
         raise ValueError(f"keep={keep} is outside candidate count {len(rows)}")
+    if weights is not None and (len(weights) != len(rank_keys) or any(w <= 0 for w in weights)):
+        raise ValueError("weights must be positive, one per rank key")
     ranked = []
     for row in rows:
         score = 0.0
-        for key in rank_keys:
-            score = score + 1.0 / (rrf_k + int(row[key]))
+        for i, key in enumerate(rank_keys):
+            score = score + (1.0 if weights is None else float(weights[i])) / (rrf_k + int(row[key]))
         ranked.append((score, row))
     ranked.sort(key=lambda item: (-item[0], *[int(item[1][key]) for key in rank_keys], int(item[1]["doc_id"])))
     return [{**row, "rrf_score": score} for score, row in ranked[:keep]]

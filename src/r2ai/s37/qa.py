@@ -7,7 +7,10 @@ doc_layout rule), so t256 chunks come from the canonical chunker unchanged.
 Structural chunks (chunks_struct): one chunk = question + one answer, as a verbatim span of doc_text.
   * answer 1 directly follows the question in doc_text, so its chunk is the contiguous span question..answer 1;
   * a long answer is cut with the canonical t256 paragraph chunker, the question stays in the first piece only;
-  * answer k >= 2 is not adjacent to the question, so (to stay verbatim) its chunks hold the answer alone.
+  * answer k >= 2 is not adjacent to the question, so (to stay verbatim) its chunks hold the answer alone;
+  * optional variant `span_qa` for answer k >= 2: the contiguous span from the question to the end of answer k (answers in
+    between included), one chunk per k, flagged by field `span_qa`; its length (`n_chars`, `n_tokens`) lets S38 decide.
+Every chunk is a substring of doc_text, in order (asserted when the chunks are written).
 """
 from __future__ import annotations
 
@@ -59,7 +62,7 @@ def extract(html: str) -> dict:
 
 
 def struct_chunks(doc_text: str, r: dict, paras: list, ntok, target: int = TARGET) -> list[tuple[str, int, int, int]]:
-    """-> [(field, start, end, answer_idx)] verbatim spans of doc_text. field: qa | answer | question."""
+    """-> [(field, start, end, answer_idx)] verbatim spans of doc_text. field: qa | answer | span_qa | question."""
     from r2ai.index.chunk import chunk_paragraphs
     body = r['body']
     q = (r.get('question') or '').strip()
@@ -89,6 +92,8 @@ def struct_chunks(doc_text: str, r: dict, paras: list, ntok, target: int = TARGE
                 out.append(('qa', q_s, e, k))                # question + answer 1 (first piece) is contiguous
             else:
                 out.append(('answer', s, e, k))
+        if k >= 1 and q_s is not None and q_e <= a_s:
+            out.append(('span_qa', q_s, a_e, k))
     if not answers and q_s is not None:
         out.append(('question', q_s, q_e, -1))
     return out

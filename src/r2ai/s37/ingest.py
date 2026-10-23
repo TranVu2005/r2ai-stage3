@@ -287,7 +287,9 @@ def chunk_segment(srcs: dict, segment: str, target: int = CHUNK_TARGET) -> tuple
         schema = dict(CHUNK_SCHEMA)
         if extra:
             cols['answer_idx'] = [x[6] for x in rows]
+            cols['n_chars'] = [x[4] - x[3] for x in rows]
             schema['answer_idx'] = pl.Int32
+            schema['n_chars'] = pl.Int32
         return pl.DataFrame(cols, schema=schema)
 
     return frame(t_rows), frame(s_rows, extra=True)

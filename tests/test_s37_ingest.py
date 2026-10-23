@@ -116,6 +116,10 @@ def test_chunk_segment_t256_and_structural_are_verbatim():
     assert '另一位医生' not in qa_chunks['text'][0]                              # answer 2 is not adjacent to the question
     ans2 = struct.filter(struct['answer_idx'] == 1)
     assert ans2.height >= 1 and '另一位医生' in ans2['text'][0] and '我最近头痛' not in ans2['text'][0]
+    span = struct.filter(struct['field'] == 'span_qa')                         # optional variant: question .. end of answer 2
+    assert span.height == 1 and span['answer_idx'][0] == 1 and span['text'][0].startswith('我最近头痛')
+    assert '您好' in span['text'][0] and span['text'][0].endswith('头颅检查。') and span['n_chars'][0] == len(span['text'][0])
+    assert (struct['n_chars'] == struct['char_end'] - struct['char_start']).all()
 
 
 def test_batch_defers_embed_then_embeds_when_gpu_free(tmp_path, monkeypatch):

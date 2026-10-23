@@ -118,6 +118,7 @@ Theo quyết định 21/10 chỉ dựng trên pool 1,3×:
 | `Jcheck-q06-rrf` | cosine + 0.6B | không cần GPU; cổng hồi quy |
 | `K4-scale` / `K4-thr` / `K4-mix` | cosine + 4B, K_q' biến thiên, tổng như J4-rrf | điểm 4B (mục LB 21/10) |
 | `K4-tfree-t<t>` / `K4-thr-C` / `K4-free-p13` | cosine + 4B; t cố định / chunk theo ngưỡng / hằng số không K_q | điểm 4B (mục LB 21/10 lượt 2) |
+| `K4-thr-C-fx` | doc K4-thr-C, chunk P4B ≥ T_C_FIXED nguyên body, builder đã sửa lỗi Pharmacity | điểm 4B (mục Lỗi builder) |
 | `COS-K<K>` / `J4-K<K>` | cosine / RRF(cosine, 4B), top-K cố định trong pool 211, chunk nguyên body cho mọi doc | điểm 4B + pool-extra (mục Top-K cố định) |
 
 ```bash
@@ -244,7 +245,7 @@ K4-tfree-t0.08 bị bỏ khỏi danh sách nộp (Vu, 21/10): gần trùng K4-th
 
 ### K4-thr-C: doc giữ nguyên K4-thr, chunk theo ngưỡng
 
-Duyệt doc đã chọn theo thứ tự RRF; mỗi doc có P4B ≥ t_c nhận đúng 1 chunk (nguyên body). t_c được chỉnh để tổng chunk bằng 175.148 (số chunk của J4-rrf-ph979): **t_c = 0,070560**. Có 123 cặp đúng bằng t_c, 60 trong số đó được lấy (hoà tách theo query_id, rồi vị trí RRF). 353 doc không có text nên không nhận chunk.
+Duyệt doc đã chọn theo thứ tự RRF; mỗi doc có P4B ≥ t_c nhận đúng 1 chunk (nguyên body). t_c được chỉnh để tổng chunk bằng 175.148 (số chunk của J4-rrf-ph979): **t_c = 0,070560**. Có 123 cặp đúng bằng t_c, 60 trong số đó được lấy (hoà tách theo query_id, rồi vị trí RRF). 353 lượt doc Pharmacity được chọn (247 query) không nhận chunk. Lý do không phải thiếu text: cả 979 doc Pharmacity đều có body. Nguyên nhân là lỗi builder S29 (`r2ai/s29/build.py`, có từ commit `32db7cd`), khiến body của doc Pharmacity không bao giờ được nạp. Lỗi đã sửa ngày 22/10, xem mục K4-thr-C-fx.
 
 - Danh sách doc (kể cả thứ tự) giống hệt K4-thr; đã kiểm bằng cách so JSON của hai ZIP.
 - Chunk/query P10 / P50 / P90 = 47 / 140 / 251 (min 4, max 305). Không query nào thiếu chunk.
@@ -370,5 +371,42 @@ P4B trung bình theo hạng trong danh sách đã chọn. Mỗi ô là trung bì
 | 21–40 | 0,5028 | 0,6469 |
 | 41–60 | – | 0,5522 |
 
-- Doc không có chunk: doc thin (không có nguồn chunk; cờ thin đã tắt) gồm COS-K40 372, J4-K20 143, J4-K40 390, J4-K60 682. Doc Pharmacity body rỗng gồm 95 / 52 / 98 / 151. Không query nào thiếu chunk. Query ít chunk nhất là query 556 ở J4-* (8 / 9 / 17 chunk; nhiều doc thin) và query 1009 ở COS-K40 (22).
+- Doc không có chunk: doc thin (không có nguồn chunk; cờ thin đã tắt) gồm COS-K40 372, J4-K20 143, J4-K40 390, J4-K60 682. Doc Pharmacity được chọn mà không có chunk gồm 95 / 52 / 98 / 151, do lỗi builder S29 (đã sửa ở mục K4-thr-C-fx), không phải do body rỗng. Bốn bản này không dựng lại vì chỉ dùng để đọc Doc P/R; phần chunk bị thiếu dưới 0,4%. Không query nào thiếu chunk. Query ít chunk nhất là query 556 ở J4-* (8 / 9 / 17 chunk; nhiều doc thin) và query 1009 ở COS-K40 (22).
 - Không cắt body. Validator S26 báo `ok` cả 4. Output ở `out/runs/s31-strong-judge/build-topk/`; profile nằm trong `<bản>.s31.json` → `profile`.
+
+## Lỗi builder: doc Pharmacity không có chunk; K4-thr-C-fx (CPU, chưa nộp)
+
+**Lỗi.** Trong `r2ai/s29/build.py` (có từ commit `32db7cd`, S29), doc Pharmacity (`extra_texts`) bị loại khỏi `need_body`. Vì vậy body của chúng không bao giờ được nạp, và mọi doc Pharmacity được chọn đều không có chunk (`has_text=False` hoặc nguồn `none`).
+
+Cả 979 doc Pharmacity đều có body: `doc_text` = title + `
+
+` + body, chunks_t256 có field `body` và `title`.
+- Text khi nhúng BGE-M3: `doc_text`, 4.096 ký tự đầu, 512 token.
+- Text khi chấm 4B: phần đầu `doc_text`, cắt 512 token. 410 / 474 cặp bị cắt; trung vị 1.762 / 3.304 ký tự.
+
+Số lượt doc Pharmacity được chọn mà không có chunk ở các bản cũ: J4-rrf-ph979 348, K4-thr-C 353, QRRF-nc140-ph (S29) 211, COS-K40 95, J4-K20 52, J4-K40 98, J4-K60 151.
+
+**Sửa (22/10).** Đưa doc Pharmacity vào `need_body`; body lấy từ span `body` của lô. Test end-to-end `test_selected_pharmacity_doc_gets_whole_body_chunk` (cả luật n_c và chunk_selector): doc Pharmacity được chọn nhận chunk bằng đúng nguyên body. Test này fail trên builder cũ.
+
+**Mốc hồi quy:**
+- Các bản cũ giữ làm lịch sử, không dựng lại: J4-rrf-ph979, K4-thr-C, K4-thr-C-extD, K4-free-D, COS-K40, J4-K*. Mốc Jcheck-q06-rrf (`da6cf34b…`) là của builder cũ; vì QRRF-nc140-ph chọn 211 doc Pharmacity nên builder đã sửa không còn tái tạo được JSON đó.
+- Hồi quy mới: K4-thr-C dựng bằng builder đã sửa với `--no-extra-chunks` (doc Pharmacity được đưa ra như không có text, đúng hành vi cũ) cho ra **đúng JSON `d771c4f9…c9b0` và ZIP `31980453…5a87` của K4-thr-C**. Kết quả này chứng minh thay đổi chỉ chạm vào Pharmacity. Hằng `K4_THR_C_JSON_SHA256`.
+- **Mốc mới: K4-thr-C-fx JSON `c105b78da25c7dbfa141a48187484161fc858dc92fffd0a0311011e00453499c`** (hằng `K4_THR_C_FX_JSON_SHA256`).
+
+**K4-thr-C-fx** = doc của K4-thr-C (giống hệt ở cả 1.200 query). Mỗi doc được chọn có P4B ≥ t_c = 0,07056 (`T_C_FIXED`) nhận một chunk nguyên body; không cắt, nếu vượt trần thì builder dừng.
+
+| | K4-thr-C (LB 0,4183) | K4-thr-C-fx |
+|---|---:|---:|
+| Doc | 195.147 | 195.147 |
+| Chunk | 175.148 | **175.548** |
+| Chunk Pharmacity | 0 | **337** (238 query) |
+| Chunk thêm không phải Pharmacity | – | 63 (59 query), đều có P4B đúng bằng t_c |
+| ZIP B | 100.471.357 | **100.763.753** (dưới trần, không cắt) |
+| ZIP SHA256 | `31980453…5a87` | `e8635c66c35cad6bc17a1b3f2bb5ab4757f58f01dbd05e19fe581603a28ed760` |
+
+- Có 353 lượt doc Pharmacity được chọn: 337 có P4B ≥ t_c nên nhận chunk, 16 nằm dưới t_c.
+- 63 chunk không phải Pharmacity là các doc hoà đúng t_c. K4-thr-C đã cắt chúng ở mốc 175.148; với quy tắc t_c cố định (P4B ≥ t_c) thì chúng được lấy.
+- Mọi chunk cũ được giữ nguyên text và thứ tự; chỉ có chunk được chèn thêm.
+- Validator S26 báo `ok`. Output ở `out/runs/s31-strong-judge/build-fx/`; hồi quy ở `build-fx-regress/`.
+
+Từ giờ mọi bản mới đều dựng bằng builder đã sửa.

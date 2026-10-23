@@ -437,3 +437,45 @@ def test_topk_pools_and_profile(monkeypatch):
     assert b.variant_chunk_mode("J4-K60", "J4") == "all" and b.variant_k_mode("J4-rrf", "J4") is None
     with pytest.raises(ValueError):
         b.topk_pools(union, 4)
+
+
+@pytest.mark.parametrize("use_selector", [False, True])
+def test_selected_pharmacity_doc_gets_whole_body_chunk(tmp_path, monkeypatch, use_selector):
+    import json
+    import zipfile
+
+    from r2ai.s29 import build as s29
+
+    canonical = tmp_path / "canonical"
+    canonical.mkdir()
+    canon_text = "Tiêu đề A\n\nThân bài A"
+    pd.DataFrame({"doc_id": [1], "lang": ["vi"], "doc_text": [canon_text]}).to_parquet(canonical / "docs.parquet")
+    pd.DataFrame({"doc_id": [1, 1], "field": ["title", "body"], "char_start": [0, 11],
+                  "char_end": [9, len(canon_text)]}).to_parquet(canonical / "chunks_t256.parquet")
+    ph_text = "Tiêu đề Pharmacity\n\nThân bài Pharmacity"
+    extra_texts = {317701: ph_text}
+    extra_spans = {317701: {"title": (0, 18), "body": (20, len(ph_text))}}
+    stamp = tmp_path / "stamp.zip"
+    stamp.write_bytes(b"x")
+    out = tmp_path / "out"
+    out.mkdir()
+    monkeypatch.setattr(s29, "_inputs", lambda: {"baseline": stamp, "p1": stamp})
+    other = [{"doc_id": 9, "chunk_text": "x"}, {"doc_id": 9, "chunk_text": "y"}]  # n_c = 2, doc 9 not selected
+    rows = [{"id": 7, "relevant_docs": [1], "relevant_chunks": other, "nc": 2}]
+    groups = {1: [1], 317701: [317701]}
+    cid_to_doc = {1: 1, 317701: 317701}
+    p1_any, row_ids = s29._row_id_maps(rows, cid_to_doc)
+    chosen = {7: [{"doc_id": 317701}, {"doc_id": 1}]}
+    selector = (lambda offered: {q: [(d, c) for d, c, h in items if h] for q, items in offered.items()}) \
+        if use_selector else None
+    summary = s29._build_variant(
+        out, "T", rows, {7: {"relevant_docs": [1]}}, p1_any, {}, row_ids, groups, cid_to_doc,
+        {1: "vi", 317701: "vi"}, set(), canonical, extra_texts, extra_spans, chosen, "c", 1.3, "s", 60, None,
+        1.4, True, None, fixed_k=False, chunk_selector=selector,
+    )
+    with zipfile.ZipFile(summary["zip"]) as archive:
+        (row,) = json.loads(archive.read("T.json"))
+    assert row["relevant_docs"] == [317701, 1]
+    assert row["relevant_chunks"] == [{"doc_id": 317701, "chunk_text": "Thân bài Pharmacity"},
+                                      {"doc_id": 1, "chunk_text": "Thân bài A"}]
+    assert summary["chunk_source"]["none"] == 0

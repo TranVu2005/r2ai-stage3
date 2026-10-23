@@ -417,9 +417,8 @@ def _build_variant(
             if _thin_carrier(doc_id, corpus_id, row_own, all_p1_texts, groups, physical, thin_texts):
                 continue
             if corpus_id not in row_own and corpus_id not in all_p1_texts:
-                if doc_id not in extra_texts:
-                    need_body.add(doc_id)
-    owner_ids = {_canonical_owner(doc_id, groups, physical) for doc_id in need_body}
+                need_body.add(doc_id)  # extra (Pharmacity) docs included: their body comes from extra_texts
+    owner_ids = {_canonical_owner(doc_id, groups, physical) for doc_id in need_body - set(extra_texts)}
     spans = _load_spans(chunks_path, owner_ids)
     body_texts: dict[int, str] = {}
     if need_body - set(extra_texts):

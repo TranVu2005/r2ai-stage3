@@ -1,0 +1,369 @@
+"""S36 doc side: global probability calibration, EF2-cut and LANG-thr on the J3-thrC frame (CPU).
+
+``python -m r2ai.s36.cal run``  fits p_cal for P_fused = P4B and P_fused = mean(P4B, Jina mapped to the P4B quantiles), selects
+``EF2-cut-p4b``, ``EF2-cut-avg``, ``LANG-thr-avg`` (and the degenerate ``LANG-thr-p4b``), writes ``cal/cal.json``,
+``cal/keep-<name>.json`` (docs per query), ``cal/pcal-<name>.parquet`` and ``docsel/docsel-J3-thrC.parquet``.
+
+Frame = J3-thrC: pool13 of K4-thr-C (round(1.3 K_q) after Pharmacity 979), order RRF k=60 over cosine, 4B, Jina.
+
+* ``P_fused``: ``p4b`` = the Qwen3-Reranker-4B P(yes); ``avg`` = (P4B + Jina') / 2, Jina' = the Jina score mapped to the P4B value of
+  the same global quantile over the pool13 pairs (monotone, so ranks are unchanged).
+* ``p_cal = sigmoid(a logit(P_fused) + b)``. (a, b) minimise the squared error between the macro mean of p_cal (mean over the
+  1,200 queries of the per-query mean over the submitted docs) and the LB Doc P of J4-K40 (0.376), K4-thr-C (0.2346), J3-thrC (0.2357).
+* ``G_q`` (expected gold docs of a query) = sum of p_cal over the pool + a tail beyond the pool depth: the mean p_cal of the last 10 pool
+  docs in cosine order decays geometrically, with the decay rate fitted on the last 60 docs and bounded below (tail <= 50 docs of
+  the last mean).
+* ``G_q`` is also scaled by a global factor s fitted so that the predicted macro Doc F2 of J3-thrC equals its LB value (0.4161): the
+  pool misses gold docs (LB Doc R about 0.51 against 0.79 predicted from the pool). The K4-thr-C prediction (LB 0.4139) checks s.
+  ``anchored`` (s fitted) builds the bundles; ``literal`` (s = 1) is reported.
+* EF2-cut: top-k of the RRF order maximising 5 sum_{i<=k} p_cal / (4 G_q + k), k in [min(20, depth), depth].
+* LANG-thr: docs per query = clip(#(P4B >= t_lang), ceil(0.5 K_q), floor(1.3 K_q)) taken in RRF order, as J3-thrC; t_vi and t_zh are
+  the P4B values where the marginal precision (mean p_cal of the language's pool docs within +-5% of the language's P4B quantile)
+  falls to the same c, and c is the fixed point c = F2 / 5 of the predicted macro F2 of the resulting selection (the F2-optimal
+  cut-off probability is F2 / 5).
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import math
+from pathlib import Path
+from typing import Any, Sequence
+
+import numpy as np
+import pandas as pd
+import pyarrow.parquet as pq
+from scipy.optimize import least_squares
+
+from r2ai import paths
+from r2ai.s29.qwen_judge import _atomic_json, _inputs, _load_submission
+from r2ai.s31 import build as s31_build
+from r2ai.s31.select import RRF_K, doc_set_diff, select_rrf
+from r2ai.s36 import fuse
+
+J3_KEYS = ("cosine_rank", "judge_rank", "jina_rank")
+EPS = 1e-6
+FLOOR_K = 20
+TAIL_LAST = 10
+TAIL_FIT = 60
+TAIL_MAX_DOCS = 50.0
+BAND = 0.05
+LB_DOC_P = {"J4-K40": 0.376, "K4-thr-C": 0.2346, "J3-thrC": 0.2357}
+LB_DOC_F2 = {"K4-thr-C": 0.4139, "J3-thrC": 0.4161}  # S35 / BTC report of 23/10
+VARIANTS = ("p4b", "avg")
+
+
+def cal_root() -> Path:
+    return fuse.run_root() / "cal"
+
+
+def submitted_zips() -> dict[str, Path]:
+    runs = paths.RUNS_DIR
+    return {"J4-K40": runs / "s31-strong-judge" / "build-topk" / "J4-K40.zip",
+            "K4-thr-C": runs / "s31-strong-judge" / "build-k4b" / "K4-thr-C.zip",
+            "J3-thrC": runs / "s35-part-jina" / "build-j3" / "J3-thrC.zip"}
+
+
+def logit(p: np.ndarray) -> np.ndarray:
+    p = np.clip(p, EPS, 1 - EPS)
+    return np.log(p / (1 - p))
+
+
+def sigmoid(x: np.ndarray) -> np.ndarray:
+    return 1.0 / (1.0 + np.exp(-x))
+
+
+class Frame:
+    """pool13 rows of every query in J3 RRF order, with P4B, Jina, language and the lookups of the scored union."""
+
+    def __init__(self) -> None:
+        ranked, union, _, _, _, _ = fuse.load_frames()
+        self.ranked = ranked
+        self.p4b_of = {(q, int(r["doc_id"])): float(r["judge_score"]) for q, rows in union.items() for r in rows}
+        self.jina, _ = fuse.load_jina(None)
+        for q, rows in ranked.items():
+            if fuse.rank_missing_last(rows, q, self.jina, "jina_score", "jina_rank"):
+                raise ValueError(f"query {q}: pool13 pair without Jina score")
+        inputs = _inputs()
+        self.base_k = {int(r["id"]): len(r["relevant_docs"]) for r in _load_submission(inputs["baseline"])}
+        docs = pq.read_table(inputs["canonical"] / "docs.parquet", columns=["doc_id", "lang"]).to_pandas()
+        self.lang = dict(zip(docs.doc_id.astype(int), docs.lang))
+        self.order = {q: select_rrf(rows, len(rows), J3_KEYS, RRF_K) for q, rows in ranked.items()}  # full J3 RRF order
+        self.qids = sorted(ranked)
+        pairs = [(q, r) for q in self.qids for r in self.order[q]]
+        self.p4b13 = np.array([float(r["judge_score"]) for _, r in pairs])
+        self.jina13 = np.array([float(r["jina_score"]) for _, r in pairs])
+        self.sorted_jina, self.sorted_p4b = np.sort(self.jina13), np.sort(self.p4b13)
+
+    def jina_prime(self, jina: np.ndarray) -> np.ndarray:
+        """Jina score -> P4B value of the same global quantile (pool13 pairs); monotone."""
+        return np.interp(jina, self.sorted_jina, self.sorted_p4b)
+
+    def fused(self, variant: str, p4b: np.ndarray, jina: np.ndarray) -> np.ndarray:
+        return p4b if variant == "p4b" else 0.5 * (p4b + self.jina_prime(jina))
+
+    def doc_lang(self, doc_id: int) -> str:
+        return self.lang.get(doc_id, "vi")  # Pharmacity docs are not in docs.parquet
+
+
+def set_arrays(frame: Frame, docs_by_query: dict[int, list[int]]) -> dict[str, np.ndarray]:
+    q, p4b, jina = [], [], []
+    for qid, ids in docs_by_query.items():
+        for d in ids:
+            q.append(qid)
+            p4b.append(frame.p4b_of[(qid, d)])
+            jina.append(frame.jina[(qid, d)])
+    return {"q": np.array(q), "p4b": np.array(p4b), "jina": np.array(jina)}
+
+
+def macro_mean(q: np.ndarray, values: np.ndarray) -> tuple[float, float]:
+    """(mean over queries of the per-query mean, mean over all docs)."""
+    _, inverse = np.unique(q, return_inverse=True)
+    sums, counts = np.bincount(inverse, weights=values), np.bincount(inverse)
+    return float((sums / counts).mean()), float(values.mean())
+
+
+def fit_calibration(frame: Frame, variant: str, sets: dict[str, dict[str, np.ndarray]]) -> dict[str, Any]:
+    x = {name: logit(frame.fused(variant, s["p4b"], s["jina"])) for name, s in sets.items()}
+
+    def residuals(theta: np.ndarray) -> np.ndarray:
+        a, b = theta
+        return np.array([macro_mean(sets[n]["q"], sigmoid(a * x[n] + b))[0] - LB_DOC_P[n] for n in sets])
+
+    best = min((least_squares(residuals, np.array([a0, b0]), bounds=([0.05, -10.0], [20.0, 10.0])) for a0 in (0.5, 1.0, 2.0) for b0 in (-2.0, 0.0, 2.0)),
+               key=lambda r: r.cost)
+    a, b = map(float, best.x)
+    fits = {}
+    for n in sets:
+        macro, micro = macro_mean(sets[n]["q"], sigmoid(a * x[n] + b))
+        fits[n] = {"lb_doc_p": LB_DOC_P[n], "predicted_macro": macro, "error": macro - LB_DOC_P[n], "predicted_micro": micro, "docs": int(len(x[n]))}
+    return {"variant": variant, "a": a, "b": b, "max_abs_error": max(abs(f["error"]) for f in fits.values()),
+            "rmse": float(math.sqrt(np.mean([f["error"] ** 2 for f in fits.values()]))), "sets": fits}
+
+
+def tail_mass(p_cos_order: np.ndarray) -> float:
+    """Expected gold docs beyond the pool depth, from the decay of p_cal over the last pool docs (cosine order)."""
+    n = len(p_cos_order)
+    if n < TAIL_FIT:
+        return 0.0
+    blocks = p_cos_order[n - TAIL_FIT:].reshape(-1, TAIL_LAST).mean(axis=1) + 1e-9
+    slope = np.polyfit(np.arange(len(blocks)), np.log(blocks), 1)[0]  # per block of TAIL_LAST docs
+    lam = max(-slope / TAIL_LAST, math.log(1 + 1 / TAIL_MAX_DOCS))
+    return float(blocks[-1] * math.exp(-(TAIL_LAST / 2 - 0.5) * lam) / math.expm1(lam))
+
+
+class Calibrated:
+    """p_cal of every pool13 pair for one P_fused variant, G_q and the per-query orders."""
+
+    def __init__(self, frame: Frame, variant: str, a: float, b: float, scale: float = 1.0) -> None:
+        self.frame, self.variant, self.a, self.b, self.scale = frame, variant, a, b, scale
+        self.p: dict[int, np.ndarray] = {}      # p_cal in RRF order
+        self.fused: dict[int, np.ndarray] = {}
+        self.g_pool: dict[int, float] = {}
+        self.g: dict[int, float] = {}
+        self.tail: dict[int, float] = {}
+        for q in frame.qids:
+            rows = frame.order[q]
+            p4b = np.array([float(r["judge_score"]) for r in rows])
+            jina = np.array([float(r["jina_score"]) for r in rows])
+            fused = frame.fused(variant, p4b, jina)
+            p = sigmoid(a * logit(fused) + b)
+            by_cos = p[np.argsort([int(r["cosine_rank"]) for r in rows], kind="stable")]
+            self.fused[q], self.p[q] = fused, p
+            self.g_pool[q] = float(p.sum())
+            self.tail[q] = tail_mass(by_cos)
+            self.g[q] = scale * (self.g_pool[q] + self.tail[q])
+        self.p_of = {(q, int(r["doc_id"])): float(p) for q in frame.qids for r, p in zip(frame.order[q], self.p[q])}
+
+    def expected(self, keep: dict[int, int], tail: bool = True) -> dict[str, float]:
+        """Macro predicted Doc P / R / F2 of selecting the top ``keep[q]`` docs of the RRF order."""
+        precision, recall, f2 = [], [], []
+        for q in self.frame.qids:
+            k = keep[q]
+            tp = float(self.p[q][:k].sum())
+            g = self.g[q] if tail else self.g_pool[q]
+            precision.append(tp / k if k else 0.0)
+            recall.append(tp / g)
+            f2.append(5 * tp / (4 * g + k))
+        return {"precision": float(np.mean(precision)), "recall": float(np.mean(recall)), "f2": float(np.mean(f2))}
+
+
+    def expected_docs(self, docs_by_query: dict[int, list[int]]) -> dict[str, float]:
+        """Same as ``expected`` for an arbitrary submitted set (docs of the pool13)."""
+        precision, recall, f2 = [], [], []
+        for q in self.frame.qids:
+            ids = docs_by_query[q]
+            tp = sum(self.p_of[(q, d)] for d in ids)
+            precision.append(tp / len(ids))
+            recall.append(tp / self.g[q])
+            f2.append(5 * tp / (4 * self.g[q] + len(ids)))
+        return {"precision": float(np.mean(precision)), "recall": float(np.mean(recall)), "f2": float(np.mean(f2))}
+
+
+def fit_scale(frame: Frame, variant: str, a: float, b: float, base_keep: dict[int, int]) -> float:
+    """Global factor s on G_q so that the predicted macro F2 of J3-thrC equals its LB Doc F2 (the pool13 and the tail model miss
+    gold docs outside the pool: the Doc R of the LB is about 0.51, while sum p_cal over the pool predicts about 0.79)."""
+    lo, hi = 0.5, 5.0
+    for _ in range(40):
+        mid = math.sqrt(lo * hi)
+        f2 = Calibrated(frame, variant, a, b, mid).expected(base_keep)["f2"]
+        lo, hi = (lo, mid) if f2 < LB_DOC_F2["J3-thrC"] else (mid, hi)
+    return math.sqrt(lo * hi)
+
+
+def ef2_keep(cal: Calibrated, tail: bool = True) -> dict[int, int]:
+    keep = {}
+    for q in cal.frame.qids:
+        p, depth = cal.p[q], len(cal.p[q])
+        g = cal.g[q] if tail else cal.g_pool[q]
+        k = np.arange(1, depth + 1)
+        value = 5 * np.cumsum(p) / (4 * g + k)
+        lo = min(FLOOR_K, depth)
+        keep[q] = int(lo + np.argmax(value[lo - 1:]))  # argmax returns the first (smallest k) on ties; +1 -1
+        keep[q] = max(lo, keep[q])
+    return keep
+
+
+def thr_keep(frame: Frame, threshold_of_doc) -> dict[int, int]:
+    """clip(#docs of the pool with P4B >= their threshold, ceil(0.5 K_q), floor(1.3 K_q))."""
+    keep = {}
+    for q in frame.qids:
+        k = frame.base_k[q]
+        n = sum(1 for r in frame.order[q] if float(r["judge_score"]) >= threshold_of_doc(int(r["doc_id"])))
+        keep[q] = int(np.clip(n, math.ceil(0.5 * k - 1e-9), math.floor(1.3 * k + 1e-9)))
+    return keep
+
+
+def marginal_curve(p4b: np.ndarray, p_cal: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """P4B descending and, for each position, the mean p_cal of the docs within +-BAND of the language's size around it."""
+    order = np.argsort(-p4b, kind="stable")
+    sorted_p4b, sorted_p = p4b[order], p_cal[order]
+    n, h = len(p4b), max(1, int(round(BAND * len(p4b))))
+    csum = np.concatenate([[0.0], np.cumsum(sorted_p)])
+    pos = np.arange(n)
+    lo, hi = np.clip(pos - h, 0, n), np.clip(pos + h + 1, 0, n)
+    return sorted_p4b, (csum[hi] - csum[lo]) / (hi - lo)
+
+
+def threshold_at(curve: tuple[np.ndarray, np.ndarray], c: float) -> float:
+    """P4B where the marginal precision first drops to c along the descending P4B list."""
+    sorted_p4b, marginal = curve
+    below = np.flatnonzero(marginal <= c)
+    return float(sorted_p4b[below[0]]) if len(below) else float(sorted_p4b[-1])
+
+
+def lang_thr(cal: Calibrated) -> dict[str, Any]:
+    frame = cal.frame
+    by_lang: dict[str, tuple[list[float], list[float]]] = {}
+    for q in frame.qids:
+        for r, p in zip(frame.order[q], cal.p[q]):
+            lst = by_lang.setdefault(frame.doc_lang(int(r["doc_id"])), ([], []))
+            lst[0].append(float(r["judge_score"]))
+            lst[1].append(float(p))
+    curves = {lang: marginal_curve(np.array(v[0]), np.array(v[1])) for lang, v in by_lang.items()}
+
+    def selection(c: float) -> tuple[dict[str, float], dict[int, int]]:
+        t = {lang: threshold_at(curve, c) for lang, curve in curves.items()}
+        return t, thr_keep(frame, lambda d: t[frame.doc_lang(d)])
+
+    def gap(c: float) -> float:
+        return cal.expected(selection(c)[1])["f2"] / 5 - c
+
+    lo, hi = 0.01, 0.5
+    for _ in range(40):
+        mid = 0.5 * (lo + hi)
+        lo, hi = (mid, hi) if gap(mid) > 0 else (lo, mid)
+    c = 0.5 * (lo + hi)
+    thresholds, keep = selection(c)
+    return {"c": c, "thresholds": thresholds, "keep": keep, "langs": {lang: len(v[0]) for lang, v in by_lang.items()},
+            "f2_over_5": cal.expected(keep)["f2"] / 5}
+
+
+def keep_stats(keep: dict[int, int]) -> dict[str, float]:
+    values = np.array([keep[q] for q in sorted(keep)], dtype=np.float64)
+    return {"total": int(values.sum()), "p10": float(np.quantile(values, .1)), "p50": float(np.quantile(values, .5)),
+            "p90": float(np.quantile(values, .9)), "min": float(values.min()), "max": float(values.max())}
+
+
+def chosen_rows(frame: Frame, keep: dict[int, int]) -> dict[int, list[dict[str, Any]]]:
+    return {q: frame.order[q][: keep[q]] for q in frame.qids}
+
+
+def run() -> dict[str, Any]:
+    frame = Frame()
+    out = cal_root()
+    out.mkdir(parents=True, exist_ok=True)
+    sets = {}
+    for name, path in submitted_zips().items():
+        docs = {r["id"]: r["relevant_docs"] for r in _load_submission(path)}
+        sets[name] = set_arrays(frame, docs)
+    base_keep, _, _ = s31_build.variable_keep(frame.ranked, frame.base_k, "thr")
+    j3_ids = {q: [int(r["doc_id"]) for r in rows[: base_keep[q]]] for q, rows in frame.order.items()}
+    zip_j3 = {r["id"]: r["relevant_docs"] for r in _load_submission(submitted_zips()["J3-thrC"])}
+    result: dict[str, Any] = {"j3_thrC_docs_equal_submitted_zip": all(j3_ids[q] == zip_j3[q] for q in j3_ids),
+                              "lb_doc_p": LB_DOC_P, "lb_doc_f2": LB_DOC_F2,
+                              "jina_to_p4b": "monotone quantile map on the pool13 pairs", "variants": {}}
+    k4_docs = {r["id"]: r["relevant_docs"] for r in _load_submission(submitted_zips()["K4-thr-C"])}
+    for variant in VARIANTS:
+        fit = fit_calibration(frame, variant, sets)
+        scale = fit_scale(frame, variant, fit["a"], fit["b"], base_keep)
+        entry: dict[str, Any] = {"fit": fit, "g_scale": scale, "modes": {}}
+        for mode, factor in (("anchored", scale), ("literal", 1.0)):
+            cal = Calibrated(frame, variant, fit["a"], fit["b"], factor)
+            tails = np.array([cal.tail[q] / (cal.g_pool[q] + cal.tail[q]) for q in frame.qids])
+            sub: dict[str, Any] = {"scale": factor,
+                                   "g": {"mean": float(np.mean(list(cal.g.values()))), "mean_pool": float(np.mean(list(cal.g_pool.values()))),
+                                         "tail_share_mean": float(tails.mean()), "tail_share_p90": float(np.quantile(tails, .9))},
+                                   "predicted_lb_check": {"J3-thrC": cal.expected_docs(zip_j3), "K4-thr-C": cal.expected_docs(k4_docs),
+                                                          "lb_doc_f2": LB_DOC_F2},
+                                   "selections": {}}
+            selections = {"J3-thrC": base_keep, "EF2-cut": ef2_keep(cal)}
+            lang = lang_thr(cal)
+            selections["LANG-thr"] = lang["keep"]
+            sub["lang_thr"] = {k: lang[k] for k in ("c", "thresholds", "langs", "f2_over_5")}
+            for tag, keep in selections.items():
+                ids = {q: [int(r["doc_id"]) for r in rows] for q, rows in chosen_rows(frame, keep).items()}
+                sub["selections"][tag] = {"docs_per_query": keep_stats(keep), "predicted": cal.expected(keep),
+                                          "vs_j3_thrC": doc_set_diff(ids, j3_ids)}
+            entry["modes"][mode] = sub
+            if mode == "anchored":
+                for tag, name in (("EF2-cut", f"EF2-cut-{variant}"), ("LANG-thr", f"LANG-thr-{variant}")):
+                    _atomic_json(out / f"keep-{name}.json", {str(q): int(k) for q, k in selections[tag].items()})
+                rows = [{"query_id": q, "doc_id": int(r["doc_id"]), "p_fused": float(f), "p_cal": float(p)}
+                        for q in frame.qids for r, f, p in zip(frame.order[q], cal.fused[q], cal.p[q])]
+                pd.DataFrame(rows).to_parquet(out / f"pcal-{variant}.parquet", index=False)
+        result["variants"][variant] = entry
+    _atomic_json(out / "cal.json", result)
+    return result
+
+
+def docsel_j3() -> dict[str, Any]:
+    """``docsel/docsel-J3-thrC.parquet``: the docs of the submitted J3-thrC (same scheme as the FUSE4 docsel; ``chunk`` = the doc
+    carries a chunk in the submitted ZIP, built before the Pharmacity fix, so no Pharmacity doc has one)."""
+    from r2ai.s36.build import docsel_writer
+
+    frame = Frame()
+    keep, _, _ = s31_build.variable_keep(frame.ranked, frame.base_k, "thr")
+    rows = _load_submission(submitted_zips()["J3-thrC"], with_chunks=True)
+    chunk_docs = {r["id"]: [int(c["doc_id"]) for c in r["relevant_chunks"]] for r in rows}
+    sidecar = json.loads((submitted_zips()["J3-thrC"].with_name("J3-thrC.s31.json")).read_text(encoding="utf-8"))
+    t_c = float(sidecar["chunk_threshold"]["t_c"])
+    out = fuse.run_root() / "docsel"
+    out.mkdir(parents=True, exist_ok=True)
+    pcal = {"J3-thrC": pd.read_parquet(cal_root() / "pcal-p4b.parquet").rename(columns={"p_fused": "p_fused_p4b", "p_cal": "p_cal_p4b"})
+            .merge(pd.read_parquet(cal_root() / "pcal-avg.parquet").rename(columns={"p_fused": "p_fused_avg", "p_cal": "p_cal_avg"}), on=["query_id", "doc_id"])}
+    docsel_writer(out, "", t_c, pcal)("J3-thrC", chosen_rows(frame, keep), chunk_docs, {"t_c": t_c})
+    return {"path": str(out / "docsel-J3-thrC.parquet"), "t_c": t_c, "docs": int(sum(keep.values())), "chunks": int(sum(len(v) for v in chunk_docs.values()))}
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("command", choices=("run", "docsel-j3"))
+    args = parser.parse_args(argv)
+    result = docsel_j3() if args.command == "docsel-j3" else run()
+    print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

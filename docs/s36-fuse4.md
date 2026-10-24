@@ -300,3 +300,10 @@ LB p4b-CRfair175 = 0,3918 (Doc 0,4209 / Chunk 0,3628): cùng CR-fair, khung p4b 
 * **120A-p4b-v2**: khung EF2-cut-p4b: mỗi query lấy pool13 cộng các doc 120ask mới (đã có 4B), xếp hạng RRF cosine/4B/Jina (`J3_KEYS`, không C-max), G_q = s_thrC x (tổng p_cal trên pool + đuôi), cắt EF2, phân bổ carrier CR-fair với tổng 175.548, full+w768. Config `configs/s36-s37-120A-p4b-v2.json` (`"pool": "pool13"`, chỉ `pairs_new_final_v2`: các cặp độ sâu D=300 của doc canonical không thuộc khung này). Mã: `s37.pool13_plus`.
 
 Cặp 4B cần trong gói Kaggle `final-4b`: khung free cần (cặp độ sâu D=300 chưa có điểm) + (cặp registry nằm trong top-300); khung p4b cần mọi cặp registry chưa có điểm. `export-final` ghi cả hai số (`pairs_needed_free_frame`, `pairs_needed_p4b_frame`, `eta_hours_*`) vào `manifest.json`; gói là hợp của hai (loại trùng), nên chạy gói một lần là đủ cho cả hai khung.
+
+## 120A-p4b-v0 (25/10): khung EF2-cut-p4b thuần trên corpus có 120ask v0
+
+Vu: LB p4b-CRfair175 0,3918 hơn khung free 0,0057, nên dựng khung p4b thuần trên dữ liệu 120ask v0, nộp trước 07:00. `apply` có `"pool": "cosine13"` (`s37.cosine13_pools`, config `configs/s36-s37-120A-p4b-v0.json`): mỗi query lấy top-n cosine của union gộp, n = kích thước pool13 cũ (round(1,3 K_q), kiểm: pool13 cũ đúng bằng top-n cosine của union S36, nên doc 120ask đẩy ra các doc cosine thấp nhất); nguồn RRF cosine / 4B / C-max / Jina (cặp thiếu Jina xếp cuối nguồn Jina), cùng a, b và s_thrC, cắt EF2 theo P4B, G_q = s_thrC x (tổng p_cal trên pool + đuôi). Không dùng máy EF2-free. Chunk: CR-fair tổng carrier 175.548 (ρ 0,9038), full+w768 (`scripts/s36/run_120a_p4b_v0.sh`).
+
+Kết quả docsel: 281.924 doc trong pool (36.160 doc cũ bị đẩy ra ở 958 query; 36.160 cặp mới thiếu Jina), 193.547 doc được chọn (P10/P50/P90 = 60/159/267), trong đó 12.653 doc 120ask (10.471 doc khác nhau, TB 10,54 mỗi query, 784 query có ≥1), Doc F2 dự đoán 0,4191 (mô hình, G_q kiểu thrC).
+

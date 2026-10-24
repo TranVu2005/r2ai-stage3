@@ -172,3 +172,10 @@ def test_pool13_plus_keeps_pool13_docs_and_the_new_docs_with_renumbered_cosine_r
     assert report["docs_added"] == 2 and "judge_rank" in pools[1][0]
     with pytest.raises(ValueError, match="not in the scored union"):
         s37.pool13_plus({1: [{"doc_id": 99}]}, union)
+
+
+def test_cosine13_pools_keep_the_old_pool_size_and_push_out_the_lowest_cosine_docs():
+    row = lambda d, rank, origin: {"doc_id": d, "cosine_rank": rank, "cosine_score": 1 - rank / 100, "judge_score": 0.5, "origin": origin, "order": (0, rank)}  # noqa: E731
+    union = {1: [row(10, 1, "s31"), row(11, 2, "s37"), row(12, 3, "s31"), row(13, 4, "s31")]}
+    pools, report = s37.cosine13_pools({1: [{"doc_id": 10}, {"doc_id": 12}, {"doc_id": 13}]}, union)
+    assert [r["doc_id"] for r in pools[1]] == [10, 11, 12] and report["old_pool13_docs_pushed_out"] == 1 and "judge_rank" in pools[1][0]

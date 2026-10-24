@@ -94,6 +94,8 @@ def test_registry_docs_and_best_chunk(tmp_path, monkeypatch):
     store, reg, text = make_segment(tmp_path)
     monkeypatch.setattr(registry, "STORE", store)
     monkeypatch.setattr(registry, "REGISTRY", reg)
+    monkeypatch.setattr(registry, "REGISTRY_V2", tmp_path / "no-v2.parquet")
+    monkeypatch.setattr(registry, "S36_PAIRS", tmp_path / "no-s36")
     index = registry.registry_index()
     assert index == {900001: "seg1"} and registry.registry_index(tmp_path / "missing.parquet") == {}
     docs = registry.load_docs(index, [900001, 5])
@@ -290,3 +292,19 @@ def test_validate_rechecks_an_existing_zip_and_refuses_a_changed_one(tmp_path, m
         assert "differs" in str(err)
     else:
         raise AssertionError("no error")
+
+
+def test_registry_index_reads_the_final_v2_registry_and_the_s36_pairs_with_a_segment(tmp_path, monkeypatch):
+    v1, v2, s36 = tmp_path / "pairs_new.parquet", tmp_path / "pairs_new_final_v2.parquet", tmp_path / "s36"
+    s36.mkdir()
+    cols = ["pair_id", "query_id", "doc_id", "segment"]
+    pd.DataFrame([(1, 1, 900001, "segA")], columns=cols).to_parquet(v1)
+    pd.DataFrame([(1, 1, 900001, "segA"), (2, 1, 900002, "segB")], columns=cols).to_parquet(v2)
+    pd.DataFrame([(5_000_000, 2, 900003, "segC"), (5_000_001, 2, 10, "")], columns=cols).to_parquet(s36 / "pairs_final.parquet")   # doc 10: canonical
+    monkeypatch.setattr(registry, "REGISTRY", v1)
+    monkeypatch.setattr(registry, "REGISTRY_V2", v2)
+    monkeypatch.setattr(registry, "S36_PAIRS", s36)
+    assert [f.name for f in registry.registry_files()] == ["pairs_new.parquet", "pairs_new_final_v2.parquet", "pairs_final.parquet"]
+    assert registry.registry_index() == {900001: "segA", 900002: "segB", 900003: "segC"}
+    assert registry.registry_index(v1) == {900001: "segA"}
+    assert registry.describe(registry.registry_index())["docs"] == 3

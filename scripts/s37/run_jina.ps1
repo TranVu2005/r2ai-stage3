@@ -11,7 +11,8 @@ param(
 )
 $env:PYTHONPATH = "$Repo\src"; $env:PYTHONUNBUFFERED = '1'; $env:PYTHONIOENCODING = 'utf-8'
 $env:R2AI_OUT_DIR = 'D:/GitHub/r2ai-stage3/out'; $env:R2AI_DATA_DIR = 'D:/GitHub/r2ai-stage3/data'; $env:R2AI_STATE_DIR = 'D:/GitHub/r2ai-stage3/state'
-$env:R2AI_LOG_DIR = 'D:/GitHub/r2ai-stage3/out/logs'; $env:HF_HOME = 'C:/Users/Admin/.cache/huggingface'; $env:HF_HUB_OFFLINE = '1'
+$env:PYTORCH_CUDA_ALLOC_CONF = 'expandable_segments:True'   # fewer fragmentation OOMs (a no-op with a warning on Windows builds without support)
+$env:R2AI_LOG_DIR ='D:/GitHub/r2ai-stage3/out/logs'; $env:HF_HOME = 'C:/Users/Admin/.cache/huggingface'; $env:HF_HUB_OFFLINE = '1'
 $log = "$Run\supervisor.log"
 function Note($m) { "$(Get-Date -Format s) supervisor_pid=$PID $m" | Add-Content -Encoding utf8 $log }
 $parts = "$Run\parts-$Layout"

@@ -14,11 +14,13 @@
 
 Config (JSON, every key optional): ``{"name": "EF2-free-s37", "pairs_new": ".../pairs_new.parquet" | [".../pairs_new_final_v2.parquet",
 ".../d300/pairs_final.parquet"], "scores_4b": [...], "cmax": [...], "jina": ".../scores-all.parquet", "t_c": 0.2030746281894702,
-"carriers": {"rule": "threshold" | "fair" | "swap", "target": N, "drop": N}, "pool": "free" | "d211" | "fixed", "depth": 300, "out": "..."}``.
+"carriers": {"rule": "threshold" | "fair" | "swap", "target": N, "drop": N}, "pool": "free" | "d211" | "fixed" | "pool13", "depth": 300, "out": "..."}``.
 Defaults are the S37 run layout (``out/runs/s37``) plus the 4B scores of the subsets exported by ``r2ai.s36.d300`` (``out/runs/s36-fuse4/d300``).
 ``pairs_new`` may list several registries (``pairs_new_final_v2`` and the D=300 pairs): a pair in two of them counts once, the copy with a 4B score
 first. ``pool`` ``fixed``: every query's pool is its cosine top-``depth`` of the merged union (all pairs of it need a 4B score; checked against the
 cosine ranking of ``out/runs/s37/pool.npz`` + the 120ask vectors and reported); G_q keeps the top-211 definition.
+``pool`` ``pool13``: the EF2-cut-p4b frame, each pool = the pool13 docs plus the new 120ask docs (J3 sources cosine / 4B / Jina, G_q = s_thrC x
+(sum p_cal over the pool + tail), no C-max in the fusion).
 """
 from __future__ import annotations
 
@@ -112,6 +114,21 @@ def fixed_pools(union: dict[int, list[dict[str, Any]]], depth: int) -> tuple[dic
     return pools, {"mode": "fixed", "depth": depth, "queries_bottom_doc_p4b_at_or_above_t_free": int(stuck)}
 
 
+def pool13_plus(ranked: dict[int, list[dict[str, Any]]], union: dict[int, list[dict[str, Any]]]) -> tuple[dict[int, list[dict[str, Any]]], dict[str, Any]]:
+    """EF2-cut-p4b frame with the new 120ask docs: every query's pool = its pool13 docs plus the docs the S37 registries added (``origin`` s37, 4B
+    scored), rows taken from the merged ``union`` so ``cosine_rank`` counts the new docs too."""
+    pools, added, lost = {}, 0, 0
+    for q, rows in union.items():
+        base = {int(r["doc_id"]) for r in ranked.get(q, [])}
+        keep = [dict(r) for r in rows if int(r["doc_id"]) in base or r.get("origin") == "s37"]
+        lost += len(base - {int(r["doc_id"]) for r in keep})
+        added += sum(1 for r in keep if int(r["doc_id"]) not in base)
+        pools[q] = s31_build._with_judge_rank(keep)
+    if lost:
+        raise ValueError(f"{lost} pool13 docs are not in the scored union")
+    return pools, {"mode": "pool13+s37", "pool13_docs": int(sum(len(v) for v in ranked.values())), "docs_added": int(added)}
+
+
 def check_fixed_pools(pools: dict[int, list[dict[str, Any]]], depth: int) -> dict[str, Any]:
     """Compare the pools with the cosine top-``depth`` of the corpus (canonical + Pharmacity + 120ask vectors): queries and docs that differ."""
     from r2ai.s36 import d300
@@ -193,7 +210,7 @@ def apply(cfg: dict[str, Any]) -> dict[str, Any]:
     for key, files in inputs.items():
         if (not files and not (key == "jina" and no_jina)) or not all(Path(f).exists() for f in files):
             raise FileNotFoundError(f"{key}: {files} (artifact not there yet)")
-    _, union, _, _, _, _ = fuse.load_frames()
+    ranked, union, _, _, _, _ = fuse.load_frames()
     scores_4b = load_scores(spec["scores_4b"], "pair_id", "score")
     pairs = read_pairs(pair_files, scores_4b)
     coverage_4b = float(pairs.pair_id.astype(int).isin(scores_4b).mean())
@@ -204,6 +221,8 @@ def apply(cfg: dict[str, Any]) -> dict[str, Any]:
         pools, pool_report = fixed_pools(union, int(spec["depth"]))
         if spec.get("check_pool", True):
             pool_report["check_vs_corpus"] = check_fixed_pools(pools, int(spec["depth"]))
+    elif pool_kind == "pool13":                                # EF2-cut-p4b frame: pool13 + the new docs, J3 keys, G_q of the pool13 frame
+        pools, pool_report = pool13_plus(ranked, union)
     else:
         pools, _, pool_report = s31_build.free_adaptive(union, deepen=pool_kind != "d211")
     pool_report["pool"] = pool_kind
@@ -232,9 +251,14 @@ def apply(cfg: dict[str, Any]) -> dict[str, Any]:
         raise MissingScores(f"pool pairs without a score: {json.dumps(missing)}")
     fitted = json.loads((cal.cal_root() / "cal.json").read_text(encoding="utf-8"))["variants"]["p4b"]
     a, b = fitted["fit"]["a"], fitted["fit"]["b"]
-    s_free = float(json.loads((cal.cal_root() / "ef2-free.json").read_text(encoding="utf-8"))["s_free"])
-    frame = cal.Frame(fuse.FOUR_KEYS, "free", data={"pools": pools, "union": union, "jina": jina, "cmax": cmax}, allow_missing=last)
-    calibrated = cal.Calibrated(frame, "p4b", a, b, s_free, use_tail=True, g_depth=cal.FREE_G_DEPTH)
+    if pool_kind == "pool13":
+        s_free = float(fitted["g_scale"])
+        frame = cal.Frame(cal.J3_KEYS, "thrC", data={"ranked": ranked, "pools": pools, "union": union, "jina": jina, "cmax": cmax}, allow_missing=last)
+        calibrated = cal.Calibrated(frame, "p4b", a, b, s_free, use_tail=True)
+    else:
+        s_free = float(json.loads((cal.cal_root() / "ef2-free.json").read_text(encoding="utf-8"))["s_free"])
+        frame = cal.Frame(fuse.FOUR_KEYS, "free", data={"pools": pools, "union": union, "jina": jina, "cmax": cmax}, allow_missing=last)
+        calibrated = cal.Calibrated(frame, "p4b", a, b, s_free, use_tail=True, g_depth=cal.FREE_G_DEPTH)
     keep = cal.ef2_keep(calibrated)
     chosen = cal.chosen_rows(frame, keep)
     sel = pd.DataFrame([(q, int(r["doc_id"]), k, float(r["judge_score"])) for q, rows in chosen.items() for k, r in enumerate(rows, 1)],

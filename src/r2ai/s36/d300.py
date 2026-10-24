@@ -308,6 +308,13 @@ def export_final(depth: int, registry: Path | None = None) -> dict[str, Any]:
     summary = {"depth": depth, "registry": str(registry), "registry_sha256": _sha256(registry), **summarize(top, depth),
                "registry_pairs_unscored": int(len(reg)), "pairs_from_depth_only": int((todo.origin == "depth").sum()),
                "pairs_from_registry_only": int((todo.origin == "registry").sum()), "pairs_in_both": int((todo.origin == "both").sum())}
+    # per frame: the free frame (fixed pool D) needs the depth pairs and the registry pairs inside the top-D; the EF2-cut-p4b frame (pool13 +
+    # the new 120ask docs) needs every unscored registry pair
+    need_free = int(todo.origin.isin(["depth", "both"]).sum())
+    need_p4b = int(todo.origin.isin(["registry", "both"]).sum())
+    summary.update({"pairs_needed_free_frame": need_free, "pairs_needed_p4b_frame": need_p4b,
+                    "eta_hours_free_frame": round(need_free / KAGGLE_PAIRS_PER_S / 3600, 2),
+                    "eta_hours_p4b_frame": round(need_p4b / KAGGLE_PAIRS_PER_S / 3600, 2)})
     return write_subset(todo, out_dir(), "final-4b", "pool-93003.parquet", summary, started, top)
 
 

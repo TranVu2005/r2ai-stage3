@@ -162,3 +162,13 @@ def test_fixed_pools_cut_every_query_at_the_depth_and_refuse_a_short_union():
     assert pools[1][0]["judge_rank"] == 1 and "judge_rank" in pools[2][-1]
     with pytest.raises(ValueError, match="only 12 scored pairs"):
         s37.fixed_pools({1: rows(12)}, 20)
+
+
+def test_pool13_plus_keeps_pool13_docs_and_the_new_docs_with_renumbered_cosine_ranks():
+    row = lambda d, rank, origin: {"doc_id": d, "cosine_rank": rank, "cosine_score": 1 - rank / 100, "judge_score": 0.5, "origin": origin, "order": (0, rank)}  # noqa: E731
+    union = {1: [row(10, 1, "s31"), row(11, 2, "s37"), row(12, 3, "s31"), row(13, 4, "s31"), row(14, 5, "s37")]}
+    pools, report = s37.pool13_plus({1: [{"doc_id": 10}, {"doc_id": 12}]}, union)
+    assert [r["doc_id"] for r in pools[1]] == [10, 11, 12, 14] and [r["cosine_rank"] for r in pools[1]] == [1, 2, 3, 5]
+    assert report["docs_added"] == 2 and "judge_rank" in pools[1][0]
+    with pytest.raises(ValueError, match="not in the scored union"):
+        s37.pool13_plus({1: [{"doc_id": 99}]}, union)

@@ -152,6 +152,33 @@ LB: mốc Final 0,3914 (Doc 0,4209, Chunk 0,3619: P 0,2213 / R 0,4769); EF2-free
 - Giải thích: mô hình p_cal ở mức doc dự đoán carrier của free tốt hơn mốc, nên không giải thích được chunk recall −4,5%; mất cửa sổ (−24%) giải thích một phần chưa biết. Bằng chứng S38 (nguyên body 0,3594 → thêm cửa sổ ~12 nghìn doc 0,3619) cho thấy cửa sổ chỉ cộng cỡ +0,0025 chunk F2 nên khó giải thích hết −0,0135. Phần dư chưa giải thích được offline vì không có nhãn chunk.
 
 
+### Quy tắc chunk kiểm bằng LB: CR-fair và CR-swap (24/10, chưa nộp)
+
+Cả hai dùng đúng docsel EF2-free (`9e15a8bd…1185`, docs không đổi), compose S38 `fe7f82e` + `--carriers`, thin theo nội dung, validator S26 `--max-chunks-per-doc 2`. Tập carrier do `python -m r2ai.s36.carriers` (`scripts/s36/run_cr.sh fair swap` dựng ZIP).
+
+- **CR-fair**: mỗi query mang chunk cho top ⌈ρ·|D_q|⌉ doc theo P4B giảm dần (hoà theo rank docsel); ρ = 0,7876448 là hằng số toàn cục, giải để tổng carrier = 174.535.
+- **CR-swap**: giữ ngưỡng toàn cục hiện tại, bỏ 4.400 carrier P4B thấp nhất (ngưỡng hiệu dụng 0,2031 → 0,2254), còn 170.135.
+
+| | EF2-free t2002 (đã nộp) | CR-fair | CR-swap |
+|---|---:|---:|---:|
+| ZIP | 102.594.467 B, `f4b6530d…063f` | `EF2-free-CRfair-t1728.zip` 102.597.138 B, SHA `4a7c4965…8aa4` | `EF2-free-CRswap-t1536.zip` 102.492.718 B, SHA `89223b24…786c` |
+| T (đúng tới 1 token) | 2002 | **1728** (1727 vượt trần) | **1536** (sàn: toàn bộ cửa sổ, còn dư 107.282 B) |
+| carrier (chunk đầu) | 174.535 | 173.898 (637 cặp không có nguồn chunk bị bỏ) | 170.135 |
+| cửa sổ 768 | 9.561 | 20.890 | 35.590 |
+| chunk tổng | 184.096 | 194.788 | 205.725 |
+| carrier/query P10 / P50 / P90 | 38 / 118 / 329 | 58 / 127 / 286 | 36 / 113 / 324 |
+| tỷ trọng 100 query đầu | 22,3% | 18,8% | 22,7% |
+| thin | 25 carrier | 18 carrier | 22 carrier |
+| validator S26 | ok | ok, 0 lỗi | ok, 0 lỗi |
+
+Pin: carriers CR-fair `e80c8a28…a2bc`, CR-swap `3d6c6008…1df8` (`out/runs/s36-fuse4/carriers/`); JSON CR-fair `43c34f16…16fe`, CR-swap `9c773cc7…69d4`. Nguồn chunk của carrier mới đúng quy tắc builder S29. Mô hình không dự đoán được Chunk F2 của hai bản này (xem phân rã trên); kết quả chỉ có từ LB.
+
+### Áp EF2-free lên dữ liệu S37 (code + test, chưa chạy)
+
+`python -m r2ai.s36.s37 apply [--config configs/s36-s37-apply.json] [--jina scores-all.parquet] [--scores-4b …] [--cmax …]` (mặc định lấy bố cục `out/runs/s37`): union S36 + cặp mới S37 (điểm 4B Kaggle theo `pair_id`), pool cosine top-211 + đào sâu, RRF 4 nguồn, cắt EF2 với (a, b) và s_free giữ nguyên, carrier theo quy tắc trong cấu hình (`threshold` / `fair` / `swap`), ghi `docsel-<tên>.parquet`, `keep-<tên>.json`, `pcal-`, `carriers-` và `<tên>.apply.json` (SHA256 mọi đầu vào/ra). Dừng khi một nguồn thiếu điểm cho cặp nào của pool và ghi cặp thiếu ra `missing-<tên>-<nguồn>.parquet`; không xếp cuối. Jina chấm lại theo query: query S37 chấm lại chỉ tin điểm S37, query không chấm lại giữ điểm S35 + bù S36. ZIP: `compose run --docsel docsel-<tên>.parquet --rule full+w768 [--carriers …]` (không cần ZIP docread; xem `docs/s38-chunk-metric-v2.md`).
+
+`python -m r2ai.s36.s37 jina-missing` → `out/runs/s36-fuse4/cal/jina-missing-pairs.parquet` (SHA `42f7fc9e…7aa6`): 21.311 cặp điểm bù S36 của 174 query mà pool Jina S37 (975 query chấm lại) không chứa (P10/P50/P90 = 1 / 150,5 / 167 cặp mỗi query). Vu chuyển cho S37 thêm vào pool chấm lại; 11.996 cặp bù còn lại nằm ở query không chấm lại. Test `tests/test_s36_s37.py`.
+
 ## Lệnh
 
 ```bash

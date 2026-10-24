@@ -76,16 +76,21 @@ def sigmoid(x: np.ndarray) -> np.ndarray:
 class Frame:
     """pool13 rows of every query in J3 RRF order, with P4B, Jina, language and the lookups of the scored union."""
 
-    def __init__(self, keys: Sequence[str] = J3_KEYS, frame: str = "thrC") -> None:
+    def __init__(self, keys: Sequence[str] = J3_KEYS, frame: str = "thrC", data: dict[str, Any] | None = None) -> None:
         """``frame`` thrC: the pool13 rows; free: the K4-free pools (cosine top-211, deepened); free211: the same pools cut at the
-        cosine top-211 for every query (no deepening). ``keys``: the RRF rank sources."""
-        ranked, union, free, _, _, _ = fuse.load_frames(deepen=frame != "free211")
+        cosine top-211 for every query (no deepening). ``keys``: the RRF rank sources. ``data`` (S37 apply) replaces the loaded S36
+        inputs: ``pools`` (query -> rows with cosine_rank / judge_score), ``union``, ``jina`` and ``cmax`` lookups."""
+        if data is None:
+            ranked, union, free, _, _, _ = fuse.load_frames(deepen=frame != "free211")
+            jina, _ = fuse.load_jina(fuse.run_root() / "extra" / "jina-scores.parquet")
+            cmax, _ = fuse.load_cmax(fuse.run_root() / "extra" / "cmax-scores.parquet")
+            pools = ranked if frame == "thrC" else free
+        else:
+            ranked, union, jina, cmax, pools = data.get("ranked", {}), data["union"], data["jina"], data["cmax"], data["pools"]
         self.keys, self.frame_name = tuple(keys), frame
         self.ranked = ranked
         self.p4b_of = {(q, int(r["doc_id"])): float(r["judge_score"]) for q, rows in union.items() for r in rows}
-        self.jina, _ = fuse.load_jina(fuse.run_root() / "extra" / "jina-scores.parquet")
-        self.cmax, _ = fuse.load_cmax(fuse.run_root() / "extra" / "cmax-scores.parquet")
-        pools = ranked if frame == "thrC" else free
+        self.jina, self.cmax = jina, cmax
         for q, rows in pools.items():
             if fuse.rank_missing_last(rows, q, self.jina, "jina_score", "jina_rank"):
                 raise ValueError(f"query {q}: pair without Jina score")

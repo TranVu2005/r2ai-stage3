@@ -546,6 +546,7 @@ Cập nhật 2026-10-17 20:25 (UTC+7), GPT-6 (Codex, S24 recovery): D21 bỏ qua
 
 | Thời gian (UTC+7) | Ai | Thay đổi |
 |---|---|---|
+| 2026-10-24 21:45 | Claude Sonnet 5.5 | S35/S36: EF2-free LB (Final 0,3834, Doc 0,4184, Chunk 0,3484), phân rã chunk offline; dựng EF2-free-CRfair-t1728 và CRswap-t1536 (compose `--carriers`), EF2-free-d211 (docread, chưa compose); code áp S37, `jina-missing-pairs`; chưa nộp. |
 | 2026-10-24 16:45 | Claude Sonnet 5.5 | S35/S36: EF2-free (EF2 khung tổng quát không K_q, 4 nguồn, s_free) + compose full+w768 T=2002; docsel + ZIP `f4b6530d…063f`, validator S26 ok; chưa nộp. |
 | 2026-10-23 16:30 | Claude Sonnet 5.5 | S36: FUSE4-thrC / FUSE4w-thrC / FUSE4-free, EF2-cut-p4b / EF2-cut-avg / LANG-thr-avg (ZIP `-docread`, docsel cho S38), chấm bù Jina 33.307 + C-max 53.347 cặp, hiệu chỉnh p_cal; validator ok; chưa nộp. |
 | 2026-10-22 21:40 | Claude Sonnet 5.5 | S35: cos_doc2 (encode theo phần) và PART-thrC (hồi quy khớp K4-thr-C); Jina Reranker v3.5 chấm pool 211 ∪ pool13; dựng JINA-K40 và J3-thrC, validator ok; chưa nộp. |

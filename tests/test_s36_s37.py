@@ -1,0 +1,117 @@
+"""S36 chunk-carrier rules and the S37 data application (union merge, Jina assembly, missing pairs)."""
+import json
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from r2ai.s36 import carriers, fuse, s37
+
+
+def docsel(sizes, t_c=0.5):
+    rows = []
+    for q, n in enumerate(sizes, 1):
+        for k in range(n):
+            rows.append((q, q * 1000 + k, k + 1, round(0.95 - 0.9 * k / max(n - 1, 1), 4)))
+    frame = pd.DataFrame(rows, columns=["query_id", "doc_id", "rank", "p4b"])
+    frame["chunk"] = frame.p4b >= t_c
+    return frame
+
+
+def test_fair_carriers_use_one_global_rho_and_match_the_target():
+    frame = docsel([10, 40, 7, 100])
+    target = 90
+    chosen, info = carriers.carriers_fair(frame, target)
+    assert len(chosen) == target and 0 < info["rho"] <= 1
+    sizes = frame.groupby("query_id").size()
+    per_query = chosen.groupby("query_id").size()
+    assert (per_query == np.ceil(info["rho"] * sizes - 1e-12)).all()              # ceil(rho * |D_q|) in every query
+    # the carriers of a query are its highest-p docs
+    for q, g in chosen.groupby("query_id"):
+        best = frame[frame.query_id == q].sort_values("p4b", ascending=False).head(len(g)).doc_id
+        assert set(g.doc_id) == set(best)
+
+
+def test_fair_rho_is_the_smallest_on_a_tie_and_rejects_impossible_targets():
+    sizes = np.array([4, 4])
+    assert carriers.fair_total(sizes, 0.5) == 4 and carriers.solve_rho(sizes, 4) <= 0.5
+    with pytest.raises(ValueError):
+        carriers.solve_rho(sizes, 0)
+    with pytest.raises(ValueError):
+        carriers.solve_rho(sizes, 9)
+
+
+def test_swap_drops_the_lowest_p_carriers_and_raises_the_threshold():
+    frame = docsel([10, 10, 10])
+    kept, info = carriers.carriers_swap(frame, 3)
+    before = frame[frame.chunk]
+    assert len(kept) == len(before) - 3
+    dropped = before.merge(kept, on=["query_id", "doc_id"], how="left", indicator=True).query("_merge == 'left_only'")
+    assert dropped.p4b.max() <= kept.merge(before, on=["query_id", "doc_id"]).p4b.min()
+    assert info["t_c_after"] >= info["t_c_before"] and info["drop"] == 3
+    with pytest.raises(ValueError):
+        carriers.carriers_swap(frame, len(before))
+
+
+def test_select_carriers_threshold_is_the_docsel_flags_and_run_writes_the_pins(tmp_path):
+    frame = docsel([6, 6])
+    path = tmp_path / "docsel.parquet"
+    frame.to_parquet(path)
+    report = carriers.run(path, "fair", "t", tmp_path / "out", target=int(frame.chunk.sum()))
+    assert report["carriers"] == int(frame.chunk.sum()) and (tmp_path / "out" / "carriers-t.parquet").exists()
+    assert json.loads((tmp_path / "out" / "carriers-t.json").read_text(encoding="utf-8"))["carriers_sha256"] == report["carriers_sha256"]
+    same, _ = carriers.select_carriers(frame, "threshold")
+    assert len(same) == int(frame.chunk.sum())
+
+
+def union_of():
+    return {1: [{"pair_id": 1, "doc_id": 10, "cosine_score": 0.9, "judge_score": 0.5, "origin": "pool13", "order": (0, 1), "cosine_rank": 1},
+                {"pair_id": 2, "doc_id": 11, "cosine_score": 0.5, "judge_score": 0.1, "origin": "pool13", "order": (0, 2), "cosine_rank": 2}],
+            2: [{"pair_id": 3, "doc_id": 20, "cosine_score": 0.7, "judge_score": 0.2, "origin": "pool13", "order": (0, 3), "cosine_rank": 1}]}
+
+
+def test_merge_union_inserts_new_pairs_in_cosine_order_and_drops_known_docs():
+    pairs = pd.DataFrame({"pair_id": [1_000_001, 1_000_002, 1_000_003], "query_id": [1, 1, 2], "doc_id": [900, 11, 901],
+                          "cosine_score": [0.95, 0.4, 0.3]})
+    out = s37.merge_union(union_of(), pairs, {1_000_001: 0.8, 1_000_002: 0.7, 1_000_003: 0.05})
+    assert [r["doc_id"] for r in out[1]] == [900, 10, 11] and [r["cosine_rank"] for r in out[1]] == [1, 2, 3]   # doc 11 already known
+    assert out[1][2]["judge_score"] == 0.1 and out[1][0]["judge_score"] == 0.8
+    assert [r["doc_id"] for r in out[2]] == [20, 901]
+    assert union_of()[1][0]["cosine_rank"] == 1                                                              # input untouched
+
+
+def test_merge_union_refuses_unscored_pairs_and_unknown_queries():
+    pairs = pd.DataFrame({"pair_id": [1_000_001], "query_id": [1], "doc_id": [900], "cosine_score": [0.9]})
+    with pytest.raises(ValueError, match="no 4B score"):
+        s37.merge_union(union_of(), pairs, {})
+    pairs = pd.DataFrame({"pair_id": [1_000_001], "query_id": [9], "doc_id": [900], "cosine_score": [0.9]})
+    with pytest.raises(ValueError, match="outside the union"):
+        s37.merge_union(union_of(), pairs, {1_000_001: 0.5})
+
+
+def test_assemble_jina_keeps_unrescored_queries_and_replaces_rescored_ones():
+    base = {(1, 10): 0.1, (1, 11): 0.2, (2, 20): 0.3, (2, 21): 0.4}
+    new = {(1, 10): 0.9, (1, 900): 0.8}
+    out = s37.assemble_jina(base, new)
+    assert out == {(1, 10): 0.9, (1, 900): 0.8, (2, 20): 0.3, (2, 21): 0.4}      # (1, 11) is gone: it must be rescored or listed
+
+
+def test_missing_pairs_lists_pool_pairs_without_a_score():
+    pools = {1: [{"doc_id": 10, "cosine_rank": 1, "judge_score": 0.5}, {"doc_id": 11, "cosine_rank": 2, "judge_score": 0.1}]}
+    gap = s37.missing_pairs(pools, {(1, 10): 0.3})
+    assert gap.to_dict("records") == [{"query_id": 1, "doc_id": 11, "cosine_rank": 2, "p4b": 0.1}]
+
+
+def test_jina_missing_lists_the_s36_pairs_of_rescored_queries_only(tmp_path, monkeypatch):
+    pd.DataFrame({"query_id": [1, 1, 2], "doc_id": [10, 11, 20]}).to_parquet(tmp_path / "pool.parquet")
+    pd.DataFrame({"query_id": [1, 1, 3], "doc_id": [11, 12, 30], "score": [0.2, 0.3, 0.4]}).to_parquet(tmp_path / "supp.parquet")
+    monkeypatch.setattr(fuse, "run_root", lambda: tmp_path / "run")
+    report = s37.jina_missing(tmp_path / "pool.parquet", tmp_path / "supp.parquet")
+    missing = pd.read_parquet(tmp_path / "run" / "cal" / "jina-missing-pairs.parquet")
+    assert missing[["query_id", "doc_id"]].values.tolist() == [[1, 12]]              # (1, 11) is in the S37 pool; query 3 is not rescored
+    assert report["pairs"] == 1 and report["s36_supplement_pairs_in_unrescored_queries"] == 1 and report["rescored_queries"] == 2
+
+
+def test_apply_stops_while_an_artifact_is_missing(tmp_path):
+    with pytest.raises(FileNotFoundError, match="not there yet"):
+        s37.apply({"pairs_new": str(tmp_path / "none.parquet"), "scores_4b": [], "cmax": [], "jina": str(tmp_path / "none2.parquet"), "out": str(tmp_path)})

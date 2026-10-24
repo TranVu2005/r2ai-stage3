@@ -2,6 +2,8 @@
 
 ``python -m r2ai.s36.d300 count --depth 300 400``   counts only (no export, no scoring)
 ``python -m r2ai.s36.d300 export --depth 300``      writes the Kaggle 4B subset ``d300`` and the C-max pair list; scoring is NOT started
+``python -m r2ai.s36.d300 export-final --depth 300`` one subset ``final-4b``: the top-D pairs and the unscored ``pairs_new_final_v2`` pairs, deduplicated
+``python -m r2ai.s36.d300 import4b --tag final-4b --scores scores-extra.parquet --report collect-extra-report.json``
 
 Merged ranking: per query, the canonical + Pharmacity cosine top-400 of ``out/runs/s37/pool.npz`` (S26 doc vectors, the pool the S29/S31
 pools were cut from) merged with the cosine of every 120ask doc (segment ``vectors.npz``), top ``depth`` by cosine (canonical first on a tie).
@@ -97,14 +99,37 @@ def merged_top(depth: int, pool: dict[str, np.ndarray] | None = None, q_dense: n
     return pd.concat(frames, ignore_index=True)
 
 
+def registry_files() -> list[Path]:
+    """The pair registries that exist: S37 ``pairs_new`` and ``pairs_new_final_v2`` and the pairs exported here (``pair_keys`` checks that a
+    ``pair_id`` means one pair across them)."""
+    return [p for p in (RUN37 / "pairs_new.parquet", RUN37 / "pairs_new_final_v2.parquet", out_dir() / "pairs_d300.parquet",
+                        out_dir() / "pairs_final.parquet") if p.exists()]
+
+
+def score_files() -> list[str]:
+    """4B score files: the S37 Kaggle subsets and the S36 subsets (``d300/<tag>/gpu/qwen3-reranker-4b/scores-extra.parquet``)."""
+    mine = sorted(str(p) for p in out_dir().glob("*/gpu/qwen3-reranker-4b/scores-extra.parquet"))
+    return list(s37.default_inputs()["scores_4b"]) + mine
+
+
+def pair_keys(files: Sequence[Path]) -> dict[int, tuple[int, int]]:
+    """``pair_id -> (query_id, doc_id)`` over the registries; one pair_id must mean one pair."""
+    out: dict[int, tuple[int, int]] = {}
+    for f in files:
+        frame = pd.read_parquet(f, columns=["pair_id", "query_id", "doc_id"])
+        for pid, q, d in zip(frame.pair_id.astype(int), frame.query_id.astype(int), frame.doc_id.astype(int)):
+            if out.setdefault(pid, (q, d)) != (q, d):
+                raise ValueError(f"pair_id {pid} is two different pairs ({out[pid]} and {(q, d)}) in {f}")
+    return out
+
+
 def scored_sets() -> dict[str, set[tuple[int, int]]]:
     """(query, doc) pairs that already have a 4B / C-max / Jina score."""
     _, union, _, _, _, _ = fuse.load_frames()
     spec = s37.default_inputs()
-    pairs = pd.read_parquet(spec["pairs_new"], columns=["pair_id", "query_id", "doc_id"])
-    key_of = dict(zip(pairs.pair_id.astype(int), zip(pairs.query_id.astype(int), pairs.doc_id.astype(int))))
+    key_of = pair_keys(registry_files())
     four_b = {(q, int(r["doc_id"])) for q, rows in union.items() for r in rows}
-    four_b |= {key_of[p] for p in s37.load_scores(spec["scores_4b"], "pair_id", "score")}
+    four_b |= {key_of[p] for p in s37.load_scores(score_files(), "pair_id", "score")}
     jina, _ = fuse.load_jina(fuse.run_root() / "extra" / "jina-scores.parquet")
     cmax, _ = fuse.load_cmax(fuse.run_root() / "extra" / "cmax-scores.parquet")
     cmax_keys = set(cmax) | {key_of[p] for p in s37.load_scores(spec["cmax"], "pair_id", "cmax")}
@@ -140,7 +165,7 @@ def summarize(top: pd.DataFrame, depth: int) -> dict[str, Any]:
 
 def count(depths: Sequence[int]) -> dict[str, Any]:
     pool, scored = load_pool(), scored_sets()
-    result = {"scored": {k: len(v) for k, v in scored.items()}, "depths": {}}
+    result = {"registries": [str(p) for p in registry_files()], "scored": {k: len(v) for k, v in scored.items()}, "depths": {}}
     for depth in depths:
         result["depths"][str(depth)] = summarize(need(merged_top(depth, pool), scored), depth)
     out = out_dir()
@@ -150,20 +175,36 @@ def count(depths: Sequence[int]) -> dict[str, Any]:
     return result
 
 
-def export(depth: int) -> dict[str, Any]:
-    started = time.monotonic()
-    out = out_dir()
-    kaggle = out / "kaggle"
-    for target in (out, kaggle, kaggle / "shards" / SHARD, kaggle / "extra_pairs.parquet", kaggle / "judge_score.py", kaggle / "manifest.json",
-                   out / "pairs_d300.parquet", out / "cmax_pairs.parquet", out / "counts.json"):
-        paths.assert_writable(target)
-    if _sha256(JUDGE_SCORE) != JUDGE_SHA:
-        raise SystemExit(f"judge_score.py SHA differs from {JUDGE_SHA}: refusing to package an unknown scorer")
-    pool, scored = load_pool(), scored_sets()
-    top = need(merged_top(depth, pool), scored)
-    summary = summarize(top, depth)
-    todo = top[~top.has_4b].sort_values(["query_id", "cosine_rank"]).reset_index(drop=True)
-    todo["pair_id"] = PAIR_ID_BASE + np.arange(len(todo))
+def combine_needs(depth_pairs: pd.DataFrame, registry_pairs: pd.DataFrame, known_ids: dict[tuple[int, int], int], next_id: int) -> pd.DataFrame:
+    """One row per (query, doc) of the pairs that need a 4B score: the cosine top-D pairs ``depth_pairs`` (``query_id, doc_id, cosine_rank,
+    cosine_score, is_ask``) and the unscored registry pairs ``registry_pairs`` (``pair_id, query_id, doc_id, cosine_rank, cosine_score``;
+    their ``pair_id`` wins), duplicates removed. A pair without a registry id keeps the id it got in an earlier export (``known_ids``) or takes
+    the next free one from ``next_id``. ``origin``: ``both`` / ``depth`` / ``registry``."""
+    reg = registry_pairs.assign(origin="registry")
+    dep = depth_pairs.assign(origin="depth", pair_id=-1)
+    merged = pd.concat([reg, dep], ignore_index=True, sort=False)
+    merged["is_ask"] = merged["is_ask"].fillna(False).astype(bool) if "is_ask" in merged else False
+    merged["key"] = list(zip(merged.query_id.astype(int), merged.doc_id.astype(int)))
+    both = set(merged.key[merged.origin == "registry"]) & set(merged.key[merged.origin == "depth"])
+    merged = merged.drop_duplicates("key", keep="first")                       # registry rows come first: their id wins
+    merged["origin"] = ["both" if k in both else o for k, o in zip(merged.key, merged.origin)]
+    ids, taken = [], max([next_id - 1, *known_ids.values()])
+    for k, pid in zip(merged.key, merged.pair_id.astype(int)):
+        if pid >= 0:
+            ids.append(pid)
+        elif k in known_ids:
+            ids.append(known_ids[k])
+        else:
+            taken += 1
+            ids.append(taken)
+    merged["pair_id"] = ids
+    if merged.pair_id.duplicated().any():
+        raise ValueError("pair_id collision between the registry and the D=300 ids")
+    return merged.sort_values(["query_id", "cosine_rank"]).drop(columns="key").reset_index(drop=True)
+
+
+def passages_for(todo: pd.DataFrame, started: float) -> tuple[dict[int, tuple[str, int]], dict[int, str], dict[int, str]]:
+    """Qwen3-truncated text, language and segment of every doc of ``todo`` (120ask docs from their segment, the others from the canonical bundle)."""
     ask_docs = sorted(set(todo.loc[todo.is_ask, "doc_id"].astype(int)))
     seg_of: dict[int, str] = {}
     texts: dict[int, str] = {}
@@ -182,6 +223,20 @@ def export(depth: int) -> dict[str, Any]:
         raise ValueError(f"{len(need_full)} canonical docs need the full text (not handled here)")
     for d in ask_docs:
         passages[d], langs[d] = truncate_document(tokenizer, texts[d]), "zh"
+    return passages, langs, seg_of
+
+
+def write_subset(todo: pd.DataFrame, out: Path, tag: str, shard_name: str, summary: dict[str, Any], started: float,
+                 top: pd.DataFrame | None = None) -> dict[str, Any]:
+    """Kaggle 4B subset (S31 pool-extra layout) of ``todo`` under ``out/kaggle`` or ``out/<tag>``, plus ``pairs_<tag>.parquet`` and the C-max list."""
+    sub = out / ("kaggle" if tag == TAG else tag)
+    pairs_name = "pairs_d300.parquet" if tag == TAG else "pairs_final.parquet"
+    for target in (out, sub, sub / "shards" / shard_name, sub / "extra_pairs.parquet", sub / "judge_score.py", sub / "manifest.json",
+                   out / pairs_name, out / "cmax_pairs.parquet", out / "counts.json"):
+        paths.assert_writable(target)
+    if _sha256(JUDGE_SCORE) != JUDGE_SHA:
+        raise SystemExit(f"judge_score.py SHA differs from {JUDGE_SHA}: refusing to package an unknown scorer")
+    passages, langs, seg_of = passages_for(todo, started)
     qtable = pq.read_table(_inputs()["query"], columns=["id", "query"]).to_pandas()
     queries = dict(zip(qtable.id.astype(int), qtable["query"].fillna("")))
     shard = pa.table({
@@ -191,26 +246,99 @@ def export(depth: int) -> dict[str, Any]:
         "query_text": pa.array([queries[int(q)] for q in todo.query_id], pa.string()),
         "doc_text": pa.array([passages[int(d)][0] for d in todo.doc_id], pa.string()),
         "doc_tokens": pa.array([passages[int(d)][1] for d in todo.doc_id], pa.int32())})
-    (kaggle / "shards").mkdir(parents=True, exist_ok=True)
-    pq.write_table(shard, kaggle / "shards" / SHARD, compression="zstd", row_group_size=5_000)
-    extra = pd.DataFrame({"pair_id": todo.pair_id, "query_id": todo.query_id, "doc_id": todo.doc_id, "cosine_rank": todo.cosine_rank,
-                          "cosine_score": todo.cosine_score, "source": f"s36-{TAG}", "free": todo.cosine_rank <= 211, "capped": False})
-    extra.to_parquet(kaggle / "extra_pairs.parquet", index=False)
+    (sub / "shards").mkdir(parents=True, exist_ok=True)
+    pq.write_table(shard, sub / "shards" / shard_name, compression="zstd", row_group_size=5_000)
+    pd.DataFrame({"pair_id": todo.pair_id, "query_id": todo.query_id, "doc_id": todo.doc_id, "cosine_rank": todo.cosine_rank,
+                  "cosine_score": todo.cosine_score, "source": f"s36-{tag}", "free": todo.cosine_rank <= 211, "capped": False}
+                 ).to_parquet(sub / "extra_pairs.parquet", index=False)
     todo.assign(lang=[langs[int(d)] for d in todo.doc_id], segment=[seg_of.get(int(d), "") for d in todo.doc_id], in_top211=todo.cosine_rank <= 211,
-                in_pool13=False, batch=TAG)[["pair_id", "query_id", "doc_id", "cosine_rank", "cosine_score", "in_pool13", "lang", "segment", "in_top211",
-                                             "is_ask", "batch"]].to_parquet(out / "pairs_d300.parquet", index=False)
-    top[~top.has_cmax][["query_id", "doc_id", "cosine_rank", "cosine_score", "is_ask", "has_4b"]].to_parquet(out / "cmax_pairs.parquet", index=False)
-    shutil.copyfile(JUDGE_SCORE, kaggle / "judge_score.py")
-    manifest = {"status": "prepared", "tag": TAG, "depth": depth, **summary, "model": "qwen3-reranker-4b", "revision": REVISION_4B,
+                in_pool13=False, batch=tag)[["pair_id", "query_id", "doc_id", "cosine_rank", "cosine_score", "in_pool13", "lang", "segment", "in_top211",
+                                             "is_ask", "batch"]].to_parquet(out / pairs_name, index=False)
+    if top is not None:
+        top[~top.has_cmax][["query_id", "doc_id", "cosine_rank", "cosine_score", "is_ask", "has_4b"]].to_parquet(out / "cmax_pairs.parquet", index=False)
+    shutil.copyfile(JUDGE_SCORE, sub / "judge_score.py")
+    manifest = {"status": "prepared", "tag": tag, **summary, "model": "qwen3-reranker-4b", "revision": REVISION_4B, "pairs": int(len(todo)),
                 "pair_id_range": [int(todo.pair_id.min()), int(todo.pair_id.max())] if len(todo) else None,
                 "lang_counts": pd.Series([langs[int(d)] for d in todo.doc_id]).value_counts().to_dict(),
                 "doc_tokens_mean": float(np.mean([passages[int(d)][1] for d in todo.doc_id])) if len(todo) else 0.0,
-                "extra_pairs_sha256": _sha256(kaggle / "extra_pairs.parquet"), "shard_sha256": _sha256(kaggle / "shards" / SHARD),
-                "judge_score_py_sha256": JUDGE_SHA, "pairs_d300_sha256": _sha256(out / "pairs_d300.parquet"),
-                "cmax_pairs_sha256": _sha256(out / "cmax_pairs.parquet"), "seconds": round(time.monotonic() - started, 1),
+                "eta_hours_kaggle_2xT4": round(len(todo) / KAGGLE_PAIRS_PER_S / 3600, 2),
+                "extra_pairs_sha256": _sha256(sub / "extra_pairs.parquet"), "shard_sha256": _sha256(sub / "shards" / shard_name),
+                "judge_score_py_sha256": JUDGE_SHA, f"{pairs_name.split('.')[0]}_sha256": _sha256(out / pairs_name),
+                "seconds": round(time.monotonic() - started, 1),
                 "note": "nothing is scored here; Jina is not requested for these pairs (rank last in the Jina source)"}
-    _atomic_json(kaggle / "manifest.json", manifest)
+    if top is not None:
+        manifest["cmax_pairs_sha256"] = _sha256(out / "cmax_pairs.parquet")
+    _atomic_json(sub / "manifest.json", manifest)
     return manifest
+
+
+def export(depth: int) -> dict[str, Any]:
+    """Kaggle subset ``d300``: the pairs of the cosine top-``depth`` pool without a 4B score."""
+    started = time.monotonic()
+    pool, scored = load_pool(), scored_sets()
+    top = need(merged_top(depth, pool), scored)
+    todo = top[~top.has_4b].sort_values(["query_id", "cosine_rank"]).reset_index(drop=True)
+    todo["pair_id"] = PAIR_ID_BASE + np.arange(len(todo))
+    return write_subset(todo, out_dir(), TAG, SHARD, {"depth": depth, **summarize(top, depth)}, started, top)
+
+
+def export_final(depth: int, registry: Path | None = None) -> dict[str, Any]:
+    """Kaggle subset ``final-4b`` (S35, 25/10): ONE subset holding (a) the cosine top-``depth`` pairs of the current corpus without a 4B score and
+    (b) the unscored pairs of the registry (``pairs_new_final_v2``: the newly crawled 120ask docs), duplicates removed. Ids: the registry's,
+    else those of an earlier ``pairs_d300``/``pairs_final`` export, else new ones above the highest."""
+    started = time.monotonic()
+    registry = registry or (RUN37 / "pairs_new_final_v2.parquet")
+    if not registry.exists():
+        raise FileNotFoundError(f"{registry} is not there yet")
+    pool, scored = load_pool(), scored_sets()
+    top = need(merged_top(depth, pool), scored)
+    reg = pd.read_parquet(registry, columns=["pair_id", "query_id", "doc_id", "cosine_rank", "cosine_score"])
+    reg = reg[[k not in scored["4b"] for k in zip(reg.query_id.astype(int), reg.doc_id.astype(int))]]
+    depth_pairs = top[~top.has_4b][["query_id", "doc_id", "cosine_rank", "cosine_score", "is_ask"]]
+    known = {}
+    for name in ("pairs_final.parquet", "pairs_d300.parquet"):
+        p = out_dir() / name
+        if p.exists():
+            old = pd.read_parquet(p, columns=["pair_id", "query_id", "doc_id"])
+            known.update({(int(q), int(d)): int(i) for i, q, d in zip(old.pair_id, old.query_id, old.doc_id)})
+    # registry docs are 120ask docs: flag them so the text comes from their segment
+    todo = combine_needs(depth_pairs, reg, known, PAIR_ID_BASE)
+    ask = set(top.loc[top.is_ask, "doc_id"].astype(int)) | set(pd.read_parquet(registry, columns=["doc_id"]).doc_id.astype(int))
+    todo["is_ask"] = todo.doc_id.astype(int).isin(ask)
+    summary = {"depth": depth, "registry": str(registry), "registry_sha256": _sha256(registry), **summarize(top, depth),
+               "registry_pairs_unscored": int(len(reg)), "pairs_from_depth_only": int((todo.origin == "depth").sum()),
+               "pairs_from_registry_only": int((todo.origin == "registry").sum()), "pairs_in_both": int((todo.origin == "both").sum())}
+    return write_subset(todo, out_dir(), "final-4b", "pool-93003.parquet", summary, started, top)
+
+
+def import4b(tag: str, scores: Path, report: Path) -> dict[str, Any]:
+    """Validate Kaggle 4B scores of a subset exported here and store them as ``<tag>/gpu/qwen3-reranker-4b/scores-extra.parquet``
+    (picked up by ``score_files`` and the S37 ``apply`` defaults); same checks as ``r2ai.s37.export.import4b``."""
+    d = out_dir() / ("kaggle" if tag == TAG else tag)
+    paths.assert_writable(d)
+    man = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
+    rep = json.loads(report.read_text(encoding="utf-8"))
+    sc, ex = pd.read_parquet(scores), pd.read_parquet(d / "extra_pairs.parquet")
+    sha, errors = _sha256(scores), []
+    if sha != rep.get("scores_sha256"):
+        errors.append(f"scores SHA256 {sha} != report {rep.get('scores_sha256')}")
+    if rep.get("revisions") != [REVISION_4B] or rep.get("model") != "qwen3-reranker-4b":
+        errors.append(f"report model/revision {rep.get('model')} {rep.get('revisions')} != qwen3-reranker-4b {REVISION_4B}")
+    if len(sc) != man["pairs"] or sc.pair_id.nunique() != len(sc):
+        errors.append(f"{len(sc)} rows / {sc.pair_id.nunique()} unique pair_id, expected {man['pairs']}")
+    elif set(sc.pair_id) != set(ex.pair_id):
+        errors.append("pair_id set differs from extra_pairs.parquet")
+    elif sc.score.isna().any():
+        errors.append("NaN scores")
+    if errors:
+        raise SystemExit("import4b refused: " + "; ".join(errors))
+    dest = d / "gpu" / "qwen3-reranker-4b"
+    dest.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(scores, dest / "scores-extra.parquet")
+    shutil.copyfile(report, dest / "collect-extra-report.json")
+    man.update({"status": "scored", "scores_sha256": sha})
+    _atomic_json(d / "manifest.json", man)
+    return {"tag": tag, "pairs": len(sc), "scores_sha256": sha, "dir": str(dest)}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -220,8 +348,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     c.add_argument("--depth", type=int, nargs="+", default=[300, 400])
     e = sub.add_parser("export")
     e.add_argument("--depth", type=int, default=300)
+    f = sub.add_parser("export-final")
+    f.add_argument("--depth", type=int, default=300)
+    f.add_argument("--registry", type=Path, default=None, help="default out/runs/s37/pairs_new_final_v2.parquet")
+    i = sub.add_parser("import4b")
+    i.add_argument("--tag", required=True)
+    i.add_argument("--scores", type=Path, required=True)
+    i.add_argument("--report", type=Path, required=True)
     args = parser.parse_args(argv)
-    result = count(args.depth) if args.cmd == "count" else export(args.depth)
+    if args.cmd == "count":
+        result = count(args.depth)
+    elif args.cmd == "export":
+        result = export(args.depth)
+    elif args.cmd == "export-final":
+        result = export_final(args.depth, paths.resolve_path(args.registry) if args.registry else None)
+    else:
+        result = import4b(args.tag, args.scores, args.report)
     print(json.dumps(result, indent=1, ensure_ascii=False, default=str))
     return 0
 

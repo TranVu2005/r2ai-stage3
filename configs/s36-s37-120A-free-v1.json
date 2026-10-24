@@ -1,0 +1,7 @@
+{
+  "name": "120A-free-v1",
+  "missing": "last",
+  "min_4b_coverage": 0.98,
+  "t_c": 0.2030746281894702,
+  "carriers": {"rule": "fair", "target": 175548}
+}

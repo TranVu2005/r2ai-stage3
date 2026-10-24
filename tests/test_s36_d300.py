@@ -52,3 +52,25 @@ def test_ask_cosines_keeps_only_docs_above_the_query_cut(tmp_path):
     np.savez(seg / "vectors.npz", doc_id=np.array([7, 8]), dense=np.array([[1.0, 0.0], [0.0, 1.0]], np.float16))
     ids, qi, cos = d300.ask_cosines(np.array([[1.0, 0.0], [0.0, 1.0]]), np.array([0.5, 0.5]), tmp_path)[0]
     assert sorted(zip(ids.tolist(), qi.tolist())) == [(7, 0), (8, 1)] and np.allclose(cos, 1.0)
+
+
+def test_combine_needs_dedupes_the_depth_and_registry_pairs_and_keeps_ids_stable():
+    depth = pd.DataFrame({"query_id": [1, 1, 2], "doc_id": [10, 11, 20], "cosine_rank": [1, 2, 1], "cosine_score": [0.9, 0.8, 0.7],
+                          "is_ask": [False, True, False]})
+    registry = pd.DataFrame({"pair_id": [1_000_005, 1_000_006], "query_id": [1, 3], "doc_id": [11, 30], "cosine_rank": [2, 4], "cosine_score": [0.8, 0.6]})
+    out = d300.combine_needs(depth, registry, {(1, 10): 5_000_007}, 5_000_000)
+    got = {(int(r.query_id), int(r.doc_id)): (int(r.pair_id), r.origin) for r in out.itertuples()}
+    assert got == {(1, 10): (5_000_007, "depth"), (1, 11): (1_000_005, "both"), (2, 20): (5_000_008, "depth"), (3, 30): (1_000_006, "registry")}
+    assert out.pair_id.is_unique and out.query_id.is_monotonic_increasing
+
+
+def test_pair_keys_refuses_a_pair_id_that_means_two_pairs(tmp_path):
+    pd.DataFrame({"pair_id": [1, 2], "query_id": [1, 1], "doc_id": [10, 11]}).to_parquet(tmp_path / "a.parquet")
+    pd.DataFrame({"pair_id": [2], "query_id": [1], "doc_id": [12]}).to_parquet(tmp_path / "b.parquet")
+    assert d300.pair_keys([tmp_path / "a.parquet"]) == {1: (1, 10), 2: (1, 11)}
+    try:
+        d300.pair_keys([tmp_path / "a.parquet", tmp_path / "b.parquet"])
+    except ValueError as err:
+        assert "two different pairs" in str(err)
+    else:
+        raise AssertionError("no error")

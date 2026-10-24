@@ -12,9 +12,13 @@
     hold (Vu 24/10: neither ranked last nor kept; S37 adds them to its pool). ``apply`` stops when any pair of a pool has no score in a source
     and writes the missing pairs to ``missing-<name>-<source>.parquet``.
 
-Config (JSON, every key optional): ``{"name": "EF2-free-s37", "pairs_new": ".../pairs_new.parquet", "scores_4b": [...], "cmax": [...],
-"jina": ".../scores-all.parquet", "t_c": 0.2030746281894702, "carriers": {"rule": "threshold" | "fair" | "swap", "target": N, "drop": N},
-"out": "..."}``. Defaults are the S37 run layout (``out/runs/s37``).
+Config (JSON, every key optional): ``{"name": "EF2-free-s37", "pairs_new": ".../pairs_new.parquet" | [".../pairs_new_final_v2.parquet",
+".../d300/pairs_final.parquet"], "scores_4b": [...], "cmax": [...], "jina": ".../scores-all.parquet", "t_c": 0.2030746281894702,
+"carriers": {"rule": "threshold" | "fair" | "swap", "target": N, "drop": N}, "pool": "free" | "d211" | "fixed", "depth": 300, "out": "..."}``.
+Defaults are the S37 run layout (``out/runs/s37``) plus the 4B scores of the subsets exported by ``r2ai.s36.d300`` (``out/runs/s36-fuse4/d300``).
+``pairs_new`` may list several registries (``pairs_new_final_v2`` and the D=300 pairs): a pair in two of them counts once, the copy with a 4B score
+first. ``pool`` ``fixed``: every query's pool is its cosine top-``depth`` of the merged union (all pairs of it need a 4B score; checked against the
+cosine ranking of ``out/runs/s37/pool.npz`` + the 120ask vectors and reported); G_q keeps the top-211 definition.
 """
 from __future__ import annotations
 
@@ -45,7 +49,8 @@ class MissingScores(SystemExit):
 
 def default_inputs() -> dict[str, Any]:
     return {"pairs_new": str(RUN37 / "pairs_new.parquet"),
-            "scores_4b": sorted(glob.glob(str(RUN37 / "kaggle-4b" / "*" / "gpu" / "qwen3-reranker-4b" / "scores-extra.parquet"))),
+            "scores_4b": sorted(glob.glob(str(RUN37 / "kaggle-4b" / "*" / "gpu" / "qwen3-reranker-4b" / "scores-extra.parquet")))
+            + sorted(glob.glob(str(fuse.run_root() / "d300" / "*" / "gpu" / "qwen3-reranker-4b" / "scores-extra.parquet"))),
             "cmax": sorted(glob.glob(str(RUN37 / "cmax_scores*.parquet"))),
             "jina": str(RUN37 / "jina" / "scores-all.parquet")}
 
@@ -81,6 +86,40 @@ def merge_union(union: dict[int, list[dict[str, Any]]], pairs: pd.DataFrame, sco
     if extra:
         raise ValueError(f"S37 pairs for queries outside the union: {sorted(extra)[:5]}")
     return out
+
+
+def read_pairs(files: Sequence[str | Path], scores_4b: dict[int, float] | None = None) -> pd.DataFrame:
+    """``pair_id, query_id, doc_id, cosine_score`` over several registries. One ``pair_id`` must mean one pair; a (query, doc) in two registries
+    counts once, the copy whose ``pair_id`` has a 4B score first (else the first registry)."""
+    frame = pd.concat([pd.read_parquet(f, columns=["pair_id", "query_id", "doc_id", "cosine_score"]) for f in files], ignore_index=True)
+    frame[["pair_id", "query_id", "doc_id"]] = frame[["pair_id", "query_id", "doc_id"]].astype(int)
+    same_id = frame.drop_duplicates(["pair_id", "query_id", "doc_id"]).pair_id
+    if same_id.duplicated().any():
+        raise ValueError(f"pair_id {int(same_id[same_id.duplicated()].iloc[0])} is two different pairs across {len(files)} registries")
+    if scores_4b is not None:
+        frame = frame.assign(_unscored=~frame.pair_id.isin(scores_4b)).sort_values("_unscored", kind="stable").drop(columns="_unscored")
+    return frame.drop_duplicates(["query_id", "doc_id"], keep="first").sort_values("pair_id").reset_index(drop=True)
+
+
+def fixed_pools(union: dict[int, list[dict[str, Any]]], depth: int) -> tuple[dict[int, list[dict[str, Any]]], dict[str, Any]]:
+    """Every pool = the cosine top-``depth`` rows of the merged union (no adaptive deepening, no K_q)."""
+    pools = {}
+    for q, rows in union.items():
+        if len(rows) < depth:
+            raise ValueError(f"Query {q}: only {len(rows)} scored pairs < depth {depth}")
+        pools[q] = s31_build._with_judge_rank([dict(r) for r in rows[:depth]])
+    stuck = sum(1 for rows in pools.values() if rows[-1]["judge_score"] >= s31_build.T_FREE)
+    return pools, {"mode": "fixed", "depth": depth, "queries_bottom_doc_p4b_at_or_above_t_free": int(stuck)}
+
+
+def check_fixed_pools(pools: dict[int, list[dict[str, Any]]], depth: int) -> dict[str, Any]:
+    """Compare the pools with the cosine top-``depth`` of the corpus (canonical + Pharmacity + 120ask vectors): queries and docs that differ."""
+    from r2ai.s36 import d300
+
+    top = d300.merged_top(depth)
+    want = {int(q): set(g.doc_id.astype(int)) for q, g in top.groupby("query_id")}
+    diff = {q: len(want[q] ^ {int(r["doc_id"]) for r in rows}) for q, rows in pools.items()}
+    return {"queries_differing": int(sum(1 for v in diff.values() if v)), "docs_differing": int(sum(diff.values()))}
 
 
 def assemble_jina(base: dict[tuple[int, int], float], s37: dict[tuple[int, int], float]) -> dict[tuple[int, int], float]:
@@ -148,19 +187,25 @@ def apply(cfg: dict[str, Any]) -> dict[str, Any]:
     out.mkdir(parents=True, exist_ok=True)
     t_c = float(spec.get("t_c", FUSE4_FREE_T_C))
     rule = {"rule": "fair", **spec.get("carriers", {})}        # default chunk rule from 24/10: CR-fair with the global rho
-    inputs = {"pairs_new": [spec["pairs_new"]], "scores_4b": list(spec["scores_4b"]), "cmax": list(spec["cmax"]),
+    pair_files = [spec["pairs_new"]] if isinstance(spec["pairs_new"], (str, Path)) else list(spec["pairs_new"])
+    inputs = {"pairs_new": pair_files, "scores_4b": list(spec["scores_4b"]), "cmax": list(spec["cmax"]),
               "jina": [] if no_jina else [spec["jina"]]}
     for key, files in inputs.items():
         if (not files and not (key == "jina" and no_jina)) or not all(Path(f).exists() for f in files):
             raise FileNotFoundError(f"{key}: {files} (artifact not there yet)")
-    pairs = pd.read_parquet(spec["pairs_new"], columns=["pair_id", "query_id", "doc_id", "cosine_score"])
     _, union, _, _, _, _ = fuse.load_frames()
     scores_4b = load_scores(spec["scores_4b"], "pair_id", "score")
+    pairs = read_pairs(pair_files, scores_4b)
     coverage_4b = float(pairs.pair_id.astype(int).isin(scores_4b).mean())
     union = merge_union(union, pairs, scores_4b, min_4b)
     pairs = pairs[pairs.pair_id.astype(int).isin(scores_4b)]
     pool_kind = spec.get("pool", "free")                       # "d211": every pool cut at the cosine top-211 (no adaptive deepening)
-    pools, _, pool_report = s31_build.free_adaptive(union, deepen=pool_kind != "d211")
+    if pool_kind == "fixed":                                   # every pool = the cosine top-depth of the merged union
+        pools, pool_report = fixed_pools(union, int(spec["depth"]))
+        if spec.get("check_pool", True):
+            pool_report["check_vs_corpus"] = check_fixed_pools(pools, int(spec["depth"]))
+    else:
+        pools, _, pool_report = s31_build.free_adaptive(union, deepen=pool_kind != "d211")
     pool_report["pool"] = pool_kind
     # sources: the S36 lookups; Jina rescored per query by S37, C-max pointwise so the S37 pairs are simply added
     jina_base, jina_files = fuse.load_jina(fuse.run_root() / "extra" / "jina-scores.parquet")
@@ -230,7 +275,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--name", default=None)
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--jina", default=None)
-    parser.add_argument("--pairs-new", default=None)
+    parser.add_argument("--pairs-new", nargs="*", default=None, help="one or several registries (pairs_new_final_v2, d300/pairs_final)")
     parser.add_argument("--scores-4b", nargs="*", default=None)
     parser.add_argument("--cmax", nargs="*", default=None)
     parser.add_argument("--missing", choices=("strict", "last"), default=None, help="pair without a Jina / C-max score: refuse (default) or rank last")

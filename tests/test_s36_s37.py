@@ -136,3 +136,29 @@ def test_fair_with_a_given_rho_is_the_default_rule_and_needs_no_target():
     assert info["rho"] == carriers.DEFAULT_RHO
     solved, info = carriers.select_carriers(frame, "fair", target=60)
     assert len(solved) == 60 and info["rho"] != carriers.DEFAULT_RHO
+
+
+def test_read_pairs_counts_a_pair_once_and_prefers_the_copy_with_a_4b_score(tmp_path):
+    first = pd.DataFrame({"pair_id": [1, 2], "query_id": [1, 1], "doc_id": [10, 11], "cosine_score": [0.9, 0.8]})
+    second = pd.DataFrame({"pair_id": [2, 7, 8], "query_id": [1, 1, 2], "doc_id": [11, 10, 20], "cosine_score": [0.8, 0.9, 0.7]})   # (1, 10) again as pair 7
+    for name, frame in (("a", first), ("b", second)):
+        frame.to_parquet(tmp_path / f"{name}.parquet")
+    files = [tmp_path / "a.parquet", tmp_path / "b.parquet"]
+    plain = s37.read_pairs(files)
+    assert plain.pair_id.tolist() == [1, 2, 8]                       # first registry wins without scores
+    scored = s37.read_pairs(files, {7: 0.5, 2: 0.1, 8: 0.2})
+    assert scored.pair_id.tolist() == [2, 7, 8]                      # pair 7 has the score, pair 1 (same query, doc) does not
+    clash = pd.DataFrame({"pair_id": [1], "query_id": [3], "doc_id": [30], "cosine_score": [0.1]})
+    clash.to_parquet(tmp_path / "c.parquet")
+    with pytest.raises(ValueError, match="two different pairs"):
+        s37.read_pairs([tmp_path / "a.parquet", tmp_path / "c.parquet"])
+
+
+def test_fixed_pools_cut_every_query_at_the_depth_and_refuse_a_short_union():
+    rows = lambda n: [{"doc_id": 100 + k, "cosine_rank": k + 1, "cosine_score": 1 - k / 100, "judge_score": 0.9 - 0.01 * k, "origin": "x", "order": (0, k)}  # noqa: E731
+                      for k in range(n)]
+    pools, report = s37.fixed_pools({1: rows(12), 2: rows(20)}, 10)
+    assert [len(v) for v in pools.values()] == [10, 10] and report["depth"] == 10 and pools[1][-1]["doc_id"] == 109
+    assert pools[1][0]["judge_rank"] == 1 and "judge_rank" in pools[2][-1]
+    with pytest.raises(ValueError, match="only 12 scored pairs"):
+        s37.fixed_pools({1: rows(12)}, 20)

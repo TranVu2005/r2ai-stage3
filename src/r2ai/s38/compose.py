@@ -24,6 +24,10 @@
   Thin is then computed on the modified carriers and everything is folded into ``<name>.swap.json`` relative to the base
   bundle, so ``write`` is unchanged. The docsel and its docs stay as they are. The T estimate takes the carrier change into
   account (``RATE_CARRIER``).
+* no base ZIP (``--base-zip`` omitted, S37 data): the base bundle is built from the docsel itself: ``relevant_docs`` in docsel ``rank``
+  order, one whole-body chunk (S29 rule, ``s29_chunk_texts``) on every carrier (the docsel ``chunk`` flags, or ``--carriers``), kept in
+  ``<name>.base.parquet``. No S36 -docread ZIP is needed. Docs of the S37 registry (``r2ai.s38.registry``, 120ask segments) take
+  their body from their segment; a doc without a body source is skipped and counted.
 * best t256 chunk (CH-t256-1 rule): the S32 chunk judge on the scored answer/body chunks of the canonical owner
   (Pharmacity lots: their own chunks), else cosine(S29 query vector, chunk vector); ties: file order.
 * ``full+w768`` picks T itself: the ZIP grows by about ``RATE_FULL`` bytes per second chunk (S38, J3-thrC), so the
@@ -56,6 +60,7 @@ import pyarrow.parquet as pq
 from r2ai import paths
 from r2ai.index.chunk import SUBMITTABLE
 from r2ai.s38 import clean as cl
+from r2ai.s38 import registry as reg
 from r2ai.s38.build import replace_chunks, write_bundle
 from r2ai.s38.score import S32_ROOT, S32_SCORES, choose, load_query_vectors, scores_dir
 from r2ai.s38.sources import (CANONICAL, _atomic_json, _atomic_parquet, _sha256, describe, load_doc_rows,
@@ -71,6 +76,7 @@ BTC_CEILING = 104_857_600   # BTC upload limit for new files: 100 MiB (docs/PROG
 RESERVE = 2_257_600   # default margin below BTC_CEILING: ZIP limit 102,600,000 B (the S29 internal ceiling); the only knob
 RATE_FULL = 94.3        # B per 768 window: (102,599,152 - 101,181,680) / 15,026 (CH-full+w768-t1849 on J3-thrC)
 FULL_MIN_T = 1536
+RATE_DOC = 2.9          # B per relevant_docs entry in the ZIP: 641,652 / 220,825 (EF2-free)
 RATE_CARRIER = 580.0    # B per whole-body carrier chunk in the ZIP: (101,717,111 - 641,652) / 174,535 (EF2-free base)
 PHARM_HANDOFF = Path("runs/s27-pharmacity/handoff/cc-s27-pharmacity")
 VALIDATOR = Path("scripts/s26/validate_pa3.py")
@@ -158,8 +164,14 @@ def s29_chunk_texts(pairs: pd.DataFrame) -> dict[tuple[int, int], tuple[str | No
     owners, cid_to_doc = load_owner_map(canonical)
     extra, extra_spans = _load_extra_docs(inputs)
     docs = set(pairs.doc_id.astype(int))
+    index = reg.registry_index()
+    reg_docs = {d for d in docs if d in index}
+    reg_text = reg.load_docs(index, reg_docs)
+    reg_lang = dict(zip(reg_text.doc_id.astype(int), reg_text.lang))
+    reg_text = dict(zip(reg_text.doc_id.astype(int), reg_text.doc_text))
+    reg_spans = reg.body_chunk_spans(index, reg_docs)
     owner = {d: owner_of(d, owners, cid_to_doc) for d in docs}
-    need = {d for d in docs if d not in extra and owner[d] in owners}
+    need = {d for d in docs if d not in extra and d not in reg_docs and owner[d] in owners}
     rows = load_doc_rows(canonical, need | {owner[d] for d in need})
     text = dict(zip(rows.doc_id.astype(int), rows.doc_text))
     lang = dict(zip(rows.doc_id.astype(int), rows.lang))
@@ -173,6 +185,10 @@ def s29_chunk_texts(pairs: pd.DataFrame) -> dict[tuple[int, int], tuple[str | No
             out[(q, d)] = ("p1_row", own[(q, d)])
         elif d in first:
             out[(q, d)] = ("p1_any", first[d])
+        elif d in reg_docs:
+            t = reg_text.get(d) or ""
+            a, b = _body_span(t, str(reg_lang.get(d, "zh")), reg_spans.get(d, empty))
+            out[(q, d)] = ("registry", t[a:b]) if t else (None, "")
         elif d in extra:
             sp = extra_spans.get(d, {})
             a, b = sp.get("answer") or sp.get("body") or (0, len(extra[d] or ""))
@@ -248,6 +264,49 @@ def carrier_swap(rows: list[dict[str, Any]], docsel: pd.DataFrame, target: pd.Da
     return {"removed": [[q, d] for q, d in sorted(base - want)], "added": added, "skipped_no_source": skipped}
 
 
+def base_rows_from_docsel(docsel: pd.DataFrame, bodies: dict[tuple[int, int], str]) -> list[dict[str, Any]]:
+    """Base bundle rows from a docsel: ``relevant_docs`` in ``rank`` order, one chunk on every pair of ``bodies``."""
+    rows = []
+    for qid, g in docsel.sort_values(["query_id", "rank"]).groupby("query_id", sort=True):
+        docs = [int(d) for d in g.doc_id]
+        rows.append({"id": int(qid), "relevant_docs": docs,
+                     "relevant_chunks": [{"doc_id": d, "chunk_text": bodies[(int(qid), d)]} for d in docs if (int(qid), d) in bodies]})
+    return rows
+
+
+def virtual_base(out: Path, name: str, docsel: pd.DataFrame, carriers: pd.DataFrame | None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """S37 mode (no S36 -docread ZIP): whole-body chunks of the carriers from the S29 sources, saved to ``<name>.base.parquet``."""
+    target = docsel[docsel.chunk][["query_id", "doc_id"]] if carriers is None else carriers[["query_id", "doc_id"]]
+    texts = s29_chunk_texts(target)
+    bodies, skipped = {}, []
+    for q, d in zip(target.query_id.astype(int), target.doc_id.astype(int)):
+        src, body = texts.get((q, d), (None, ""))
+        if src is None or not body.strip():
+            skipped.append([q, d])
+        else:
+            bodies[(q, d)] = body
+    frame = pd.DataFrame([(q, d, b) for (q, d), b in bodies.items()], columns=["query_id", "doc_id", "body"])
+    path = out / f"{name}.base.parquet"
+    _atomic_parquet(frame, path)
+    return base_rows_from_docsel(docsel, bodies), {
+        "base_parquet": str(path), "base_parquet_sha256": _sha256(path), "carriers": len(bodies), "skipped_no_source": len(skipped),
+        "skipped_examples": skipped[:5]}
+
+
+def load_base(prep: dict[str, Any]) -> list[dict[str, Any]]:
+    """The base bundle of a prepared run: the ZIP, or the docs of its docsel with the chunks of ``<name>.base.parquet``."""
+    if prep.get("base_zip"):
+        if _sha256(Path(prep["base_zip"])) != prep["base_zip_sha256"]:
+            raise ValueError("base ZIP changed since prepare")
+        return read_bundle(Path(prep["base_zip"]))
+    base, docsel_path = Path(prep["base_parquet"]), Path(prep["docsel"])
+    if _sha256(base) != prep["base_parquet_sha256"] or _sha256(docsel_path) != prep["docsel_sha256"]:
+        raise ValueError("base parquet or docsel changed since prepare")
+    frame = pd.read_parquet(base)
+    docsel = pd.read_parquet(docsel_path, columns=["query_id", "doc_id", "rank"])
+    return base_rows_from_docsel(docsel, dict(zip(zip(frame.query_id.astype(int), frame.doc_id.astype(int)), frame.body)))
+
+
 def doc_texts(doc_ids: set[int]) -> tuple[dict[int, str], dict[int, str], dict[int, int], set[int], dict[int, int]]:
     """(text by carrier doc, lang, owner, Pharmacity ids, text key): own canonical row, else the alias owner's
     (validator S26 rule); Pharmacity lot docs take their lot doc_text."""
@@ -257,12 +316,20 @@ def doc_texts(doc_ids: set[int]) -> tuple[dict[int, str], dict[int, str], dict[i
     canonical = paths.DATA_DIR / CANONICAL
     owners, cid_to_doc = load_owner_map(canonical)
     extra, _ = _load_extra_docs(_inputs())
-    owner = {d: owner_of(d, owners, cid_to_doc) for d in doc_ids}
-    rows = load_doc_rows(canonical, (doc_ids | set(owner.values())) - set(extra))
+    index = reg.registry_index()
+    reg_docs = {d for d in doc_ids if d in index}
+    reg_rows = reg.load_docs(index, reg_docs)
+    reg_text = dict(zip(reg_rows.doc_id.astype(int), reg_rows.doc_text))
+    reg_lang = dict(zip(reg_rows.doc_id.astype(int), reg_rows.lang))
+    owner = {d: (d if d in reg_docs else owner_of(d, owners, cid_to_doc)) for d in doc_ids}
+    rows = load_doc_rows(canonical, ((doc_ids - reg_docs) | set(owner.values())) - set(extra) - reg_docs)
     text = dict(zip(rows.doc_id.astype(int), rows.doc_text))
     lang = dict(zip(rows.doc_id.astype(int), rows.lang))
     out_text, out_lang, key = {}, {}, {}
     for d in doc_ids:
+        if d in reg_docs:
+            out_text[d], out_lang[d], key[d] = reg_text.get(d) or "", str(reg_lang.get(d, "zh")), d
+            continue
         if d in extra:
             out_text[d], out_lang[d], key[d] = extra[d] or "", "vi", d
             continue
@@ -294,6 +361,8 @@ def t256_chunks(owners: set[int], pharm: set[int]) -> pd.DataFrame:
         p["char_end"] = [lots[c][1] for c in p.chunk_id]
         p["vec_row"], p["file_row"], p["origin"] = -1, np.arange(len(p)), "p"
         frames.append(p)
+    if not frames:
+        return pd.DataFrame({"chunk_id": [], "doc_id": [], "field": [], "char_start": [], "char_end": [], "text": [], "file_row": []})
     return pd.concat(frames, ignore_index=True)
 
 
@@ -302,9 +371,12 @@ def best_t256(carriers: pd.DataFrame, text: dict[int, str], owner: dict[int, int
     """((query, doc) -> char span of the best answer/body t256 chunk in the carrier's text (CH-t256-1 rule),
     doc -> its answer/body t256 chunks when their spans index the carrier's text)."""
     docs = set(carriers.doc_id.astype(int))
+    index = reg.registry_index()
+    reg_docs = {d for d in docs if d in index}
+    docs -= reg_docs
     own = {d: (d if d in pharm else owner[d]) for d in docs}
     chunks = t256_chunks({o for d, o in own.items() if d not in pharm}, pharm & docs)
-    by_owner = {int(o): g.sort_values("file_row") for o, g in chunks.groupby("doc_id", sort=False)}
+    by_owner = {int(o): g.sort_values("file_row") for o, g in chunks.groupby("doc_id", sort=False)} if len(chunks) else {}
     pieces: dict[int, pd.DataFrame] = {}
     for d in docs:
         g = by_owner.get(own[d])
@@ -316,6 +388,8 @@ def best_t256(carriers: pd.DataFrame, text: dict[int, str], owner: dict[int, int
         sub = g[g.field.isin(SUBMITTABLE)].reset_index(drop=True)
         if len(sub):
             pieces[d] = sub.assign(idx=np.arange(len(sub)))
+    if not docs:                                              # only registry docs
+        return reg.best_spans(carriers, text, index, choose)
     cp = pd.read_parquet(paths.OUT_DIR / S32_ROOT / "pool" / "chunk_pairs.parquet",
                          columns=["pair_id", "query_id", "doc_id", "chunk_id", "field"])
     cp = cp.merge(carriers[["query_id", "doc_id"]], on=["query_id", "doc_id"])
@@ -329,6 +403,8 @@ def best_t256(carriers: pd.DataFrame, text: dict[int, str], owner: dict[int, int
         sup_dense = np.array(sup["dense"])
     out: dict[tuple[int, int], tuple[int, int]] = {}
     for q, d in zip(carriers.query_id.astype(int), carriers.doc_id.astype(int)):
+        if d in reg_docs:
+            continue
         g = pieces.get(d)
         if g is None:
             continue
@@ -352,24 +428,44 @@ def best_t256(carriers: pd.DataFrame, text: dict[int, str], owner: dict[int, int
             vals = (np.stack(vecs).astype(np.float32) @ qv[q].astype(np.float32)).tolist()
         pick = keep[choose(vals, [int(g.idx.iat[k]) for k in keep], 1)[0]]
         out[(q, d)] = (int(g.char_start.iat[pick]), int(g.char_end.iat[pick]))
+    if reg_docs:
+        reg_out, reg_pieces = reg.best_spans(carriers[carriers.doc_id.astype(int).isin(reg_docs)], text, index, choose)
+        out.update(reg_out)
+        pieces.update(reg_pieces)
     return out, pieces
 
 
 # ------------------------------------------------------------------------------------------ prepare
 
-def prepare(out: Path, name: str, base_zip: Path, docsel_path: Path | None, rule: str, base64: bool,
+def prepare(out: Path, name: str, base_zip: Path | None, docsel_path: Path | None, rule: str, base64: bool,
             skip_check: bool, thin: bool = True, carriers: Path | None = None) -> dict[str, Any]:
     started = time.monotonic()
-    rows = read_bundle(base_zip)
-    report: dict[str, Any] = {"name": name, "rule": rule, "base_zip": str(base_zip), "base_zip_bytes": base_zip.stat().st_size,
-                              "base_zip_sha256": _sha256(base_zip), "docsel": str(docsel_path) if docsel_path else None,
+    report: dict[str, Any] = {"name": name, "rule": rule, "docsel": str(docsel_path) if docsel_path else None,
                               "base64_baophutho": base64 if rule.startswith("clean") else None, "thin": thin}
+    if base_zip is not None:
+        rows = read_bundle(base_zip)
+        report.update({"base_zip": str(base_zip), "base_zip_bytes": base_zip.stat().st_size, "base_zip_sha256": _sha256(base_zip)})
+    else:
+        if docsel_path is None:
+            raise ValueError("without --base-zip the base bundle is built from the docsel (--docsel)")
+        docsel0 = pd.read_parquet(docsel_path, columns=["query_id", "doc_id", "rank", "chunk", "p4b"])
+        target0 = pd.read_parquet(carriers, columns=["query_id", "doc_id"]) if carriers is not None else None
+        rows, info = virtual_base(out, name, docsel0, target0)
+        estimate = int(RATE_CARRIER * info["carriers"] + RATE_DOC * len(docsel0))
+        report.update({"base_zip": None, "base_zip_bytes": estimate, "base_zip_sha256": None, **info,
+                       "docsel_sha256": _sha256(docsel_path), "carriers": str(carriers) if carriers else None,
+                       "carriers_sha256": _sha256(carriers) if carriers else None})
+        carriers = None                              # already folded into the base bundle
+        kept = {(int(r["id"]), int(c["doc_id"])) for r in rows for c in r["relevant_chunks"]}
+        skip_check = True
     swap: dict[str, Any] = {"removed": [], "added": []}
     if carriers is not None and docsel_path is None:
         raise ValueError("--carriers needs the docsel")
     if docsel_path is not None:
         report["docsel_sha256"] = _sha256(docsel_path)
         docsel = pd.read_parquet(docsel_path, columns=["query_id", "doc_id", "rank", "chunk", "p4b"])
+        if base_zip is None:
+            docsel = docsel.assign(chunk=[(int(q), int(d)) in kept for q, d in zip(docsel.query_id, docsel.doc_id)])
         check = check_docsel(rows, docsel)
         report["docsel_check"] = check
         if not skip_check and (check["queries_docs_differ"] or check["carriers_only_base"] or check["carriers_only_docsel"]):
@@ -525,9 +621,7 @@ def write(out: Path, name: str, threshold: int | None, validate: bool = True, re
     chosen: dict[tuple[int, int], list] = {}
     for q, d, t in zip(frame.query_id.astype(int), frame.doc_id.astype(int), frame.text):
         chosen.setdefault((q, d), []).append(None if t is None or t != t else t)
-    rows = read_bundle(Path(prep["base_zip"]))
-    if _sha256(Path(prep["base_zip"])) != prep["base_zip_sha256"]:
-        raise ValueError("base ZIP changed since prepare")
+    rows = load_base(prep)
     swap_path = out / f"{name}.swap.json"
     rows = apply_swap(rows, json.loads(swap_path.read_text(encoding="utf-8"))) if swap_path.exists() else rows
     new_rows = [replace_chunks(r, chosen) for r in rows]
@@ -641,9 +735,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     paths.assert_writable(out)
     out.mkdir(parents=True, exist_ok=True)
     if args.command in ("prepare", "run") and not (out / f"{args.name}.prepare.json").exists():
-        if not (args.base_zip and args.rule):
-            parser.error("prepare needs --base-zip and --rule (and normally --docsel)")
-        rep = prepare(out, args.name, paths.resolve_path(args.base_zip),
+        if not (args.rule and (args.base_zip or args.docsel)):
+            parser.error("prepare needs --rule and --base-zip (or --docsel alone: the base bundle is built from the docsel)")
+        rep = prepare(out, args.name, paths.resolve_path(args.base_zip) if args.base_zip else None,
                       paths.resolve_path(args.docsel) if args.docsel else None, args.rule, not args.no_base64,
                       args.skip_docsel_check, not args.no_thin, paths.resolve_path(args.carriers) if args.carriers else None)
         print(json.dumps(rep, ensure_ascii=False, indent=1))

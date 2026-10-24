@@ -158,3 +158,13 @@ scripts/s38/compose.sh EF2-cut-avg clean        # hoặc EF2-cut-p4b; RULE = cle
 - **Cứu phần chữ thật của doc thin**: doc thin hiện mất cả chunk. Doc baothanhhoa.vn / baophutho.vn có khối base64 ở đầu rồi câu tiếng Việt thật ở cuối (baophutho còn khung bình luận). Thay vì bỏ chunk, có thể cắt bỏ dòng base64 và token `{placeholder}`, giữ phần chữ còn lại làm chunk nếu đủ dài (ngưỡng độ dài cần đo), rồi mới xét thin. Chỉ đáng làm khi số carrier thin trong docsel đủ lớn (S35 báo; trên EF2-cut-p4b chỉ 24 carrier, tác động không đáng kể).
 - **Ghép question cho host hỏi–đáp** (ask.39, 120ask, vinmec): xem «Chưa làm» ở trên.
 - **Tiêu chí tỷ lệ ký tự không phải chữ** không dùng cho thin (xem phần quyết định 24/10); nếu cần bắt thêm kiểu rác khác thì phải xét riêng từng dạng, có kiểm diff trên docsel.
+
+## Compose: carriers tuỳ chọn, bundle dựng từ docsel, body 120ask theo registry (S35, 24/10)
+
+Ba thêm vào `r2ai.s38.compose`, không đổi hành vi khi không dùng (nền `fe7f82e`; commit `37cbeae`, `dde831c`, `f355f73`):
+
+- **`--carriers carriers.parquet`** (`query_id, doc_id`): tập carrier thay cho tập của bundle nền, nằm trong các doc của docsel. Carrier bỏ ra mất chunk; carrier mới nhận chunk nguyên body theo nguồn S29 (`s29_chunk_texts`; cặp không có nguồn chunk bị bỏ và đếm); thin tính trên tập mới; mọi thay đổi gộp vào `<name>.swap.json` so với bundle nền nên `write` không đổi. Ước lượng T tính theo `RATE_CARRIER` (580 B mỗi carrier) và `RATE_DOC` (2,9 B mỗi doc).
+- **Không `--base-zip`**: bundle dựng từ docsel (`relevant_docs` theo `rank`, một chunk nguyên body mỗi carrier, lưu `<name>.base.parquet`), không cần ZIP `-docread` của S36. Cổng offline: nguồn S29 cho đúng chunk của ZIP docread EF2-free trên 4.000/4.000 carrier mẫu.
+- **Registry 120ask** (`r2ai.s38.registry`): doc có trong `out/runs/s37/pairs_new.parquet` lấy `doc_text`, span t256 và chunk tốt nhất cho cửa sổ 768 từ segment `data/s37_120ask/<segment>/` (điểm chunk 0,6B của các run `cmax*`, không có thì chunk đầu theo cosine của `cmax_top3`, không có nữa thì chunk body đầu).
+- Bộ chọn T (`run_full`): tái dùng phép đo cũ (`<name>-t<T>.compose.json` còn khớp SHA ZIP và mới hơn `prepare.json`) và, khi mọi ứng viên dưới trần, ước lượng lại T từ phần dư byte đo được thay vì bước mù; `--rounds` mặc định 4.
+- Test: `tests/test_s38_compose_registry.py` (hoán đổi carrier, gộp swap, base từ docsel, registry, chọn T).

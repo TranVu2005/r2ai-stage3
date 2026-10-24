@@ -47,14 +47,14 @@ def s35_jina_scores() -> Path:
     return paths.RUNS_DIR / "s35-part-jina" / "jina" / "scores-all.parquet"
 
 
-def load_frames() -> tuple[dict[int, list[dict[str, Any]]], dict[int, list[dict[str, Any]]], dict[int, list[dict[str, Any]]], dict[int, int], dict[str, Any], dict[str, Path]]:
+def load_frames(deepen: bool = True) -> tuple[dict[int, list[dict[str, Any]]], dict[int, list[dict[str, Any]]], dict[int, list[dict[str, Any]]], dict[int, int], dict[str, Any], dict[str, Path]]:
     """``(ranked, union, free_pools, free_keep, free_report, files)``: the pool13 rows of K4-thr-C, the scored union
     (cosine order, 4B scores), and the K4-free pools with their kept-doc counts."""
     root = s31_root()
     union, files = load_union(root)
     frame = s31_build.load_candidates(root / "pool", files["judge"], files["pool13_index"], files["q06"])
     ranked = s31_build.rank_candidates(frame)
-    free, keep, report = s31_build.free_adaptive(union)
+    free, keep, report = s31_build.free_adaptive(union, deepen)
     return ranked, union, free, keep, report, files
 
 

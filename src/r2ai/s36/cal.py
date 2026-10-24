@@ -77,8 +77,9 @@ class Frame:
     """pool13 rows of every query in J3 RRF order, with P4B, Jina, language and the lookups of the scored union."""
 
     def __init__(self, keys: Sequence[str] = J3_KEYS, frame: str = "thrC") -> None:
-        """``frame`` thrC: the pool13 rows; free: the K4-free pools (cosine top-211, deepened). ``keys``: the RRF rank sources."""
-        ranked, union, free, _, _, _ = fuse.load_frames()
+        """``frame`` thrC: the pool13 rows; free: the K4-free pools (cosine top-211, deepened); free211: the same pools cut at the
+        cosine top-211 for every query (no deepening). ``keys``: the RRF rank sources."""
+        ranked, union, free, _, _, _ = fuse.load_frames(deepen=frame != "free211")
         self.keys, self.frame_name = tuple(keys), frame
         self.ranked = ranked
         self.p4b_of = {(q, int(r["doc_id"])): float(r["judge_score"]) for q, rows in union.items() for r in rows}
@@ -397,49 +398,81 @@ FREE_G_DEPTH = 211  # P_FREE: G_q is the sum of p_cal over the cosine top-211 pl
 LB_DOC_F2_FREE = {"FUSE4-free": 0.4104}
 
 
-def ef2_free() -> dict[str, Any]:
+def ef2_free(deepen: bool = True) -> dict[str, Any]:
     """EF2-free (S35, 24/10): free frame (cosine top-211 + adaptive deepening over the scored union), RRF of the four sources, EF2 cut
     with floor 20 and ceiling = scored pool depth; no K_q anywhere. (a, b) of ``run`` unchanged (fitted on three aggregate LB Doc P
     values, no per-query label or LB score). G_q = s_free (sum p_cal over the cosine top-211 + tail beyond 211), s_free fitted once so
-    that the predicted macro Doc F2 of the submitted FUSE4-free (aggregate LB 0.4104) is equal to it."""
+    that the predicted macro Doc F2 of the submitted FUSE4-free (aggregate LB 0.4104) is equal to it.
+
+    ``deepen`` False (EF2-free-d211): the pool is cut at the cosine top-211 for every query; (a, b) and s_free are read from
+    ``cal/ef2-free.json`` and not refitted (G_q is the same sum over the cosine top-211 plus tail, so only the pool differs)."""
     out = cal_root()
     fitted = json.loads((out / "cal.json").read_text(encoding="utf-8"))["variants"]["p4b"]
     a, b = fitted["fit"]["a"], fitted["fit"]["b"]
     build_dir = fuse.run_root() / "build-docread"
-    frame = Frame(fuse.FOUR_KEYS, "free")
+    name = "EF2-free" if deepen else "EF2-free-d211"
+    tag = "free" if deepen else "free-d211"
+    frame = Frame(fuse.FOUR_KEYS, "free" if deepen else "free211")
     docs_of = lambda path: {r["id"]: r["relevant_docs"] for r in _load_submission(path)}  # noqa: E731
-    fuse4_free = docs_of(build_dir / "FUSE4-free-docread.zip")
-    lo, hi = 0.5, 5.0
-    for _ in range(40):
-        mid = math.sqrt(lo * hi)
-        f2 = Calibrated(frame, "p4b", a, b, mid, use_tail=True, g_depth=FREE_G_DEPTH).expected_docs(fuse4_free)["f2"]
-        lo, hi = (lo, mid) if f2 < LB_DOC_F2_FREE["FUSE4-free"] else (mid, hi)
-    s_free = math.sqrt(lo * hi)
+    ref_ids = docs_of(build_dir / "EF2-cut-p4b-docread.zip")
+    if deepen:
+        fuse4_free = docs_of(build_dir / "FUSE4-free-docread.zip")
+        lo, hi = 0.5, 5.0
+        for _ in range(40):
+            mid = math.sqrt(lo * hi)
+            f2 = Calibrated(frame, "p4b", a, b, mid, use_tail=True, g_depth=FREE_G_DEPTH).expected_docs(fuse4_free)["f2"]
+            lo, hi = (lo, mid) if f2 < LB_DOC_F2_FREE["FUSE4-free"] else (mid, hi)
+        s_free = math.sqrt(lo * hi)
+    else:
+        s_free = float(json.loads((out / "ef2-free.json").read_text(encoding="utf-8"))["s_free"])
     cal = Calibrated(frame, "p4b", a, b, s_free, use_tail=True, g_depth=FREE_G_DEPTH)
     keep = ef2_keep(cal)
     ids = {q: [int(r["doc_id"]) for r in rows] for q, rows in chosen_rows(frame, keep).items()}
-    ref_ids = docs_of(build_dir / "EF2-cut-p4b-docread.zip")
     tails = np.array([cal.tail[q] / (cal.g_pool[q] + cal.tail[q]) for q in frame.qids])
-    checks = {}
-    for name, path in (("FUSE4-free", build_dir / "FUSE4-free-docread.zip"), ("K4-free", paths.RUNS_DIR / "s31-strong-judge" / "build-ext" / "K4-free.zip")):
-        checks[name] = cal.expected_docs(docs_of(path))
     result: dict[str, Any] = {
-        "a": a, "b": b, "s_free": s_free, "s_thrC": fitted["g_scale"], "fit_data": {"lb_doc_f2_free": LB_DOC_F2_FREE, "calibration": "ab from cal.json"},
+        "name": name, "a": a, "b": b, "s_free": s_free, "s_thrC": fitted["g_scale"],
+        "fit_data": {"lb_doc_f2_free": LB_DOC_F2_FREE, "calibration": "ab from cal.json (three aggregate LB Doc P)",
+                     "s_free": "fitted on the aggregate LB Doc F2 of FUSE4-free" if deepen else "read from cal/ef2-free.json, not refitted"},
         "g_rule": f"s_free (sum p_cal over the cosine top-{FREE_G_DEPTH} + geometric tail beyond {FREE_G_DEPTH})",
         "depth": keep_stats({q: len(frame.order[q]) for q in frame.qids}),
         "g": {"mean": float(np.mean(list(cal.g.values()))), "tail_share_mean": float(tails.mean()), "tail_share_p90": float(np.quantile(tails, .9))},
-        "docs_per_query": keep_stats(keep), "predicted": cal.expected(keep), "predicted_submitted": checks,
+        "docs_per_query": keep_stats(keep), "predicted": cal.expected(keep),
         "vs_EF2-cut-p4b": doc_set_diff(ids, ref_ids),
-        "vs_FUSE4-free": doc_set_diff(ids, fuse4_free),
         "keep_at_floor": int(sum(1 for q in frame.qids if keep[q] == min(FLOOR_K, len(frame.order[q])))),
         "keep_at_depth": int(sum(1 for q in frame.qids if keep[q] == len(frame.order[q]))),
-        "queries_deeper_than_211": int(sum(1 for q in frame.qids if len(frame.order[q]) > FREE_G_DEPTH))}
-    _atomic_json(out / "keep-EF2-free.json", {str(q): int(k) for q, k in keep.items()})
+    }
+    if deepen:
+        result["predicted_submitted"] = {n: cal.expected_docs(docs_of(path)) for n, path in (
+            ("FUSE4-free", build_dir / "FUSE4-free-docread.zip"), ("K4-free", paths.RUNS_DIR / "s31-strong-judge" / "build-ext" / "K4-free.zip"))}
+        result["vs_FUSE4-free"] = doc_set_diff(ids, fuse4_free)
+        result["queries_deeper_than_211"] = int(sum(1 for q in frame.qids if len(frame.order[q]) > FREE_G_DEPTH))
+    else:
+        result["deep_queries"] = d211_loss(ids)
+    _atomic_json(out / f"keep-{name}.json", {str(q): int(k) for q, k in keep.items()})
     rows = [{"query_id": q, "doc_id": int(r["doc_id"]), "p_fused": float(f), "p_cal": float(p)}
             for q in frame.qids for r, f, p in zip(frame.order[q], cal.fused[q], cal.p[q])]
-    pd.DataFrame(rows).to_parquet(out / "pcal-free.parquet", index=False)
-    _atomic_json(out / "ef2-free.json", result)
+    pd.DataFrame(rows).to_parquet(out / f"pcal-{tag}.parquet", index=False)
+    _atomic_json(out / f"{name.lower()}.json", result)
     return result
+
+
+def d211_loss(ids: dict[int, list[int]]) -> dict[str, Any]:
+    """Docs of EF2-free (``docsel-EF2-free``) that the cosine top-211 cut loses on the queries whose free pool was deeper than 211
+    (pool rows counted in ``pcal-free.parquet``), and the docs it takes in their place."""
+    depth = pd.read_parquet(cal_root() / "pcal-free.parquet", columns=["query_id"]).groupby("query_id").size()
+    deep = sorted(int(q) for q in depth[depth > FREE_G_DEPTH].index)
+    free = pd.read_parquet(fuse.run_root() / "docsel" / "docsel-EF2-free.parquet", columns=["query_id", "doc_id", "cosine_rank"])
+    free = free[free.query_id.isin(deep)]
+    old = {int(q): set(g.doc_id.astype(int)) for q, g in free.groupby("query_id")}
+    beyond = free[free.cosine_rank > FREE_G_DEPTH].groupby("query_id").size().reindex(deep, fill_value=0)
+    lost = np.array([len(old[q] - set(ids[q])) for q in deep])
+    gained = np.array([len(set(ids[q]) - old[q]) for q in deep])
+    old_n, new_n = np.array([len(old[q]) for q in deep]), np.array([len(ids[q]) for q in deep])
+    return {"queries": len(deep), "docs_ef2_free": int(old_n.sum()), "docs_d211": int(new_n.sum()),
+            "docs_lost_total": int(lost.sum()), "docs_lost_per_query_mean": float(lost.mean()),
+            "docs_lost_per_query_p10_p50_p90": [float(np.quantile(lost, q)) for q in (.1, .5, .9)],
+            "docs_lost_beyond_cosine_211": int(beyond.sum()), "docs_gained_total": int(gained.sum()),
+            "docs_gained_per_query_mean": float(gained.mean()), "queries_identical_docs": int(((lost == 0) & (gained == 0)).sum())}
 
 
 def docsel_j3() -> dict[str, Any]:
@@ -463,9 +496,9 @@ def docsel_j3() -> dict[str, Any]:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=("run", "docsel-j3", "ef2-fuse", "ef2-free"))
+    parser.add_argument("command", choices=("run", "docsel-j3", "ef2-fuse", "ef2-free", "ef2-free-d211"))
     args = parser.parse_args(argv)
-    result = {"docsel-j3": docsel_j3, "ef2-fuse": ef2_fuse, "ef2-free": ef2_free, "run": run}[args.command]()
+    result = {"docsel-j3": docsel_j3, "ef2-fuse": ef2_fuse, "ef2-free": ef2_free, "ef2-free-d211": lambda: ef2_free(deepen=False), "run": run}[args.command]()
     print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
     return 0
 

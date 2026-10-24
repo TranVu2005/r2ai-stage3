@@ -255,14 +255,14 @@ def thr_ext_pools(
     return pools, keep, report
 
 
-def free_adaptive(union: dict[int, list[dict[str, Any]]]) -> tuple[dict[int, list[dict[str, Any]]], dict[int, int], dict[str, Any]]:
-    """K4-free: top-P_FREE; deepen to every scored pair when the 211th doc has P4B >= T_FREE."""
+def free_adaptive(union: dict[int, list[dict[str, Any]]], deepen: bool = True) -> tuple[dict[int, list[dict[str, Any]]], dict[int, int], dict[str, Any]]:
+    """K4-free: top-P_FREE; deepen to every scored pair when the 211th doc has P4B >= T_FREE (``deepen`` False: always the top-P_FREE)."""
     pools, keep, deepened, still = {}, {}, [], []
     for qid, rows in union.items():
         if len(rows) < P_FREE:
             raise ValueError(f"Query {qid}: only {len(rows)} scored pairs < {P_FREE}")
         pool = rows[:P_FREE]
-        if pool[-1]["judge_score"] >= T_FREE and len(rows) > P_FREE:
+        if deepen and pool[-1]["judge_score"] >= T_FREE and len(rows) > P_FREE:
             pool = rows
             deepened.append(qid)
         if pool[-1]["judge_score"] >= T_FREE:  # bottom of the scored pool still at or above t
@@ -537,6 +537,7 @@ def build(
     chunk_target: int | None = None,
     docsel_hook: Any = None,
     keep_override: dict[str, dict[int, int]] | None = None,
+    free_deepen: bool = True,
 ) -> list[dict[str, Any]]:
     """``rank_hook(ranked)`` may add rank keys to the pool13 rows and returns a sidecar dict;
     ``rank_keys_override`` replaces the RRF keys of a variant; ``variant_alias`` maps an output
@@ -546,6 +547,7 @@ def build(
     to its chunk mode (e.g. ``fixed-whole``); ``rank_weights`` gives weighted RRF (one weight per rank key);
     ``chunk_target`` replaces ``THR_C_CHUNKS`` for the ``threshold`` chunk mode (calibration of a new t_c);
     ``keep_override`` maps an output name to its docs-per-query (the pool rows are taken in RRF order);
+    ``free_deepen`` False cuts every K4-free pool at the cosine top-P_FREE (EF2-free-d211);
     ``docsel_hook(name, chosen, chunk_doc_ids, chunk_info)`` receives the selected rows (RRF order) of each built bundle."""
     started = time.monotonic()
     judge_tag = JUDGE_TAGS.get(judge) if judge else None
@@ -630,7 +632,7 @@ def build(
             pools[name], keep_by_variant[name], keep_reports[name] = thr_ext_pools(
                 ranked, union, base_k, thr_keep, thr_cache["t"])
         elif mode == "free":
-            pools[name], keep_by_variant[name], keep_reports[name] = free_adaptive(union)
+            pools[name], keep_by_variant[name], keep_reports[name] = free_adaptive(union, free_deepen)
         elif mode and mode.startswith("topk:"):
             k = int(mode.split(":")[1])
             pools[name], keep_by_variant[name] = topk_pools(union, k)

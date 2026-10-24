@@ -128,6 +128,30 @@ Với P4B-only hai ngưỡng gần như trùng (0,1321 / 0,1303, chênh do cửa
 4. ZIP FUSE4-free-docread 102.471.046 B, sát trần 102.600.000 B (còn 128.954 B).
 5. Các bản S35 cũ (PART-thrC, J3-thrC, JINA-K40) dựng trước bản sửa lỗi Pharmacity, không dựng lại.
 
+### Tham số toàn cục và giới hạn rò K_q (24/10)
+
+- **(a, b)** = (0,5298075; −1,4096976) khớp trên ba Doc P tổng hợp của LB public (J4-K40 0,376, K4-thr-C 0,2346, J3-thrC 0,2357); **s_free** = 1,7405 khớp trên một Doc F2 tổng hợp của LB public (FUSE4-free 0,4104). Cả bốn là tham số toàn cục (một giá trị cho mọi query), không dùng nhãn, điểm LB theo query hay dữ liệu theo query nào. Bộ query mới dùng lại đúng các giá trị này.
+- **Rò K_q qua độ sâu pool**: pool top-211 và ngưỡng T_FREE là hằng số chung, nhưng 525 query có pool sâu hơn 211 (đào sâu khi doc thứ 211 có P4B ≥ T_FREE) và độ sâu đã chấm của chúng đến từ pool-extra, chấm theo trần 2,0·K_q của S31. 454 trong 525 query vẫn còn doc có P4B ≥ T_FREE ở đáy pool đã chấm, nên trần EF2 của các query này (tới 522 doc) vẫn mang dấu K_q cũ. Bản `EF2-free-d211` cắt pool ở cosine top-211 cho mọi query để bỏ phần rò này (giữ nguyên (a, b), s_free, t_c, 4 nguồn RRF).
+- t_c: EF2-cut-p4b chọn chunk theo top-N P4B với N = 175.548 (tổng chunk K4-thr-C-fx, t_c 0,08756); EF2-free dùng hằng số 0,20307 (hiệu chỉnh một lần trên docs FUSE4-free về cùng tổng 175.548). Không bản nào dùng K_q theo từng query; cả hai kế thừa tổng chunk của pipeline K_q cũ (n_c × 1,4).
+
+### EF2-FUSE4 khác EF2-cut-p4b ở đâu
+
+Cùng khung pool13, cùng (a, b), s = 1,490 và cùng G_q (G chỉ phụ thuộc P4B của pool13). Khác duy nhất: thứ tự RRF thêm nguồn C-max (4 nguồn thay 3), nên top-k đổi và k đổi theo (|Δk| TB 8,55 doc/query, 75 query cùng k, tổng 195.049 so với 193.879 doc). Có dùng K_q: pool13 = round(1,3·K_q), trần EF2 và đuôi G đều lấy từ độ sâu pool13. Chưa dựng ZIP.
+
+### EF2-free-d211 (S35, 24/10, chưa compose)
+
+`python -m r2ai.s36.cal ef2-free-d211` rồi `scripts/s36/run_ef2_free.sh EF2-free-d211`: pool cắt ở cosine top-211 cho 1.200 query (253.200 cặp), RRF 4 nguồn hạng tính lại trong pool 211, G_q như EF2-free (tổng p_cal cosine top-211 + đuôi). 176.213 doc, k/query P10/P50/P90 = 73,9 / 155 / 206 (min 20, max 211, 42 query ở trần); mô hình dự đoán Doc F2 0,3790 (P 0,2408 / R 0,4565; thấp hơn EF2-free 0,4153 vì mô hình vẫn tính G đầy đủ trong khi pool bị cắt). Trên 525 query sâu: EF2-free 139.174 doc, d211 94.562 doc, mất 45.304 doc (TB 86,3/query, P10/P50/P90 8,4/56/199; 43.876 doc nằm ngoài cosine top-211), thêm 692 doc. docread ZIP 79.678.698 B SHA `bce908d8…33d9`, validator ok; docsel SHA `8ce87a00…febf`. Chưa chạy compose theo yêu cầu của Vu (chờ chốt quy tắc chunk).
+
+### Phân rã chunk EF2-free-t2002 so với mốc t1907 (24/10, offline)
+
+LB: mốc Final 0,3914 (Doc 0,4209, Chunk 0,3619: P 0,2213 / R 0,4769); EF2-free Final 0,3834 (Doc 0,4184, P 0,226 / R 0,6076; Chunk 0,3484: P 0,2236 / R 0,4554). Số liệu: `cal/chunkdiff.json`, `chunkdiff2.json`, `chunkrule-proxy.json` (`scripts/s36/chunkdiff*.py`, `chunkrule_proxy.py`).
+
+- Carrier chunk đầu: chung 148.614; chỉ-free 25.921 (p_cal TB 0,274, P4B TB 0,610); chỉ-mốc 26.934 (p_cal TB 0,120, P4B TB 0,232). Chỉ-mốc gồm 18.745 doc có trong docs EF2-free nhưng P4B < t_c 0,2031 (p_cal TB 0,087) và 8.189 doc EF2-free không chọn (p_cal TB 0,198). Tổng p_cal của carrier: free 53.725 so với mốc 49.860 (+7,8%); chỉ số recall thay thế (macro Σp_cal/G_q) free/mốc = 0,9936 (LB chunk recall 0,955). Carrier dồn vào ít query hơn: 100 query đầu giữ 22,3% (mốc 16,3%); carrier/query P10/P50/P90 38/118/329 so với 46/137,5/258.
+- Chunk thứ hai: 9.561 so với 12.637 (−3.076, −24,3%). Với T = 2002, 2.949 carrier có body trong (1.907; 2.002] mất cửa sổ (nếu T = 1.907 thì free có 12.510); trong carrier chung, 2.526 doc có cửa sổ ở mốc mà không có ở free. Chỉ số thay thế của cửa sổ free/mốc = 0,750.
+- Byte: ZIP nền free 101.717.111 B so với mốc 101.444.896 B (+272.215 B); ngân sách cho cửa sổ 882.889 so với 1.155.104 B (−23,6%), mỗi cửa sổ ≈ 92–94 B, mỗi carrier chunk đầu ≈ 580 B. relevant_docs: +192.270 B thô, +78.100 B nén (29% phần tăng); chunk_text: thô −7,4 MB nhưng nén +194 kB (71%): carrier của free nén kém hơn. JSON thô free 945.572.363 B so với mốc 964.570.736 B, ZIP cuối bằng nhau (102.594.467 / 102.593.008 B).
+- Giải thích: mô hình p_cal ở mức doc dự đoán carrier của free tốt hơn mốc, nên không giải thích được chunk recall −4,5%; mất cửa sổ (−24%) giải thích một phần chưa biết. Bằng chứng S38 (nguyên body 0,3594 → thêm cửa sổ ~12 nghìn doc 0,3619) cho thấy cửa sổ chỉ cộng cỡ +0,0025 chunk F2 nên khó giải thích hết −0,0135. Phần dư chưa giải thích được offline vì không có nhãn chunk.
+
+
 ## Lệnh
 
 ```bash

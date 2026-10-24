@@ -57,6 +57,8 @@ VARIANTS: dict[str, dict[str, Any]] = {
     # four-source order + EF2 cut (r2ai.s36.cal ef2-fuse): pool13 / K4-free pools, docs per query from cal/keep-<name>.json, no K_q in EF2-free
     "EF2-FUSE4": {"keys": fuse.FOUR_KEYS, "alias": "K4-thr-C", "frame": "thrC", "chunk_target": THRC_CHUNKS, "docread": True, "cal": "p4b"},
     "EF2-free": {"keys": fuse.FOUR_KEYS, "alias": "K4-free", "frame": "free", "chunk_mode": "fixed-whole", "needs_t_c": True, "docread": True, "cal": "free"},
+    # EF2-free with the pool cut at the cosine top-211 for every query (no adaptive deepening); same (a, b), s_free and t_c
+    "EF2-free-d211": {"keys": fuse.FOUR_KEYS, "alias": "K4-free", "frame": "free", "chunk_mode": "fixed-whole", "needs_t_c": True, "docread": True, "cal": "free-d211", "free_deepen": False},
     "Check-FUSE4-thrC-th": {"keys": TWO_KEYS, "alias": "K4-thr-C", "frame": "thrC", "target": K4_THR_C_FX_JSON_SHA256, "chunk_target": THRC_CHUNKS},
     "Check-FUSE4-thrC-id": {"keys": TWO_KEYS, "alias": "K4-thr-C-fx", "frame": "thrC", "target": K4_THR_C_FX_JSON_SHA256},
     "Check-FUSE4-thrC-pre": {"keys": TWO_KEYS, "alias": "K4-thr-C", "frame": "thrC", "target": K4_THR_C_JSON_SHA256, "no_extra_chunks": True},
@@ -68,7 +70,7 @@ VARIANTS: dict[str, dict[str, Any]] = {
 
 def run_settings(names: Sequence[str]) -> dict[str, Any]:
     specs = [VARIANTS[n] for n in names]
-    for key in ("no_extra_chunks", "chunk_mode", "calibrate", "needs_t_c", "chunk_target", "docread", "cal"):
+    for key in ("no_extra_chunks", "chunk_mode", "calibrate", "needs_t_c", "chunk_target", "docread", "cal", "free_deepen"):
         if len({bool(s.get(key)) if key not in ("chunk_mode", "chunk_target") else s.get(key) for s in specs}) > 1:
             raise ValueError(f"Variants with different {key} cannot share a build run: {list(names)}")
     return specs[0]
@@ -165,6 +167,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         kwargs.update(extra_scores=fuse.s31_root() / "gpu" / "qwen3-reranker-4b" / "scores-extra.parquet",
                       extra_dir=fuse.s31_root() / "pool-extra",
                       orig_scores=fuse.s31_root() / "gpu" / "qwen3-reranker-4b" / "scores-pool13.parquet")
+        if settings.get("free_deepen") is False:
+            kwargs["free_deepen"] = False
         if "pool_hook" in hooks:
             kwargs["pool_hook"] = hooks["pool_hook"]
     elif "rank_hook" in hooks:

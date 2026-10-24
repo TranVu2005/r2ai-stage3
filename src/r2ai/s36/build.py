@@ -54,6 +54,9 @@ VARIANTS: dict[str, dict[str, Any]] = {
     "EF2-cut-p4b": {"keys": J3_KEYS, "alias": "K4-thr-C", "frame": "thrC", "chunk_target": THRC_CHUNKS, "docread": True, "cal": "p4b"},
     "EF2-cut-avg": {"keys": J3_KEYS, "alias": "K4-thr-C", "frame": "thrC", "chunk_target": THRC_CHUNKS, "docread": True, "cal": "avg"},
     "LANG-thr-avg": {"keys": J3_KEYS, "alias": "K4-thr-C", "frame": "thrC", "chunk_target": THRC_CHUNKS, "docread": True, "cal": "avg"},
+    # four-source order + EF2 cut (r2ai.s36.cal ef2-fuse): pool13 / K4-free pools, docs per query from cal/keep-<name>.json, no K_q in EF2-free
+    "EF2-FUSE4": {"keys": fuse.FOUR_KEYS, "alias": "K4-thr-C", "frame": "thrC", "chunk_target": THRC_CHUNKS, "docread": True, "cal": "p4b"},
+    "EF2-free": {"keys": fuse.FOUR_KEYS, "alias": "K4-free", "frame": "free", "chunk_mode": "fixed-whole", "needs_t_c": True, "docread": True, "cal": "free"},
     "Check-FUSE4-thrC-th": {"keys": TWO_KEYS, "alias": "K4-thr-C", "frame": "thrC", "target": K4_THR_C_FX_JSON_SHA256, "chunk_target": THRC_CHUNKS},
     "Check-FUSE4-thrC-id": {"keys": TWO_KEYS, "alias": "K4-thr-C-fx", "frame": "thrC", "target": K4_THR_C_FX_JSON_SHA256},
     "Check-FUSE4-thrC-pre": {"keys": TWO_KEYS, "alias": "K4-thr-C", "frame": "thrC", "target": K4_THR_C_JSON_SHA256, "no_extra_chunks": True},

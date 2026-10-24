@@ -76,20 +76,27 @@ def sigmoid(x: np.ndarray) -> np.ndarray:
 class Frame:
     """pool13 rows of every query in J3 RRF order, with P4B, Jina, language and the lookups of the scored union."""
 
-    def __init__(self) -> None:
-        ranked, union, _, _, _, _ = fuse.load_frames()
+    def __init__(self, keys: Sequence[str] = J3_KEYS, frame: str = "thrC") -> None:
+        """``frame`` thrC: the pool13 rows; free: the K4-free pools (cosine top-211, deepened). ``keys``: the RRF rank sources."""
+        ranked, union, free, _, _, _ = fuse.load_frames()
+        self.keys, self.frame_name = tuple(keys), frame
         self.ranked = ranked
         self.p4b_of = {(q, int(r["doc_id"])): float(r["judge_score"]) for q, rows in union.items() for r in rows}
-        self.jina, _ = fuse.load_jina(None)
-        for q, rows in ranked.items():
+        self.jina, _ = fuse.load_jina(fuse.run_root() / "extra" / "jina-scores.parquet")
+        self.cmax, _ = fuse.load_cmax(fuse.run_root() / "extra" / "cmax-scores.parquet")
+        pools = ranked if frame == "thrC" else free
+        for q, rows in pools.items():
             if fuse.rank_missing_last(rows, q, self.jina, "jina_score", "jina_rank"):
-                raise ValueError(f"query {q}: pool13 pair without Jina score")
+                raise ValueError(f"query {q}: pair without Jina score")
+            if fuse.rank_missing_last(rows, q, self.cmax, "cmax_score", "cmax_rank"):
+                raise ValueError(f"query {q}: pair without C-max score")
+        self.pools = pools
         inputs = _inputs()
         self.base_k = {int(r["id"]): len(r["relevant_docs"]) for r in _load_submission(inputs["baseline"])}
         docs = pq.read_table(inputs["canonical"] / "docs.parquet", columns=["doc_id", "lang"]).to_pandas()
         self.lang = dict(zip(docs.doc_id.astype(int), docs.lang))
-        self.order = {q: select_rrf(rows, len(rows), J3_KEYS, RRF_K) for q, rows in ranked.items()}  # full J3 RRF order
-        self.qids = sorted(ranked)
+        self.order = {q: select_rrf(rows, len(rows), self.keys, RRF_K) for q, rows in pools.items()}  # full RRF order
+        self.qids = sorted(pools)
         pairs = [(q, r) for q in self.qids for r in self.order[q]]
         self.p4b13 = np.array([float(r["judge_score"]) for _, r in pairs])
         self.jina13 = np.array([float(r["jina_score"]) for _, r in pairs])
@@ -155,7 +162,10 @@ def tail_mass(p_cos_order: np.ndarray) -> float:
 class Calibrated:
     """p_cal of every pool13 pair for one P_fused variant, G_q and the per-query orders."""
 
-    def __init__(self, frame: Frame, variant: str, a: float, b: float, scale: float = 1.0) -> None:
+    def __init__(self, frame: Frame, variant: str, a: float, b: float, scale: float = 1.0, use_tail: bool = True,
+                 g_depth: int | None = None) -> None:
+        """``g_depth``: G_q (sum and tail) is taken over the top ``g_depth`` docs in cosine order only, so it does not depend on how
+        deep the pool was scored (free frame: 211)."""
         self.frame, self.variant, self.a, self.b, self.scale = frame, variant, a, b, scale
         self.p: dict[int, np.ndarray] = {}      # p_cal in RRF order
         self.fused: dict[int, np.ndarray] = {}
@@ -170,9 +180,11 @@ class Calibrated:
             p = sigmoid(a * logit(fused) + b)
             by_cos = p[np.argsort([int(r["cosine_rank"]) for r in rows], kind="stable")]
             self.fused[q], self.p[q] = fused, p
-            self.g_pool[q] = float(p.sum())
+            if g_depth is not None:
+                by_cos = by_cos[:g_depth]
+            self.g_pool[q] = float(p.sum() if g_depth is None else by_cos.sum())
             self.tail[q] = tail_mass(by_cos)
-            self.g[q] = scale * (self.g_pool[q] + self.tail[q])
+            self.g[q] = scale * (self.g_pool[q] + (self.tail[q] if use_tail else 0.0))
         self.p_of = {(q, int(r["doc_id"])): float(p) for q in frame.qids for r, p in zip(frame.order[q], self.p[q])}
 
     def expected(self, keep: dict[int, int], tail: bool = True) -> dict[str, float]:
@@ -337,6 +349,99 @@ def run() -> dict[str, Any]:
     return result
 
 
+def ef2_fuse() -> dict[str, Any]:
+    """EF2-FUSE4 (pool13, RRF of the four sources) and EF2-free (K4-free pools, RRF of the four sources, no K_q anywhere), with the
+    P4B calibration (a, b) and the scale s of ``run`` kept as they are. Writes ``keep-<name>.json`` and ``pcal-<tag>.parquet``."""
+    out = cal_root()
+    fitted = json.loads((out / "cal.json").read_text(encoding="utf-8"))["variants"]["p4b"]
+    a, b, s = fitted["fit"]["a"], fitted["fit"]["b"], fitted["g_scale"]
+    result: dict[str, Any] = {"a": a, "b": b, "s": s, "lb_doc_f2": {**LB_DOC_F2, "FUSE4-thrC": 0.4178, "FUSE4-free": 0.4104, "EF2-cut-p4b": 0.4209}, "frames": {}}
+    zips = {"thrC": {"J3-thrC": submitted_zips()["J3-thrC"], "K4-thr-C": submitted_zips()["K4-thr-C"],
+                     "FUSE4-thrC": fuse.run_root() / "build-docread" / "FUSE4-thrC-docread.zip",
+                     "FUSE4w-thrC": fuse.run_root() / "build-docread" / "FUSE4w-thrC-docread.zip",
+                     "EF2-cut-p4b": fuse.run_root() / "build-docread" / "EF2-cut-p4b-docread.zip",
+                     "EF2-cut-avg": fuse.run_root() / "build-docread" / "EF2-cut-avg-docread.zip",
+                     "LANG-thr-avg": fuse.run_root() / "build-docread" / "LANG-thr-avg-docread.zip"},
+            "free": {"FUSE4-free": fuse.run_root() / "build-docread" / "FUSE4-free-docread.zip",
+                     "K4-free": paths.RUNS_DIR / "s31-strong-judge" / "build-ext" / "K4-free.zip"}}
+    ref_ids = {r["id"]: r["relevant_docs"] for r in _load_submission(zips["thrC"]["EF2-cut-p4b"])}
+    for frame_name, name, tail in (("thrC", "EF2-FUSE4", True),):  # EF2-free: ``ef2_free`` (S35, 24/10)
+        frame = Frame(fuse.FOUR_KEYS, frame_name)
+        cal = Calibrated(frame, "p4b", a, b, s, use_tail=tail)
+        keep = ef2_keep(cal)
+        ids = {q: [int(r["doc_id"]) for r in rows] for q, rows in chosen_rows(frame, keep).items()}
+        entry: dict[str, Any] = {"frame": frame_name, "g_rule": "s (sum p_cal over the pool + geometric tail beyond the pool13 depth)" if tail
+                                 else "s sum p_cal over the scored pool (no tail)",
+                                 "depth": keep_stats({q: len(frame.order[q]) for q in frame.qids}),
+                                 "g_mean": float(np.mean(list(cal.g.values()))), "docs_per_query": keep_stats(keep),
+                                 "predicted": cal.expected(keep), "vs_EF2-cut-p4b": doc_set_diff(ids, ref_ids),
+                                 "keep_at_floor": int(sum(1 for q in frame.qids if keep[q] == min(FLOOR_K, len(frame.order[q])))),
+                                 "keep_at_depth": int(sum(1 for q in frame.qids if keep[q] == len(frame.order[q]))),
+                                 "predicted_submitted": {}}
+        for zname, zpath in zips[frame_name].items():
+            docs = {r["id"]: r["relevant_docs"] for r in _load_submission(zpath)}
+            entry["predicted_submitted"][zname] = cal.expected_docs(docs)
+        result["frames"][name] = entry
+        _atomic_json(out / f"keep-{name}.json", {str(q): int(k) for q, k in keep.items()})
+        tag = "p4b" if frame_name == "thrC" else "free"
+        if frame_name == "free":
+            rows = [{"query_id": q, "doc_id": int(r["doc_id"]), "p_fused": float(f), "p_cal": float(p)}
+                    for q in frame.qids for r, f, p in zip(frame.order[q], cal.fused[q], cal.p[q])]
+            pd.DataFrame(rows).to_parquet(out / f"pcal-{tag}.parquet", index=False)
+        del frame, cal
+    _atomic_json(out / "ef2-fuse.json", result)
+    return result
+
+
+FREE_G_DEPTH = 211  # P_FREE: G_q is the sum of p_cal over the cosine top-211 plus a geometric tail beyond it
+LB_DOC_F2_FREE = {"FUSE4-free": 0.4104}
+
+
+def ef2_free() -> dict[str, Any]:
+    """EF2-free (S35, 24/10): free frame (cosine top-211 + adaptive deepening over the scored union), RRF of the four sources, EF2 cut
+    with floor 20 and ceiling = scored pool depth; no K_q anywhere. (a, b) of ``run`` unchanged (fitted on three aggregate LB Doc P
+    values, no per-query label or LB score). G_q = s_free (sum p_cal over the cosine top-211 + tail beyond 211), s_free fitted once so
+    that the predicted macro Doc F2 of the submitted FUSE4-free (aggregate LB 0.4104) is equal to it."""
+    out = cal_root()
+    fitted = json.loads((out / "cal.json").read_text(encoding="utf-8"))["variants"]["p4b"]
+    a, b = fitted["fit"]["a"], fitted["fit"]["b"]
+    build_dir = fuse.run_root() / "build-docread"
+    frame = Frame(fuse.FOUR_KEYS, "free")
+    docs_of = lambda path: {r["id"]: r["relevant_docs"] for r in _load_submission(path)}  # noqa: E731
+    fuse4_free = docs_of(build_dir / "FUSE4-free-docread.zip")
+    lo, hi = 0.5, 5.0
+    for _ in range(40):
+        mid = math.sqrt(lo * hi)
+        f2 = Calibrated(frame, "p4b", a, b, mid, use_tail=True, g_depth=FREE_G_DEPTH).expected_docs(fuse4_free)["f2"]
+        lo, hi = (lo, mid) if f2 < LB_DOC_F2_FREE["FUSE4-free"] else (mid, hi)
+    s_free = math.sqrt(lo * hi)
+    cal = Calibrated(frame, "p4b", a, b, s_free, use_tail=True, g_depth=FREE_G_DEPTH)
+    keep = ef2_keep(cal)
+    ids = {q: [int(r["doc_id"]) for r in rows] for q, rows in chosen_rows(frame, keep).items()}
+    ref_ids = docs_of(build_dir / "EF2-cut-p4b-docread.zip")
+    tails = np.array([cal.tail[q] / (cal.g_pool[q] + cal.tail[q]) for q in frame.qids])
+    checks = {}
+    for name, path in (("FUSE4-free", build_dir / "FUSE4-free-docread.zip"), ("K4-free", paths.RUNS_DIR / "s31-strong-judge" / "build-ext" / "K4-free.zip")):
+        checks[name] = cal.expected_docs(docs_of(path))
+    result: dict[str, Any] = {
+        "a": a, "b": b, "s_free": s_free, "s_thrC": fitted["g_scale"], "fit_data": {"lb_doc_f2_free": LB_DOC_F2_FREE, "calibration": "ab from cal.json"},
+        "g_rule": f"s_free (sum p_cal over the cosine top-{FREE_G_DEPTH} + geometric tail beyond {FREE_G_DEPTH})",
+        "depth": keep_stats({q: len(frame.order[q]) for q in frame.qids}),
+        "g": {"mean": float(np.mean(list(cal.g.values()))), "tail_share_mean": float(tails.mean()), "tail_share_p90": float(np.quantile(tails, .9))},
+        "docs_per_query": keep_stats(keep), "predicted": cal.expected(keep), "predicted_submitted": checks,
+        "vs_EF2-cut-p4b": doc_set_diff(ids, ref_ids),
+        "vs_FUSE4-free": doc_set_diff(ids, fuse4_free),
+        "keep_at_floor": int(sum(1 for q in frame.qids if keep[q] == min(FLOOR_K, len(frame.order[q])))),
+        "keep_at_depth": int(sum(1 for q in frame.qids if keep[q] == len(frame.order[q]))),
+        "queries_deeper_than_211": int(sum(1 for q in frame.qids if len(frame.order[q]) > FREE_G_DEPTH))}
+    _atomic_json(out / "keep-EF2-free.json", {str(q): int(k) for q, k in keep.items()})
+    rows = [{"query_id": q, "doc_id": int(r["doc_id"]), "p_fused": float(f), "p_cal": float(p)}
+            for q in frame.qids for r, f, p in zip(frame.order[q], cal.fused[q], cal.p[q])]
+    pd.DataFrame(rows).to_parquet(out / "pcal-free.parquet", index=False)
+    _atomic_json(out / "ef2-free.json", result)
+    return result
+
+
 def docsel_j3() -> dict[str, Any]:
     """``docsel/docsel-J3-thrC.parquet``: the docs of the submitted J3-thrC (same scheme as the FUSE4 docsel; ``chunk`` = the doc
     carries a chunk in the submitted ZIP, built before the Pharmacity fix, so no Pharmacity doc has one)."""
@@ -358,9 +463,9 @@ def docsel_j3() -> dict[str, Any]:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=("run", "docsel-j3"))
+    parser.add_argument("command", choices=("run", "docsel-j3", "ef2-fuse", "ef2-free"))
     args = parser.parse_args(argv)
-    result = docsel_j3() if args.command == "docsel-j3" else run()
+    result = {"docsel-j3": docsel_j3, "ef2-fuse": ef2_fuse, "ef2-free": ef2_free, "run": run}[args.command]()
     print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
     return 0
 

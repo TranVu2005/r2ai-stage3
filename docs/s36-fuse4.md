@@ -137,8 +137,62 @@ python -m r2ai.s36.build --variant FUSE4-thrC --variant FUSE4w-thrC --out out/ru
 python -m r2ai.s36.build --variant EF2-cut-p4b --variant LANG-thr-avg --variant EF2-cut-avg --out out/runs/s36-fuse4/build-docread
 python -m r2ai.s36.build --variant FUSE4-free --out out/runs/s36-fuse4/build-docread             # t_c = FUSE4_FREE_T_C
 python -m r2ai.s36.report bundles|sources
+python -m r2ai.s36.cal ef2-free && bash scripts/s36/run_ef2_free.sh                              # EF2-free: chọn k, docread + docsel + validator
+(cd ../s38-chunk-metric-v2 && bash scripts/s38/compose.sh EF2-free full+w768)               # chunk full+w768
 ```
 
 ## Trạng thái cuối
 
-Xem bản ghi `out/runs/s36-fuse4/free.log` cho `Check-FUSE4-free-id`.
+`Check-FUSE4-free-id` (lượt chạy thứ hai, xong 23/10 17:32) qua: JSON `896ffcbb6b6aaa3c3dcd319b7f2dd56d94186c6857df0b3bce0688df51f6bbba` bằng JSON K4-free, `regression_pass` true, ZIP 102.321.554 B. Lượt đầu bị dừng sau 80 phút ở vòng cắt body.
+
+LB 23/10 (Vu báo): EF2-cut-p4b Doc 0,4209 (mô hình dự đoán 0,4206), FUSE4-thrC Doc 0,4178, FUSE4-free Doc 0,4104.
+
+## EF2-free (S35, 24/10): EF2 trong khung tổng quát, không dùng K_q
+
+Mục tiêu: so với mốc EF2-cut-p4b-full+w768-t1907 (ZIP SHA `af427ae3…1264`, LB Final 0,3914 = Doc 0,4209 / Chunk 0,3619) chỉ khác khung free. Ngưỡng Vu chọn EF2-free làm bản cuối: Final ≥ 0,3814. Dữ liệu chỉ là pool và điểm hiện tại (canonical + Pharmacity, Jina S35/S36 cũ, C-max S32/S36); không dùng 120ask, không dùng Jina chấm lại của S37.
+
+Chỗ EF2-cut-p4b dùng K_q hoặc thông tin pipeline cũ, và thay thế (Vu duyệt 24/10):
+
+| Chỗ | Thay thế toàn cục |
+|---|---|
+| pool13 = round(1,3·K_q) | cosine top-211 của union đã chấm, đào sâu thích ứng nếu doc thứ 211 có P4B ≥ T_FREE 0,0775 (hằng số chung, đúng khung FUSE4-free); trần EF2 = độ sâu pool đã chấm |
+| G_q = Σ p_cal trên pool13 + đuôi sau độ sâu pool13 | G_q = s_free · (Σ p_cal trên cosine top-211 + đuôi hình học sau 211), cùng độ sâu 211 cho mọi query, không phụ thuộc phần đào sâu |
+| s = 1,490 neo vào Doc F2 LB của J3-thrC (pool13) | s_free = 1,7405 neo một lần vào Doc F2 LB 0,4104 của FUSE4-free; (a, b) giữ nguyên |
+| (a, b) khớp 3 Doc P tổng hợp của LB | giữ (a, b) = (0,5298075; −1,4096976); dữ liệu fit chỉ là ba Doc P tổng hợp (J4-K40 0,376, K4-thr-C 0,2346, J3-thrC 0,2357) và một Doc F2 tổng hợp cho s_free; không dùng nhãn hay điểm LB theo query |
+| t_c đặt theo 175.548 chunk của pipeline K_q | hằng số `FUSE4_FREE_T_C` 0,2030746 (đã ghi một lần cho khung free), chunk nguyên body, không cắt |
+| nguồn RRF | 4 nguồn (cosine, 4B, Jina, C-max) như FUSE4-free; EF2-cut-p4b dùng 3 nguồn J3 |
+| sàn, F_FREE = 86 | không dùng; sàn EF2 cố định 20 |
+
+Tồn dư K_q: 525 query có pool sâu hơn 211; độ sâu đã chấm của chúng (pool-extra) ban đầu theo trần 2,0·K_q. 454 query vẫn còn doc có P4B ≥ T_FREE ở đáy pool đã chấm.
+
+Kết quả (`cal/ef2-free.json`, `python -m r2ai.s36.cal ef2-free`):
+
+| | EF2-free | EF2-cut-p4b |
+|---|---:|---:|
+| doc tổng | 220.825 | 193.879 |
+| k/query P10 / P50 / P90 | 74 / 161 / 363 (min 20, max 485) | 62 / 156 / 266 (max 332) |
+| mô hình dự đoán Doc F2 | 0,4153 | 0,4206 (LB 0,4209) |
+| mô hình dự đoán P / R | 0,2334 / 0,5295 | 0,2413 / 0,5299 |
+
+Độ sâu pool P10/P50/P90 = 211/211/428 (max 522). G trung bình 79,5, đuôi 12,4% (P90 17,5%). Kiểm mô hình dưới G free: FUSE4-free 0,4104 (neo), K4-free 0,4095. Bốn query ở sàn, hai query ở trần. Khác EF2-cut-p4b: 32,43 doc chỉ có ở EF2-free, 9,98 doc chỉ có ở EF2-cut-p4b mỗi query; 1 query trùng hẳn. Khác FUSE4-free: 15,87 doc/query.
+
+Bundle (docsel `docsel/docsel-EF2-free.parquet` SHA `9e15a8bd…1185`, ZIP docread 101.717.111 B SHA `c1c1605f…11c1`, validator ok), rồi compose S38 `full+w768` (nền `fe7f82e`, trần BTC − reserve, thin theo nội dung, THIN_JUNK_SHARE 0,5, T tự tìm): T = 2002, đúng tới một token (T = 2001 ZIP 102.602.368 B vượt trần 102.600.000 B). ZIP cuối `out/runs/s38-chunk-metric-v2/compose/EF2-free-full+w768-t2002.zip`, 102.594.467 B, SHA256 `f4b6530d7865f70d6822c4256ebd920ac733900a4f87fca200680a775c79063f`, JSON SHA `9c1bf23e…983e8d`. Validator S26 `--max-chunks-per-doc 2`: ok, 0 lỗi, 1.200 id, chunk thuộc relevant_docs, ZIP một file ở gốc.
+
+So với mốc EF2-cut-p4b-full+w768-t1907 (`cal/ef2free-vs-ref.json`):
+
+| | EF2-free t2002 | mốc t1907 |
+|---|---:|---:|
+| doc | 220.825 | 193.879 |
+| doc/query TB / trung vị / P10–P90 | 184,02 / 161 / 74–363 | 161,57 / 156 / 62–266 |
+| chunk | 184.096 | 188.185 |
+| chunk carrier (chunk đầu) | 174.535 | 175.548 |
+| chunk thứ hai (w768) | 9.561 | 12.637 |
+| T | 2002 | 1907 |
+
+Trùng doc: 82,4% doc của EF2-free nằm trong mốc, 93,8% doc của mốc nằm trong EF2-free. Carrier chung 148.614.
+
+Thin: 25 carrier bị thin (21 doc, cả 21 là baophutho.vn), 25 chunk chuyển sang doc kế tiếp, t_c trước/sau 0,20307 / 0,20181. Dưới ngưỡng 50 carrier nên không dừng báo trước khi đóng gói.
+
+Giới hạn: mô hình dự đoán EF2-free 0,4153 thấp hơn EF2-cut-p4b 0,4206 vì s_free neo vào FUSE4-free (LB 0,4104 so với 0,4161 của J3-thrC). Doc F2 thực của EF2-free chỉ biết sau khi nộp.
+
+EF2-FUSE4 (pool13, 4 nguồn): chọn k xong (`cal/keep-EF2-FUSE4.json`, 195.049 doc, dự đoán 0,4206) nhưng chưa dựng ZIP; ưu tiên EF2-free.

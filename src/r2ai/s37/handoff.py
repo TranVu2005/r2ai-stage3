@@ -24,6 +24,7 @@ FOURB_TAGS = ('s37-b001-003', 's37-b004-006', 's37-b007')
 FOURB_DIR = RUN / 'gpu' / 'qwen3-reranker-4b'
 MERGED_4B = FOURB_DIR / 'scores-120ask-4b.parquet'
 JINA_FINAL = RUN / 'jina-final'
+JINA_FINAL2 = RUN / 'jina-final2'
 JINA_FIRST = RUN / 'jina'
 S35_JINA = RUNS_DIR / 's35-part-jina' / 'jina'
 SEGMENT_FILES = ('docs.parquet', 'chunks_t256.parquet', 'chunks_struct.parquet', 'provenance.parquet', 'vectors.npz', 'chunk_vectors.npz',
@@ -83,27 +84,29 @@ def cmax(pairs: pd.DataFrame) -> dict:
 def jina_state(pairs: pd.DataFrame) -> tuple[dict, pd.DataFrame, set]:
     """Jina: S35 scores stay valid for queries outside the 976; for those 976 the valid scores are the first-run parts that did not change
     (jina-final/reused_scores.parquet) plus whatever jina-final has scored so far (parts, or scores-all.parquet when complete)."""
-    pool_man = json.loads((JINA_FINAL / 'pool_manifest.json').read_text('utf-8')) if (JINA_FINAL / 'pool_manifest.json').exists() else None
-    full = pd.read_parquet(JINA_FINAL / 'pool_full.parquet', columns=['query_id', 'doc_id']) if pool_man else pd.DataFrame(columns=['query_id', 'doc_id'])
-    parts = sorted((JINA_FINAL / 'parts-b10s0').glob('part-*.parquet'))
-    reused = pd.read_parquet(JINA_FINAL / 'reused_scores.parquet') if (JINA_FINAL / 'reused_scores.parquet').exists() else pd.DataFrame(columns=['query_id', 'doc_id', 'score'])
+    run = JINA_FINAL2 if (JINA_FINAL2 / 'pool_manifest.json').exists() else JINA_FINAL   # the top-up run is complete on its own (it carries the reused scores)
+    pool_man = json.loads((run / 'pool_manifest.json').read_text('utf-8')) if (run / 'pool_manifest.json').exists() else None
+    full = pd.read_parquet(run / 'pool_full.parquet', columns=['query_id', 'doc_id']) if pool_man else pd.DataFrame(columns=['query_id', 'doc_id'])
+    parts = sorted((run / 'parts-b10s0').glob('part-*.parquet'))
+    reused = pd.read_parquet(run / 'reused_scores.parquet') if (run / 'reused_scores.parquet').exists() else pd.DataFrame(columns=['query_id', 'doc_id', 'score'])
     new = pd.concat([pd.read_parquet(f) for f in parts], ignore_index=True) if parts else pd.DataFrame(columns=['query_id', 'doc_id', 'score'])
     rows = pd.concat([reused[['query_id', 'doc_id', 'score']], new[['query_id', 'doc_id', 'score']]], ignore_index=True).drop_duplicates(['query_id', 'doc_id'])
     per_q = rows.groupby('query_id').size()
     need = full.groupby('query_id').size() if len(full) else pd.Series(dtype=int)
     complete_q = sorted(q for q, n in need.items() if per_q.get(q, 0) == n)
-    done = (JINA_FINAL / 'scores-all.parquet').exists()
+    done = (run / 'scores-all.parquet').exists()
     res = {'status': 'complete' if done and len(complete_q) == len(need) and len(need) else 'pending', 'layout': 'b10s0',
            'revision': 'e8a93f33f0b22108f8c2364f8484ce3422552fbc', 'queries_in_final_pool': int(len(need)),
            'queries_with_final_scores': len(complete_q), 'queries_pending': int(len(need) - len(complete_q)),
            'rule': 'queries outside the 976 keep the S35 Jina scores (s35-part-jina/jina/scores-all.parquet); the 976 use the scores listed here',
            's35_scores_sha256': 'e9a4818eeb720b83711616b497c94f87e3c5d1cceffa6fd26b655f6c6489cf39'}
     if pool_man:
-        res['final_pool'] = {k: pool_man[k] for k in ('pairs_final_pool', 'pairs_by_source', 'queries_to_score', 'queries_reused_from_first_run', 'pool_full_sha256', 'pool_sha256', 's36_missing_sha256')}
-    if (JINA_FINAL / 'reused_scores.parquet').exists():
-        res['reused_scores'] = file_entry(JINA_FINAL / 'reused_scores.parquet')
+        res['final_pool'] = {k: pool_man[k] for k in ('pairs_final_pool', 'pairs_by_source', 'queries_to_score', 'pool_full_sha256', 'pool_sha256', 's36_missing_sha256')}
+        res['final_pool']['run'] = run.name
+    if (run / 'reused_scores.parquet').exists():
+        res['reused_scores'] = file_entry(run / 'reused_scores.parquet')
     if done:
-        res['scores_final_run'] = file_entry(JINA_FINAL / 'scores-all.parquet')
+        res['scores_final_run'] = file_entry(run / 'scores-all.parquet')
     return res, rows, set(complete_q)
 
 

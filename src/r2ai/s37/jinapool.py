@@ -30,13 +30,28 @@ POOL_COLUMNS = ['query_id', 'doc_id', 'cosine_rank', 'cosine_score', 'p4b', 'in_
 def new_pairs() -> pd.DataFrame:
     """Every S37 pair (pairs_new.parquet) with the 512-token doc text exported for the 4B subsets."""
     pairs = pd.read_parquet(RUN / 'pairs_new.parquet')
+    cols = ['pair_id', 'lang', 'query_text', 'doc_text', 'doc_tokens']
     shards = sorted((RUN / 'kaggle-4b').glob('*/shards/pool-93001.parquet'))
-    texts = pd.concat([pd.read_parquet(s, columns=['pair_id', 'lang', 'query_text', 'doc_text', 'doc_tokens']) for s in shards], ignore_index=True)
-    texts = texts.drop_duplicates('pair_id')
+    frames = [pd.read_parquet(s, columns=cols) for s in shards]
+    have = set(pd.concat(frames).pair_id) if frames else set()
+    missing = sorted(set(pairs.pair_id) - have)
+    if missing:                                    # pairs that never went into a 4B subset (e.g. the last crawl): same text, no 4B export
+        frames.append(texts_from_segments(missing)[cols])
+    texts = pd.concat(frames, ignore_index=True).drop_duplicates('pair_id')
     merged = pairs.drop(columns=['lang']).merge(texts, on='pair_id', how='left', validate='one_to_one')
     if merged.doc_text.isna().any():
-        raise SystemExit(f'{int(merged.doc_text.isna().sum())} S37 pairs have no exported doc text (run export kaggle4b for their batch first)')
+        raise SystemExit(f'{int(merged.doc_text.isna().sum())} S37 pairs have no doc text')
     return merged
+
+
+def texts_from_segments(pair_ids: list[int]) -> pd.DataFrame:
+    """Query text + doc text cut to 512 Qwen3 tokens (the rule of the 4B subsets) straight from the segments; writes nothing."""
+    import polars as pl
+    from r2ai.s37 import export as E
+    pairs = E.load_pairs(None).filter(pl.col('pair_id').is_in(pair_ids))
+    queries = dict(pl.read_parquet(E.QUERY).iter_rows())
+    docs = E.truncated(E.tokenizer(), E.doc_texts(sorted(pairs['segment'].unique().to_list())))
+    return E.base_rows(pairs, queries, docs).to_pandas()
 
 
 def build() -> dict:
@@ -76,15 +91,27 @@ def build() -> dict:
 
 
 FINAL = RUN / 'jina-final'
+FINAL2 = RUN / 'jina-final2'
 S36_EXTRA_POOL = RUNS_DIR / 's36-fuse4' / 'extra' / 'jina' / 'pool.parquet'
 S36_MISSING = RUNS_DIR / 's36-fuse4' / 'cal' / 'jina-missing-pairs.parquet'
 S36_MISSING_SHA = '42f7fc9e0025e5b54154419cd4494df4482c30974382b80e6a3832cdf5e67aa6'
 S36_MISSING_PAIRS, S36_MISSING_QUERIES = 21311, 174
 
 
-def final_pool() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Final Jina pool: S35 pool + every S37 pair (b1-b7) + the S36 missing pairs (Vu's file, SHA pinned).
-    Returns (full pool of every affected query, rows of the queries still to score, first-run scores that stay valid)."""
+def previous_scores(run: Path) -> pd.DataFrame:
+    """Every score a finished or partial run owns: reused scores carried into it + its own parts."""
+    frames = [pd.read_parquet(f) for f in sorted((run / 'parts-b10s0').glob('part-*.parquet'))]
+    if (run / 'reused_scores.parquet').exists():
+        frames.append(pd.read_parquet(run / 'reused_scores.parquet'))
+    return pd.concat(frames, ignore_index=True).drop_duplicates(['query_id', 'doc_id']) if frames else pd.DataFrame(columns=['query_id', 'doc_id', 'score'])
+
+
+def final_pool(prev_pool: Path | None = None, prev_run: Path | None = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Final Jina pool: S35 pool + every S37 pair in pairs_new.parquet + the S36 missing pairs (Vu's file, SHA pinned).
+    Returns (full pool of every affected query, rows of the queries still to score, earlier scores that stay valid).
+    Earlier scores come from `prev_run` (default: the first, partial run in OUT); a query keeps them only when its ordered rows are unchanged."""
+    prev_pool = prev_pool or OUT / 'pool.parquet'
+    prev_run = prev_run or OUT
     if sha256_file(S36_MISSING) != S36_MISSING_SHA:
         raise SystemExit('jina-missing-pairs.parquet SHA differs from the one Vu gave')
     miss = pd.read_parquet(S36_MISSING)
@@ -110,9 +137,8 @@ def final_pool() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     pool = keep.sort_values(['query_id', 'cosine_score', 'doc_id'], ascending=[True, False, True], kind='stable').reset_index(drop=True)
     # queries already scored in the first (partial) run whose pool did not change keep those scores: Jina seeds the block split by
     # query_id over that query's own rows, so identical ordered rows give identical scores.
-    parts = sorted((OUT / 'parts-b10s0').glob('part-*.parquet'))
-    done = pd.concat([pd.read_parquet(f) for f in parts], ignore_index=True) if parts else pd.DataFrame(columns=['query_id', 'doc_id', 'score'])
-    prev = pd.read_parquet(OUT / 'pool.parquet')[['query_id', 'doc_id']]
+    done = previous_scores(prev_run)
+    prev = pd.read_parquet(prev_pool)[['query_id', 'doc_id']]
     same = set()
     prev_docs = prev.groupby('query_id').doc_id.apply(tuple)
     new_docs = pool.groupby('query_id').doc_id.apply(tuple)
@@ -124,22 +150,29 @@ def final_pool() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     return pool, todo, done[done.query_id.isin(same)].reset_index(drop=True)
 
 
-def build_final() -> dict:
-    pool, todo, reused = final_pool()
-    assert_writable(FINAL)
-    FINAL.mkdir(parents=True, exist_ok=True)
-    pool.to_parquet(FINAL / 'pool_full.parquet', index=False)
-    todo.to_parquet(FINAL / 'pool.parquet', index=False)
-    reused.to_parquet(FINAL / 'reused_scores.parquet', index=False)
+def build_final(second: bool = False) -> dict:
+    """`final`: the pool of the first complete run (jina-final). `final2`: top-up after the last crawl: only the queries whose pool
+    changed since jina-final are scored (jina-final2), every other query keeps its jina-final score. Never overwrites a run that has a pool."""
+    out, prev_pool, prev_run = (FINAL2, FINAL / 'pool_full.parquet', FINAL) if second else (FINAL, None, None)
+    if (out / 'pool.parquet').exists():
+        raise SystemExit(f'{out} already has a pool (a run may be using it): refusing to overwrite')
+    pool, todo, reused = final_pool(prev_pool, prev_run)
+    assert_writable(out)
+    out.mkdir(parents=True, exist_ok=True)
+    pool.to_parquet(out / 'pool_full.parquet', index=False)
+    todo.to_parquet(out / 'pool.parquet', index=False)
+    reused.to_parquet(out / 'reused_scores.parquet', index=False)
     per_q = todo.groupby('query_id').size()
     man = {'queries_in_final_pool': int(pool.query_id.nunique()), 'pairs_final_pool': len(pool),
            'pairs_by_source': {k: int(v) for k, v in pool.source.value_counts().items()},
-           'queries_reused_from_first_run': int(reused.query_id.nunique()), 'pairs_reused': len(reused),
+           'queries_reused_from_previous_run': int(reused.query_id.nunique()), 'pairs_reused': len(reused),
            'queries_to_score': int(todo.query_id.nunique()), 'pairs_to_score': len(todo),
-           'pairs_per_query_to_score': {'mean': float(per_q.mean()), 'min': int(per_q.min()), 'max': int(per_q.max())},
-           'layout': 'b10s0', 's36_missing_sha256': S36_MISSING_SHA, 'first_run_pool_sha256': sha256_file(OUT / 'pool.parquet'),
-           'pool_full_sha256': sha256_file(FINAL / 'pool_full.parquet'), 'pool_sha256': sha256_file(FINAL / 'pool.parquet')}
-    atomic_json(FINAL / 'pool_manifest.json', man)
+           'pairs_per_query_to_score': {'mean': float(per_q.mean()) if len(per_q) else 0.0, 'min': int(per_q.min()) if len(per_q) else 0,
+                                        'max': int(per_q.max()) if len(per_q) else 0},
+           'layout': 'b10s0', 's36_missing_sha256': S36_MISSING_SHA,
+           'previous_pool_sha256': sha256_file(prev_pool or OUT / 'pool.parquet'),
+           'pool_full_sha256': sha256_file(out / 'pool_full.parquet'), 'pool_sha256': sha256_file(out / 'pool.parquet')}
+    atomic_json(out / 'pool_manifest.json', man)
     return man
 
 
@@ -161,9 +194,9 @@ def compare(tol: float = 2e-3) -> dict:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('command', choices=('build', 'compare', 'final'))
+    ap.add_argument('command', choices=('build', 'compare', 'final', 'final2'))
     a = ap.parse_args(argv)
-    res = {'build': build, 'compare': compare, 'final': build_final}[a.command]()
+    res = {'build': build, 'compare': compare, 'final': build_final, 'final2': lambda: build_final(second=True)}[a.command]()
     print(json.dumps(res, indent=1, ensure_ascii=False, default=str))
     return 0
 

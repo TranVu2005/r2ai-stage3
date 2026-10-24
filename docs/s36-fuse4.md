@@ -179,6 +179,48 @@ Pin: carriers CR-fair `e80c8a28…a2bc`, CR-swap `3d6c6008…1df8` (`out/runs/s3
 
 `python -m r2ai.s36.s37 jina-missing` → `out/runs/s36-fuse4/cal/jina-missing-pairs.parquet` (SHA `42f7fc9e…7aa6`): 21.311 cặp điểm bù S36 của 174 query mà pool Jina S37 (975 query chấm lại) không chứa (P10/P50/P90 = 1 / 150,5 / 167 cặp mỗi query). Vu chuyển cho S37 thêm vào pool chấm lại; 11.996 cặp bù còn lại nằm ở query không chấm lại. Test `tests/test_s36_s37.py`.
 
+### Kết quả LB của quy tắc chunk và bản 120ask (24–25/10)
+
+CR-fair (docsel EF2-free): Chunk 0,3537, hơn EF2-free t2002 0,0053, giữ. CR-swap: Chunk 0,3493, bỏ (cửa sổ thêm không đáng giá hơn carrier). CR-fair với ρ toàn cục (thứ tự P4B giảm dần, hoà theo rank docsel) là quy tắc chunk mặc định (`DEFAULT_RHO` = 0,7876448 trong `r2ai.s36.carriers`; `--target` giải ρ theo tổng carrier). Mốc CR-fair Final 0,3861.
+
+**120A-free-v0** (trước là 120A-p4b): máy EF2-free (pool cosine top-211 thích nghi, `s_free`, 4 nguồn RRF) áp lên dữ liệu S37 bằng `python -m r2ai.s36.s37 apply --config configs/s36-s37-120A-p4b.json` (manifest S37 SHA `6b9e090e…1ce3`: 4B 100%, C-max 100%, Jina 36% đang chờ; cặp thiếu Jina hoặc C-max xếp cuối nguồn đó), CR-fair giải ρ = 0,76444 cho tổng 175.548 carrier (bằng mốc t1907), compose `full+w768`, thin theo nội dung. Không phải EF2-cut-p4b thuần: trùng 91% với docsel EF2-cut-p4b. **LB: Final 0,4033 (Doc 0,4344 / Chunk 0,3721), bản tốt nhất, mốc mới.**
+
+| | 120A-free-v0 |
+|---|---:|
+| doc | 228.844 (120ask 14.255, 11.663 doc khác nhau, 6,2%; 811/1.200 query có ít nhất một, TB 11,9/query) |
+| Doc F2 mô hình | 0,4225 (LB 0,4344) |
+| T / cửa sổ | 1536 (sàn, dư 1,39 MB) / 34.212 |
+| carrier giao | 174.962 (586 cặp không có nguồn chunk bị bỏ: 441 doc canonical, chủ yếu ask.39.net 385 và zh 470, không có doc 120ask), P10/P50/P90 = 58/127/286, top-100 19,2% |
+| thin | 14 carrier (13 doc) |
+| ZIP | `120A-free-v0-full+w768-t1536.zip` 101.213.371 B, SHA256 `55127059b31540b032fbed375a9252040d0de977bbe6ea4a8088d5a4ce357dc8` |
+| bị đẩy ra so với EF2-cut-p4b | 17.091 doc (vi 12.150, zh 4.907; suckhoedoisong.vn 1.997, nhathuoclongchau.com.vn 1.808, 120ask.com 1.525, thanhnien.vn 1.504); vào 52.056 doc |
+
+Tên file apply trong `s37/` vẫn là `120A-p4b` (SHA ghim trong `120A-p4b.apply.json`); `s37/120A-free-v0.names.json` ghi ánh xạ. Validator: compose cũ chỉ truyền lô Pharmacity làm nguồn verbatim phụ nên báo 10.750 `chunk_no_canonical_doc` (chunk của doc 120ask). Đã sửa (`registry.validator_extra`, `compose.run_validator`, lệnh `compose validate` trên nhánh `feat/s38-compose-registry`, commit `6f0540c`): bảy segment 120ask vào làm nguồn verbatim; `compose validate --name 120A-free-v0-full+w768 --threshold 1536` cho ok, 0 lỗi, `canonical_substring` 120.408.
+
+**p4b-CRfair** (EF2-cut-p4b + CR-fair ρ = 0,7876): chỉ 152.687 carrier (mốc t1907 có 175.548), ZIP 91.413.363 B (T 1536, 32.113 cửa sổ, P10/P50/P90 = 49/123/210), không so được với 0,3914; thay bằng **p4b-CRfair175** (ρ = 0,9022 cho 175.549 carrier, 174.771 có nguồn chunk).
+
+### d211: phân tích (a)(b)(c) và quyết định dừng (25/10)
+
+Mô hình: d211 0,3790, EF2-free 0,4153, thiệt Doc 0,0363 (Final ít nhất −0,018 chỉ riêng Doc). Dừng hẳn d211; compose d211-CRfair bị dừng, không có ZIP. Số liệu: `cal/d211-analysis.json`, mã `scripts/s36/d211_analysis.py`, chạy trên `cal.Frame`/`Calibrated` không đổi.
+
+(a) Số query có doc hạng 211 với P4B ≥ 0,0775 / 0,1 / 0,15 / 0,203: 628 / 600 / 538 / 478. d211 mất 45.304 doc của EF2-free trên 521 query (vi 35.868 = 19,9%, zh 9.436 = 23,1%; 43.876 nằm sau cosine 211, 1.428 trong top-211 do RRF xếp lại; chỉ lấy thêm 692 doc), P4B TB 0,568, kỳ vọng ~11.800 doc vàng.
+
+(b) Độ sâu cố định D cho mọi query, cận dưới từ điểm đã có (phần chưa chấm tính bằng 0): D=211 0,3790; D=300 0,4092; D=400 0,4201; toàn bộ độ sâu đã chấm (≤522, phụ thuộc K_q) 0,4238; EF2-free thích nghi 0,4153. Cặp cần chấm thêm (corpus không 120ask): D=300 53.233 4B / 54.196 Jina / 54.162 C-max; D=400 150.866 / 153.126 / 153.078. Tính lại trên corpus CÓ 120ask: xem mục D=300 dưới.
+
+(c) Sai số mô hình dưới G của d211 (`s_free` × tổng p_cal cosine top-211 + đuôi): FUSE4-free 0 (neo), EF2-free −0,0031 (LB 0,4184), EF2-cut-p4b −0,0231 (LB 0,4209), J3-thrC −0,0218, K4-thr-C −0,0210. Mô hình xếp EF2-cut-p4b thấp hơn EF2-free 0,017 còn LB cao hơn 0,0025: với bộ doc từ pool ngắn kiểu pool13 mô hình thấp hơn LB khoảng 0,022. Nếu d211 chịu cùng độ lệch thì Doc d211 khoảng 0,401 (thiệt ~0,017, Final thiệt ≥ 0,009 trước khi tính chunk); chunk còn thiệt thêm vì d211 chỉ 139.405 carrier. Chưa chứng minh được thiệt ≤ 0,01 nên không nộp.
+
+### Chuẩn bị D=300 trên corpus có 120ask (25/10, chỉ CPU, chưa chấm điểm)
+
+`python -m r2ai.s36.d300 count --depth 211 300 400` và `export --depth 300` (mã `src/r2ai/s36/d300.py`, test `tests/test_s36_d300.py`). Xếp hạng gộp: cosine top-400 canonical + Pharmacity của `out/runs/s37/pool.npz` hợp với cosine mọi doc 120ask (vector segment), lấy top-D (canonical trước khi hoà). Cặp coi là đã chấm khi có điểm 4B (union S36 + Kaggle S37), C-max (S32 + bù S36 + S37) hoặc Jina.
+
+| D | cặp cần 4B | 120ask / canonical | query | giờ 2×T4 | cặp cần C-max | cặp thiếu Jina |
+|---|---:|---|---:|---:|---:|---:|
+| 211 | 941 | 0 / 941 | 18 | 0,05 | 991 | 32.499 |
+| 300 | 33.233 | 2.169 / 31.064 | 629 | 1,59 | 34.023 | 79.029 (120ask 47.156) |
+| 400 | 107.975 | 10.772 / 97.203 | 995 | 5,17 | 109.952 | 164.384 |
+
+D=211 lẽ ra bằng 0; 941 cặp canonical còn lại (18 query) do xếp hạng top-400 mới đổi chỗ một số doc Pharmacity so với union S31. Phần thêm không chấm Jina (xếp cuối nguồn Jina). Gói Kaggle `out/runs/s36-fuse4/d300/kaggle/` (bố cục S31/S37, `judge_score.py` SHA `688948a7…a7186`): 33.233 cặp, `pair_id` 5.000.000–5.033.232, vi 24.614 / zh 8.619, doc_tokens TB 412 (2.586 hàng doc_text rỗng của 588 doc canonical, như S31 pool-extra), SHA `extra_pairs` `49cbf440…5d2b`, shard `pool-93002.parquet` `a3750fb3…18b1`; `pairs_d300.parquet` `e5417d9f…4480` (để `apply` về sau), `cmax_pairs.parquet` (34.023 cặp) `f8e90f3d…1d2b`. Chưa chạy chấm điểm; Vu quyết sau khi kiểm quota Kaggle. Khi có điểm: `apply` cần nhận thêm `pairs_d300.parquet` ngoài `pairs_new.parquet`.
+
 ## Lệnh
 
 ```bash

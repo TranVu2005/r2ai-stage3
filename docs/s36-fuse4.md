@@ -309,3 +309,11 @@ Kết quả docsel: 281.924 doc trong pool (36.160 doc cũ bị đẩy ra ở 95
 
 Compose (25/10, 02:30 đến 03:12): `120A-p4b-v0-full+w768-t1536.zip`, 100.664.783 B (trần 102.600.000), SHA256 `dd8d4d76cfe4bf7cc9664ce9db984705633e0c537d916f9aafc790d821463a22`. T = 1536 (`FULL_MIN_T`, sàn của luật; ZIP còn dư 1,9 MB), 35.220 cửa sổ 768 token, 174.894 carrier sau thin (thin theo nội dung: 17 doc, 20 carrier đổi), 210.114 chunk, 193.547 doc (bằng docsel). Validator S26 (`--max-chunks-per-doc 2`) chạy lại bằng `compose validate` với 7 segment 120ask làm nguồn verbatim: ok, 0 lỗi, `p1_pair` 91.546, `canonical_substring` 118.568. Log: `out/runs/s36-fuse4/validate-120A-p4b-v0.log`. Chưa nộp (Vu nộp). Chưa tính phân bố ngôn ngữ/host của 36.160 doc cũ bị đẩy khỏi pool13.
 
+## LB 120A-p4b-v0 = 0,4111 (25/10): bản tốt nhất, config cố định
+
+LB 120A-p4b-v0 = 0,4111 (Doc 0,4394 / Chunk 0,3828): mốc mới, khung p4b giữ lợi thế +0,0078 so với khung free (120A-free-v0 0,4033). Bản này là **dự phòng cho private**. `configs/s36-s37-120A-p4b-v0.json` đã cố định: đường dẫn tường minh của pairs_new, điểm 4B và C-max (không glob, nên điểm 4B/Jina nhập sau không đổi bản này), `"jina": false` (chỉ điểm Jina của S35 + S36; 36.160 cặp pool của doc 120ask v0 xếp cuối nguồn Jina), khối `frozen` ghi SHA đầu vào, docsel, carriers và ZIP (`dd8d4d76…3a22`, 100.664.783 B, T 1536, 35.220 cửa sổ). Dựng lại bằng config này cho đúng SHA docsel `8a24b9b1…cca4` và carriers `f5830f26…1bd0` (đã kiểm). `apply` nhận `"jina": false`.
+
+Bản chính v2 = cấu hình này + 120ask mới + Jina đầy đủ (`configs/s36-s37-120A-p4b-v2.json`, `"pool": "cosine13"`); bản tổng quát v2 = khung free D=300 cùng dữ liệu (`configs/s36-s37-120A-free-v2.json`).
+
+Gói `final-4b` phải phủ cả hai khung: pool13 của khung p4b là top-n_q cosine (n_q = round(1,3 K_q), tối đa 339, 195 query có n_q > 300) và pool của khung free là top-300. `export-final` lấy top-max(300, n_q) mỗi query, kiểm mọi cặp chưa có điểm của cả hai khung nằm trong subset (lỗi nếu thiếu), và ghi vào `manifest.json` số cặp theo khung (`pairs_needed_free_frame`, `pairs_needed_p4b_frame`, `pairs_needed_either_frame`, `pairs_registry_below_both_cuts`, giờ Kaggle từng khung). Trên corpus 120ask v0 (chưa có registry v2): top-300 thiếu 33.233 cặp 4B, top-n_q thiếu 303 cặp (đều là doc canonical, nằm trong top-300).
+

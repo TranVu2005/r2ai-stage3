@@ -4,6 +4,6 @@
   "missing": "last",
   "min_4b_coverage": 0.98,
   "t_c": 0.2030746281894702,
-  "pool": "pool13",
+  "pool": "cosine13",
   "carriers": {"rule": "fair", "target": 175548}
 }

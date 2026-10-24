@@ -214,7 +214,7 @@ def apply(cfg: dict[str, Any]) -> dict[str, Any]:
     spec = {**default_inputs(), **{k: v for k, v in cfg.items() if v is not None}}
     last = spec.get("missing", "strict") == "last"          # "last": a pair without a Jina / C-max score takes the last rank of its pool
     min_4b = float(spec.get("min_4b_coverage", 1.0))
-    no_jina = last and not Path(spec["jina"]).exists()       # S37 rescoring not there yet: the S35 + S36 scores, new docs rank last
+    no_jina = last and (spec["jina"] is False or not Path(spec["jina"]).exists())   # no S37 rescoring (``"jina": false`` pins that): the S35 + S36 scores, new docs rank last
     name = spec.get("name", DEFAULT_NAME)
     out = paths.resolve_path(spec["out"]) if spec.get("out") else fuse.run_root() / "s37"
     paths.assert_writable(out)

@@ -291,7 +291,11 @@ def export_final(depth: int, registry: Path | None = None) -> dict[str, Any]:
     if not registry.exists():
         raise FileNotFoundError(f"{registry} is not there yet")
     pool, scored = load_pool(), scored_sets()
-    top = need(merged_top(depth, pool), scored)
+    # the EF2-cut-p4b frame (pool13) takes the cosine top-n_q of the corpus, n_q = round(1.3 K_q) (up to 339 > 300): cover max(depth, n_q) per query
+    size13 = {int(q): len(rows) for q, rows in fuse.load_frames()[0].items()}
+    cover = {q: max(depth, n) for q, n in size13.items()}
+    top = need(merged_top(max(cover.values()), pool), scored)
+    top = top[top.cosine_rank <= top.query_id.astype(int).map(cover)]
     reg = pd.read_parquet(registry, columns=["pair_id", "query_id", "doc_id", "cosine_rank", "cosine_score"])
     reg = reg[[k not in scored["4b"] for k in zip(reg.query_id.astype(int), reg.doc_id.astype(int))]]
     depth_pairs = top[~top.has_4b][["query_id", "doc_id", "cosine_rank", "cosine_score", "is_ask"]]
@@ -305,16 +309,23 @@ def export_final(depth: int, registry: Path | None = None) -> dict[str, Any]:
     todo = combine_needs(depth_pairs, reg, known, PAIR_ID_BASE)
     ask = set(top.loc[top.is_ask, "doc_id"].astype(int)) | set(pd.read_parquet(registry, columns=["doc_id"]).doc_id.astype(int))
     todo["is_ask"] = todo.doc_id.astype(int).isin(ask)
-    summary = {"depth": depth, "registry": str(registry), "registry_sha256": _sha256(registry), **summarize(top, depth),
+    free_keys = set(zip(*[top[top.cosine_rank <= depth][c].astype(int) for c in ("query_id", "doc_id")])) - scored["4b"]
+    p4b_keys = set(zip(*[top[top.cosine_rank <= top.query_id.astype(int).map(size13)][c].astype(int) for c in ("query_id", "doc_id")])) - scored["4b"]
+    todo_keys = set(zip(todo.query_id.astype(int), todo.doc_id.astype(int)))
+    if not (free_keys | p4b_keys) <= todo_keys:
+        raise ValueError(f"{len((free_keys | p4b_keys) - todo_keys)} pairs of the free top-{depth} / pool13 are missing from the subset")
+    summary = {"depth": depth, "registry": str(registry), "registry_sha256": _sha256(registry), **summarize(top[top.cosine_rank <= depth], depth),
                "registry_pairs_unscored": int(len(reg)), "pairs_from_depth_only": int((todo.origin == "depth").sum()),
                "pairs_from_registry_only": int((todo.origin == "registry").sum()), "pairs_in_both": int((todo.origin == "both").sum())}
-    # per frame: the free frame (fixed pool D) needs the depth pairs and the registry pairs inside the top-D; the EF2-cut-p4b frame (pool13 +
-    # the new 120ask docs) needs every unscored registry pair
-    need_free = int(todo.origin.isin(["depth", "both"]).sum())
-    need_p4b = int(todo.origin.isin(["registry", "both"]).sum())
-    summary.update({"pairs_needed_free_frame": need_free, "pairs_needed_p4b_frame": need_p4b,
-                    "eta_hours_free_frame": round(need_free / KAGGLE_PAIRS_PER_S / 3600, 2),
-                    "eta_hours_p4b_frame": round(need_p4b / KAGGLE_PAIRS_PER_S / 3600, 2)})
+    # per frame: the free frame (fixed pool D) needs the unscored pairs of the cosine top-D, the EF2-cut-p4b frame the unscored pairs of the cosine
+    # top-n_q (pool13 size); the rest of the subset is the registry pairs below both cuts (new 120ask pairs that the S37 crawl found)
+    both_frames = free_keys | p4b_keys
+    summary.update({"pairs_needed_free_frame": len(free_keys), "pairs_needed_p4b_frame": len(p4b_keys), "pairs_needed_either_frame": len(both_frames),
+                    "pairs_registry_below_both_cuts": len(todo_keys - both_frames),
+                    "eta_hours_free_frame": round(len(free_keys) / KAGGLE_PAIRS_PER_S / 3600, 2),
+                    "eta_hours_p4b_frame": round(len(p4b_keys) / KAGGLE_PAIRS_PER_S / 3600, 2),
+                    "eta_hours_either_frame": round(len(both_frames) / KAGGLE_PAIRS_PER_S / 3600, 2),
+                    "pool13_size_max": int(max(size13.values())), "coverage_checked": True})
     return write_subset(todo, out_dir(), "final-4b", "pool-93003.parquet", summary, started, top)
 
 

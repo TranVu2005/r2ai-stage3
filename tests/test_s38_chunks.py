@@ -276,20 +276,29 @@ def test_check_docsel_counts_differences():
 
 def test_estimate_thresholds_fits_budget():
     frame = pd.DataFrame({'rank': [1] * 5 + [2] * 5, 'body_tokens': [0] * 5 + [1600, 1700, 1800, 1900, 2000]})
-    est = CO.estimate_thresholds(frame, CO.CEILING - int(2.5 * CO.RATE_FULL))
+    limit = CO.BTC_CEILING - CO.RESERVE
+    assert limit == 102_600_000 and CO.BTC_CEILING == 100 * 1024 * 1024
+    est = CO.estimate_thresholds(frame, limit - int(2.5 * CO.RATE_FULL))
     assert est['k_estimate'] == 2 and est['t_estimate'] == 1800              # bodies 1900, 2000 keep the window
-    assert CO.estimate_thresholds(frame, CO.CEILING - 10 ** 6)['t_estimate'] == CO.FULL_MIN_T
-    # the reserve shrinks the budget: 2.5 second chunks fit without it, only 1.5 with a reserve of one chunk
-    base = CO.CEILING - int(2.5 * CO.RATE_FULL)
-    assert CO.estimate_thresholds(frame, base, int(CO.RATE_FULL))['k_estimate'] == 1
-    assert CO.RESERVE == 500_000
+    assert CO.estimate_thresholds(frame, limit - 10 ** 6)['t_estimate'] == CO.FULL_MIN_T
+    # a bigger reserve shrinks the budget by exactly that much: the same base now fits 1 second chunk, not 2
+    assert CO.estimate_thresholds(frame, limit - int(2.5 * CO.RATE_FULL), CO.RESERVE + int(CO.RATE_FULL))['k_estimate'] == 1
 
 
-def test_is_thin_base64_needs_placeholders_only():
+def test_t1907_zip_valid_under_default_limit():
+    assert 102_593_008 < CO.BTC_CEILING - CO.RESERVE                         # EF2-cut-p4b + full+w768, T=1907
+
+
+def test_is_thin_by_content_any_host():
     blob = 'QUJD' * 80
-    assert CO.is_thin_base64('{title}\n\n{publish}\n\n{head}\n\n' + blob + '\n\n{name} - {time}')
-    assert not CO.is_thin_base64('Bài viết thật về cúm.\n\n' + blob)
-    assert not CO.is_thin_base64('{title}\n\nkhông có base64')
+    assert CO.is_thin('{title}\n\n{publish}\n\n{head}\n\n' + blob + '\n\n{name} - {time}')
+    assert CO.is_thin('{title}\n\n{publish}\n\n{body}')                      # placeholders only, no base64
+    assert CO.is_thin(blob + '\n' + blob)                                      # base64 only
+    assert not CO.is_thin('Bài viết thật về cúm.\n\n' + 'Triệu chứng sốt, ho. ' * 30 + '\n\n' + blob)   # real text, small blob
+    assert not CO.is_thin('{title}\n\nkhông có base64 nhưng có nội dung thật ' * 10)
+    assert not CO.is_thin('') and not CO.is_thin('   \n')
+    assert not CO.is_thin('1 2 3 4 5 6 7 8 9 0 / - + = . , ; ' * 20)          # non-letters alone are not junk
+    assert abs(CO.junk_share('{a}{b}\nxxxxxxxx') - 0.4) < 1e-9
 
 
 def test_apply_swap_removes_and_inserts_at_rank():

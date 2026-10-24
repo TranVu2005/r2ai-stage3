@@ -11,19 +11,20 @@
   ``full+w768``  body > T tokens -> base chunk + 768-token window around the best t256 chunk (2 chunks);
   ``clean+cap2048``  clean first (same markers), then cap2048 on the cleaned body.
   Carriers the rule leaves alone keep the base chunk byte for byte; docs never change.
-* thin (Vu, 24/10; on unless ``--no-thin``, needs the docsel): a baophutho.vn carrier whose base chunk is only
-  template placeholders (``{title}`` ...) before a base64 line is thin: it loses its chunk, and the chunk goes to the
-  next doc of the global S31 order (P4B descending, then query, then rank) that has no chunk and has a chunk source
-  as in the S29 builder (P1 chunk of the query, else first P1 chunk of the doc, else the body span of a doc with
-  canonical chunks or of a Pharmacity lot doc), not empty and not itself thin. The new chunk sits at its rank
-  among the query's chunks and then goes through the rule like any carrier. Kept in ``<name>.swap.json``.
+* thin (Vu, 24/10; on unless ``--no-thin``, needs the docsel): a carrier whose base chunk is junk by content, any host
+  (``is_thin``: at least ``THIN_JUNK_SHARE`` = 50% of its characters are base64 lines and ``{placeholder}`` tokens;
+  baophutho.vn extraction failures are ``{title}`` ... + a base64 blob = 79-96% junk) loses its chunk, and the chunk
+  goes to the next doc of the global S31 order (P4B descending, then query, then rank) that has no chunk and has a
+  chunk source as in the S29 builder (P1 chunk of the query, else first P1 chunk of the doc, else the body span of a
+  doc with canonical chunks or of a Pharmacity lot doc), not empty and not itself thin. The new chunk sits at its
+  rank among the query's chunks and then goes through the rule like any carrier. Kept in ``<name>.swap.json``.
 * best t256 chunk (CH-t256-1 rule): the S32 chunk judge on the scored answer/body chunks of the canonical owner
   (Pharmacity lots: their own chunks), else cosine(S29 query vector, chunk vector); ties: file order.
 * ``full+w768`` picks T itself: the ZIP grows by about ``RATE_FULL`` bytes per second chunk (S38, J3-thrC), so the
   first candidates sit around the estimate; every round builds its candidates in parallel processes and the next
   round bisects between the highest T over the ceiling and the lowest under it, until they are 1 token apart or
-  ``--rounds`` is used up. Result: the lowest measured T with ZIP < ``CEILING - RESERVE`` = 102,600,000 - 500,000 B (``--reserve``; the
-  internal ceiling 102,600,000 B is the S29 one, itself 2.26 MB below the BTC cap 104,857,600 B). No hand tuning per bundle.
+  ``--rounds`` is used up. Result: the lowest measured T with ZIP < ``BTC_CEILING - reserve`` (``--reserve``, default
+  ``RESERVE`` = 2,257,600 B -> 102,600,000 B). No hand tuning per bundle.
 
 Steps (``run`` = ``prepare`` + ``write``): ``prepare`` writes ``<out>/<name>.cache.parquet`` (chunks per carrier,
 body tokens) and ``<name>.prepare.json``; ``write --threshold T`` writes ``<name>[-t<T>].zip``, runs the validator
@@ -57,9 +58,11 @@ from r2ai.s38.window import _body_span, pieces_for
 
 RULES = {"clean": None, "cap2048": ("window", 2048, 2048), "full+w768": ("full+window", 768, 1536),
          "clean+cap2048": ("window", 2048, 2048)}
-PLACEHOLDERS = re.compile(r"^(?:\{\w+\}\s*)*$")
-CEILING = 102_600_000
-RESERVE = 500_000   # safety margin: a full+w768 ZIP must stay below CEILING - RESERVE (Vu, 24/10)
+PLACEHOLDER = re.compile(r"\{\w+\}")
+THIN_JUNK_SHARE = 0.5   # thin carrier: >= 50% of the chunk is base64 lines + {placeholders}. EF2-cut-p4b has a clean gap
+                        # (non-thin carriers: junk share <= 0.059; thin ones: 0.79-0.96), so 0.5 catches exactly the 24
+BTC_CEILING = 104_857_600   # BTC upload limit for new files: 100 MiB (docs/PROGRESS.md, "Trần dùng cho file mới")
+RESERVE = 2_257_600   # default margin below BTC_CEILING: ZIP limit 102,600,000 B (the S29 internal ceiling); the only knob
 RATE_FULL = 94.3        # B per 768 window: (102,599,152 - 101,181,680) / 15,026 (CH-full+w768-t1849 on J3-thrC)
 FULL_MIN_T = 1536
 PHARM_HANDOFF = Path("runs/s27-pharmacity/handoff/cc-s27-pharmacity")
@@ -85,10 +88,20 @@ def check_docsel(rows: list[dict[str, Any]], docsel: pd.DataFrame) -> dict[str, 
             "carriers_only_base": len(base_car - carriers), "carriers_only_docsel": len(carriers - base_car)}
 
 
-def is_thin_base64(body: str) -> bool:
-    """Only template placeholders ({title}, {publish}, ...) before the first base64 line."""
-    at = cl.base64_start(body)
-    return at is not None and bool(PLACEHOLDERS.match(body[:at].strip()))
+def junk_share(text: str) -> float:
+    """Share of the characters of ``text`` that sit in base64 lines (``clean.BASE64_LINE``) or ``{placeholder}`` tokens."""
+    text = text.strip()
+    if not text:
+        return 0.0
+    lines = text.split("\n")
+    base64 = sum(len(x) for x in lines if cl.BASE64_LINE.match(x.strip()))
+    holders = sum(len(m.group()) for x in lines if not cl.BASE64_LINE.match(x.strip()) for m in PLACEHOLDER.finditer(x))
+    return (base64 + holders) / len(text)
+
+
+def is_thin(text: str) -> bool:
+    """Junk by content, any host: base64 lines and ``{placeholder}`` tokens make up at least ``THIN_JUNK_SHARE``."""
+    return junk_share(text) >= THIN_JUNK_SHARE
 
 
 def host_map(keys: set[int]) -> dict[int, str]:
@@ -169,12 +182,9 @@ def s29_chunk_texts(pairs: pd.DataFrame) -> dict[tuple[int, int], tuple[str | No
 
 
 def thin_swap(rows: list[dict[str, Any]], docsel: pd.DataFrame) -> dict[str, Any]:
-    """Thin base64 carriers of ``cl.BASE64_HOSTS`` and their replacements in the global S31 order."""
+    """Thin carriers (``is_thin``, any host) and their replacements in the global S31 order."""
     car = [(int(r["id"]), int(c["doc_id"]), c["chunk_text"]) for r in rows for c in r["relevant_chunks"]]
-    docs = {d for _, d, _ in car}
-    _, _, _, _, key = doc_texts(docs)
-    hosts = host_map(set(key.values()))
-    thin = [(q, d) for q, d, body in car if hosts.get(key[d]) in cl.BASE64_HOSTS and is_thin_base64(body)]
+    thin = [(q, d) for q, d, body in car if is_thin(body)]
     thin_docs = {d for _, d in thin}
     if not thin:
         return {"removed": [], "added": [], "thin_docs": []}
@@ -185,7 +195,7 @@ def thin_swap(rows: list[dict[str, Any]], docsel: pd.DataFrame) -> dict[str, Any
     added = []
     for q, d, p4b, rank in zip(cand.query_id.astype(int), cand.doc_id.astype(int), cand.p4b, cand["rank"].astype(int)):
         src, body = texts.get((q, d), (None, ""))
-        if src is None or not body.strip() or is_thin_base64(body):
+        if src is None or not body.strip() or is_thin(body):
             continue
         added.append({"query_id": q, "doc_id": d, "rank": rank, "p4b": float(p4b), "source": src, "body": body})
         if len(added) == len(thin):
@@ -466,7 +476,7 @@ def write(out: Path, name: str, threshold: int | None, validate: bool = True, re
     paths.assert_writable(target.with_name(target.name + ".tmp"))
     res = write_bundle(new_rows, target, f"{label}.json")
     entry = {"name": label, "rule": rule, "threshold": threshold, "zip": str(target), "zip_bytes": target.stat().st_size,
-             "zip_sha256": _sha256(target), **res, "limit_bytes": CEILING - reserve, "under_ceiling": target.stat().st_size < CEILING - reserve,
+             "zip_sha256": _sha256(target), **res, "limit_bytes": BTC_CEILING - reserve, "under_ceiling": target.stat().st_size < BTC_CEILING - reserve,
              "docs": sum(len(r["relevant_docs"]) for r in new_rows),
              "chunks": sum(len(r["relevant_chunks"]) for r in new_rows),
              "second_chunks": int((frame["rank"] == 2).sum()),
@@ -490,10 +500,10 @@ def write(out: Path, name: str, threshold: int | None, validate: bool = True, re
     return entry
 
 
-def estimate_thresholds(frame: pd.DataFrame, base_zip_bytes: int, margin: int = 0) -> dict[str, Any]:
-    """T so that (number of second chunks) x RATE_FULL fits under the ceiling, and two neighbours."""
+def estimate_thresholds(frame: pd.DataFrame, base_zip_bytes: int, reserve: int = RESERVE) -> dict[str, Any]:
+    """T so that (number of second chunks) x RATE_FULL fits under ``BTC_CEILING - reserve``, and two neighbours."""
     bt = np.sort(frame[frame["rank"] == 2].body_tokens.to_numpy())    # ascending; second chunks at T = #(bt > T)
-    budget = CEILING - margin - base_zip_bytes
+    budget = BTC_CEILING - reserve - base_zip_bytes
     k = int(max(budget, 0) / RATE_FULL)
 
     def t_for(count: int) -> int:
@@ -557,9 +567,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--rule", choices=list(RULES))
     parser.add_argument("--no-base64", action="store_true", help="clean: no base64 cut on baophutho.vn")
     parser.add_argument("--skip-docsel-check", action="store_true")
-    parser.add_argument("--no-thin", action="store_true", help="keep the placeholder+base64 baophutho carriers")
+    parser.add_argument("--no-thin", action="store_true", help="keep the thin (base64 / placeholder) carriers")
     parser.add_argument("--threshold", type=int, action="append", default=None, help="full+w768: body tokens above which the window is added")
-    parser.add_argument("--reserve", type=int, default=RESERVE, help="bytes kept free below the ceiling (default 500,000)")
+    parser.add_argument("--reserve", type=int, default=RESERVE, help="bytes kept free below the BTC ceiling 104,857,600 (default 2,257,600 -> limit 102,600,000)")
     parser.add_argument("--rounds", type=int, default=3, help="full+w768 run: parallel build rounds")
     parser.add_argument("--no-validate", action="store_true")
     args = parser.parse_args(argv)

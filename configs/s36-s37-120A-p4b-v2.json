@@ -1,6 +1,6 @@
 {
   "name": "120A-p4b-v2",
-  "pairs_new": ["D:/GitHub/r2ai-stage3/out/runs/s37/pairs_new_final_v2.parquet"],
+  "pairs_new": ["D:/GitHub/r2ai-stage3/out/runs/s37/pairs_new_final_v2.parquet", "D:/GitHub/r2ai-stage3/out/runs/s36-fuse4/d300/pairs_final.parquet"],
   "missing": "last",
   "min_4b_coverage": 0.98,
   "t_c": 0.2030746281894702,

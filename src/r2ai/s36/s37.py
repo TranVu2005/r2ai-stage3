@@ -147,7 +147,7 @@ def apply(cfg: dict[str, Any]) -> dict[str, Any]:
     paths.assert_writable(out)
     out.mkdir(parents=True, exist_ok=True)
     t_c = float(spec.get("t_c", FUSE4_FREE_T_C))
-    rule = {"rule": "threshold", **spec.get("carriers", {})}
+    rule = {"rule": "fair", **spec.get("carriers", {})}        # default chunk rule from 24/10: CR-fair with the global rho
     inputs = {"pairs_new": [spec["pairs_new"]], "scores_4b": list(spec["scores_4b"]), "cmax": list(spec["cmax"]),
               "jina": [] if no_jina else [spec["jina"]]}
     for key, files in inputs.items():
@@ -159,7 +159,9 @@ def apply(cfg: dict[str, Any]) -> dict[str, Any]:
     coverage_4b = float(pairs.pair_id.astype(int).isin(scores_4b).mean())
     union = merge_union(union, pairs, scores_4b, min_4b)
     pairs = pairs[pairs.pair_id.astype(int).isin(scores_4b)]
-    pools, _, pool_report = s31_build.free_adaptive(union)
+    pool_kind = spec.get("pool", "free")                       # "d211": every pool cut at the cosine top-211 (no adaptive deepening)
+    pools, _, pool_report = s31_build.free_adaptive(union, deepen=pool_kind != "d211")
+    pool_report["pool"] = pool_kind
     # sources: the S36 lookups; Jina rescored per query by S37, C-max pointwise so the S37 pairs are simply added
     jina_base, jina_files = fuse.load_jina(fuse.run_root() / "extra" / "jina-scores.parquet")
     if no_jina:
@@ -193,7 +195,7 @@ def apply(cfg: dict[str, Any]) -> dict[str, Any]:
     sel = pd.DataFrame([(q, int(r["doc_id"]), k, float(r["judge_score"])) for q, rows in chosen.items() for k, r in enumerate(rows, 1)],
                        columns=["query_id", "doc_id", "rank", "p4b"])
     sel["chunk"] = sel.p4b >= t_c                                               # fixed-whole: the global threshold carriers
-    carriers, carrier_info = carrier_rules.select_carriers(sel, rule["rule"], rule.get("target"), rule.get("drop"))
+    carriers, carrier_info = carrier_rules.select_carriers(sel, rule["rule"], rule.get("target"), rule.get("drop"), rule.get("rho"))
     carriers.to_parquet(out / f"carriers-{name}.parquet", index=False)
     chunk_ids = {int(q): g.doc_id.astype(int).tolist() for q, g in carriers.groupby("query_id")}
     pcal_rows = [{"query_id": q, "doc_id": int(r["doc_id"]), "p_fused": float(f), "p_cal": float(p)}

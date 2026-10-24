@@ -125,3 +125,14 @@ def test_merge_union_drops_unscored_pairs_above_the_coverage_floor():
     out = s37.merge_union(union_of(), pairs, scores, 0.7)
     assert [r["doc_id"] for r in out[2]] == [20]                     # pair 4 (query 2) was not scored: dropped
     assert {900, 901, 902} <= {r["doc_id"] for r in out[1]}
+
+
+def test_fair_with_a_given_rho_is_the_default_rule_and_needs_no_target():
+    frame = docsel([10, 40, 7, 100])
+    by_rho, info = carriers.carriers_fair(frame, rho=0.5)
+    sizes = frame.groupby("query_id").size()
+    assert info["rho"] == 0.5 and (by_rho.groupby("query_id").size() == np.ceil(0.5 * sizes - 1e-12)).all()
+    default, info = carriers.select_carriers(frame, "fair")
+    assert info["rho"] == carriers.DEFAULT_RHO
+    solved, info = carriers.select_carriers(frame, "fair", target=60)
+    assert len(solved) == 60 and info["rho"] != carriers.DEFAULT_RHO

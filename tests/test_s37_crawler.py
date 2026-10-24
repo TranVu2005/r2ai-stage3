@@ -145,6 +145,27 @@ def test_pack_batches_only_complete_shards(server, tmp_path, monkeypatch):
     assert len(list((tmp_path / 'batches').glob('*.tar'))) == 2         # idempotent
 
 
+def test_pack_partial_ships_unfinished_shard_once(server, tmp_path, monkeypatch):
+    monkeypatch.setattr(C, 'SHARD_URLS', 2)
+    urls = tmp_path / 'urls.tsv'
+    q = queue(server, 'ok', 'ok', 'ok', 'ok', 'ok')
+    urls.write_text(''.join(f'{d}\t{u}\n' for d, u in q), encoding='utf-8')
+    c, _ = crawler(tmp_path)
+    c.run(q[:3])                                                         # crawl stops inside shard 1 (1 of 2 URLs)
+    ns = type('A', (), {'out': str(tmp_path), 'urls': str(urls), 'batch_shards': 2, 'final': False, 'partial': True})
+    C.cmd_pack(ns)
+    batches = sorted((tmp_path / 'batches').glob('*.tar'))
+    assert len(batches) == 1                                             # the complete shard 0 still waits for a partner
+    with tarfile.open(batches[0]) as t:
+        manifest = json.load(t.extractfile('MANIFEST.json'))
+        assert manifest['urls'] == 1 and manifest['ok'] == 1
+        assert [m['name'] for m in manifest['shards']] == ['r1-00001.jsonl.gz']
+    C.cmd_pack(ns)
+    assert len(list((tmp_path / 'batches').glob('*.tar'))) == 1          # same row count: not packed twice
+    packed = json.loads((tmp_path / 'packed.json').read_text('utf-8'))
+    assert packed['partial'] == {'r1-00001.jsonl.gz': 1} and packed['shards'] == []
+
+
 def test_retry_round_queue_holds_only_failed(server, tmp_path):
     c, _ = crawler(tmp_path)
     c.run(queue(server, 'ok', 'down', 'gone'))

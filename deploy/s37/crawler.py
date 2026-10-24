@@ -3,7 +3,7 @@
 
     crawler.py run    --urls urls.tsv --out data [--round 1] [--sample 50] [--limit N]
     crawler.py status --out data
-    crawler.py pack   --out data [--batch-shards 5] [--final]
+    crawler.py pack   --out data [--batch-shards 5] [--final] [--partial]
 
 Politeness: one IP, one request at a time, start-to-start gap 1.0 s + uniform(0, 0.3) s, descriptive UA, no proxy
 (trust_env off), no IP rotation, no browser emulation. Redirects are followed by hand (max 3 hops) and only inside the
@@ -363,6 +363,16 @@ def complete_shards(out: Path, urls: Path) -> list[Path]:
     return res
 
 
+def partial_shards(out: Path, urls: Path, packed: dict) -> list[Path]:
+    """Shards with logged records that are not complete (crawl stopped inside them) and not packed with the same row count yet."""
+    complete = {p.name for p in complete_shards(out, urls)}
+    rows: dict[str, int] = {}
+    for r in read_log(out / 'log.jsonl'):
+        rows[r['shard']] = rows.get(r['shard'], 0) + 1
+    return [out / 'shards' / n for n, k in sorted(rows.items())
+            if n not in complete and n not in packed['shards'] and packed.get('partial', {}).get(n) != k]
+
+
 def cmd_pack(a) -> int:
     out = Path(a.out)
     packed_path = out / 'packed.json'
@@ -371,8 +381,14 @@ def cmd_pack(a) -> int:
     groups = [ready[i:i + a.batch_shards] for i in range(0, len(ready), a.batch_shards)]
     if groups and len(groups[-1]) < a.batch_shards and not a.final:
         groups.pop()
+    if getattr(a, 'partial', False):          # crawl stopped for good: also ship the records of an unfinished shard (own batch)
+        repair_shards(out, read_log(out / 'log.jsonl'))      # cut a torn trailing member first
+        extra = partial_shards(out, Path(a.urls), packed)
+        if extra:
+            groups.append(extra)
     (out / 'batches').mkdir(exist_ok=True)
     log = read_log(out / 'log.jsonl')
+    extra_set = set(extra) if getattr(a, 'partial', False) else set()
     for g in groups:
         names = [p.name for p in g]
         n = len(packed['batches']) + 1
@@ -396,7 +412,11 @@ def cmd_pack(a) -> int:
             t.addfile(ti, io.BytesIO(mb))
         os.replace(tmp, tar_path)
         (out / 'batches' / f'batch-{n:04d}.tar.sha256').write_text(f'{sha256_file(tar_path)}  {tar_path.name}\n')
-        packed['shards'] += names
+        for p in g:
+            if p in extra_set:
+                packed.setdefault('partial', {})[p.name] = sum(1 for r in log if r['shard'] == p.name)
+            else:
+                packed['shards'].append(p.name)
         packed['batches'].append({'tar': tar_path.name, **{k: manifest[k] for k in ('urls', 'ok', 'suspect', 'failed')}})
         packed_path.write_text(json.dumps(packed, indent=1), encoding='utf-8')
         print(json.dumps({'packed': tar_path.name, 'shards': len(g), 'urls': manifest['urls'], 'ok': manifest['ok'],
@@ -428,6 +448,8 @@ def main(argv=None) -> int:
     p.add_argument('--urls', default='urls.tsv')
     p.add_argument('--batch-shards', type=int, default=5)
     p.add_argument('--final', action='store_true')
+    p.add_argument('--partial', action='store_true',
+                   help='crawl stopped for good: also pack the logged records of an unfinished shard as its own batch')
     p.set_defaults(fn=cmd_pack)
     a = ap.parse_args(argv)
     if getattr(a, 'min_gap', 1.0) < 1.0:

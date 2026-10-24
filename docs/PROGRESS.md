@@ -1,9 +1,9 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-24 04:24 (UTC+7)
+- Cập nhật: 2026-10-24 12:58 (UTC+7)
 - Model thực hiện: Claude Opus 5.5
-- Commit HEAD đã kiểm trước cập nhật này: `ac3c7a8`, nhánh `feat/s38-chunk-metric-v2` (base `feat/s36-fuse4` `e5567b4`)
-- **S38 (23–24/10): BTC đổi metric chunk (thêm vế LCS/|c| ≥ 0,4).** Scorer dùng v2 mặc định. Theo metric mới (Vu): nguyên body (K4-thr-C) Chunk F2 0,3594 · CH-win768 0,3433 · CH-win384 0,1805 · CH-sec-1 0,0904 → gold chunk dài, nguyên body tốt nhất. Trên J3-thrC, chưa nộp, validator ok: CH-pre1024, CH-cap2048, CH-full+w768-t1849, CH-clean. **Ghép cuối trên EF2-cut-p4b** (`scripts/s38/compose.sh EF2-cut-p4b <rule>`), cache sẵn cho clean / cap2048 / full+w768 / clean+cap2048, có thin baophutho; **chờ Vu báo quy tắc thắng rồi mới ghi ZIP**. Chi tiết `docs/s38-chunk-metric-v2.md`.
+- Commit HEAD đã kiểm trước cập nhật này: `7b13ead`, nhánh `feat/s38-chunk-metric-v2` (base `feat/s36-fuse4` `e5567b4`)
+- **S38 (23–24/10): BTC đổi metric chunk (thêm vế LCS/|c| ≥ 0,4).** Scorer dùng v2 mặc định. Theo metric mới (Vu): nguyên body (K4-thr-C) Chunk F2 0,3594 · CH-win768 0,3433 · CH-win384 0,1805 · CH-sec-1 0,0904 → gold chunk dài, nguyên body tốt nhất. Trên J3-thrC, chưa nộp, validator ok: CH-pre1024, CH-cap2048, CH-full+w768-t1849, CH-clean. **Ghép cuối trên EF2-cut-p4b** (`scripts/s38/compose.sh EF2-cut-p4b <rule>`), cache sẵn cho clean / cap2048 / full+w768 / clean+cap2048, có thin baophutho; **đã ghi ZIP EF2-cut-p4b + full+w768 T=1907 (102.593.008 B, validator 0 lỗi, chưa nộp)**; các quy tắc khác chờ Vu. Chi tiết `docs/s38-chunk-metric-v2.md`.
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - **Best mới đã đo: R1m 0,2673** (Qwen3-Reranker-0,6B + RRF trên phía zh, D16; người dùng cung cấp 15/10). **R1m chưa tích hợp vào repo này**: chờ phía vi (S15, sáng 16/10) rồi tích hợp một lần, kèm pin model Qwen3 (revision `e61197ed…`) và cache điểm. Trong repo, best tái tạo được vẫn là **C1 0,2655**. **C3 (S6-f + zh đợt 3) đã vào `main` local theo S14b: replay JSON `6cf9284d…3436` và ZIP `1c2472d1…1af9` khớp, chưa có điểm LB.** Chi tiết mục 5 (S14b).
 - **S14 (14/10, nhánh `feat/integrate`, chưa push): tái tạo C1 bằng một lệnh.** Best đã đo: **C1 Final 0,2655** (người dùng cung cấp) = base S6-f-K150 + doc zh đợt 2 (τ_doc tuyệt đối −0,87255859375, trần 30) + chunk zh ZL (τ 0,96, ≤ 3 doc/query, mỗi ID v2 một chunk, chỉ doc đã chọn) + LZMA dict 256 MiB; ZIP 82.047.434 B, ZIP SHA256 `e7c84e2c37c996fe3d046bf22a4d25b2fd9e8e1c2568d928fa45797108720c13`, JSON `83375428b79957b1580299f97b05299bb292957826bd4cb8bdc602a83b8dd5f3`. `python -m r2ai.compose replay --manifest configs/best-c1.yaml` (pin đủ input trong `configs/best-c1.yaml`, thiếu pin thì dừng) dựng lại **JSON SHA và ZIP SHA đều khớp**, validator native 0 lỗi / 1.200 query / 126.208 chunk. Replay S6-f JSON `d0da38b1…dca1` khớp; A1-115 JSON `4ffbba8b…2c82` khớp (ZIP khác 8 byte do mtime, gate là JSON); VS-append JSON và ZIP khớp. `submission-best.yaml` vẫn mặc định A1-115. Chi tiết mục 5 (S14) và `submissions/LOG.md`.
@@ -263,6 +263,8 @@ Cả hai: doc/query 136,48, 0 doc thêm do bảo vệ, chunk CC/query 9,34 (h1) 
 **Chưa làm (chờ Vu):** `feat/zh-v2` có thêm 6 commit mới (trích xuất lại, supersede) và `feat/en-pubmed`, `feat/reranker-trial` chưa được merge vào `main`; C3 không cần chúng (nguồn zh được pin theo SHA). Gộp R1m: xem đầu file.
 
 ## 6. Lệch so với `R2AI_STAGE3_CONTEXT.md`
+
+Cập nhật 2026-10-24 12:58 (UTC+7), Claude Sonnet 5.5, HEAD kiểm trước cập nhật `7b13ead`, nhánh `feat/s38-chunk-metric-v2`. S38, theo yêu cầu của Vu: ghép EF2-cut-p4b + full+w768 (hiệu chỉnh T cho vừa trần, thin bật, Vu chọn). T thấp nhất dưới trần đã đo = 1907 (1904 trên trần; 1905–1906 chưa đo). ZIP 102.593.008 B, 188.185 chunk, validator 0 lỗi, relevant_docs khớp EF2-cut-p4b. Chưa nộp.
 
 Cập nhật 2026-10-24 04:24 (UTC+7), Claude Opus 5.5, HEAD kiểm trước cập nhật `ac3c7a8`, nhánh `feat/s38-chunk-metric-v2`. S38, quyết định của Vu 24/10: nền ghép EF2-cut-p4b (bỏ EF2-cut-avg); 20 doc baophutho chỉ có placeholder + base64 là thin, chunk chuyển cho doc kế tiếp theo thứ tự toàn cục P4B của bộ chọn t_c S31 (Vu chọn); chờ quy tắc thắng mới ghép. `r2ai.s38.compose`: thêm thin (nguồn chunk như builder S29; dựng lại khớp 175.548/175.548 carrier EF2-cut-p4b) và quy tắc `clean+cap2048`. EF2-cut-p4b: 24 carrier thin bỏ chunk, 24 doc nhận thay (23 hoà t_c, 1 P4B 0,086942), tổng chunk giữ 175.548. Cache prepare sẵn 4 quy tắc; T ước lượng full+w768 1.917. Cổng hồi quy (`--no-thin`, J3-thrC): cache clean và cap2048 trùng hệt cache cổng trước. Chưa ghi ZIP, chưa nộp.
 
@@ -553,6 +555,7 @@ Cập nhật 2026-10-17 20:25 (UTC+7), GPT-6 (Codex, S24 recovery): D21 bỏ qua
 
 | Thời gian (UTC+7) | Ai | Thay đổi |
 |---|---|---|
+| 2026-10-24 12:58 | Claude Sonnet 5.5 | S38: ghi ZIP EF2-cut-p4b + full+w768 T=1907 (102.593.008 B), validator 0 lỗi, kiểm id/relevant_docs/phân phối so với probe t1849; chưa nộp. |
 | 2026-10-24 04:24 | Claude Opus 5.5 | S38: compose thêm thin baophutho (chuyển chunk theo P4B toàn cục, nguồn S29) và quy tắc clean+cap2048; nền ghép EF2-cut-p4b, cache 4 quy tắc; cổng hồi quy giữ nguyên; chưa ghi ZIP, chờ Vu. |
 | 2026-10-24 02:20 | Claude Opus 5.5 | S38: `r2ai.s38.compose` + `scripts/s38/compose.sh` (docsel + quy tắc chunk → ZIP + validator, tự hiệu chỉnh T), marker base64 baophutho; cổng hồi quy khớp 3 bản J3-thrC; cache prepare EF2-cut-avg/p4b × 3 quy tắc; chưa dựng ZIP, chưa nộp. |
 | 2026-10-23 23:35 | Claude Opus 5.5 | S38 lượt 3: `build --full-threshold` (CH-full+w768 ngưỡng thấp nhất dưới trần T = 1.849, 15.026 chunk 2); `r2ai.s38.clean` + CH-clean (marker đuôi đếm trên toàn host, 25.391 carrier cắt, medlatec 0); validator ok cả hai; `reports/s38-clean.md`; chưa nộp. |

@@ -279,6 +279,10 @@ def test_estimate_thresholds_fits_budget():
     est = CO.estimate_thresholds(frame, CO.CEILING - int(2.5 * CO.RATE_FULL))
     assert est['k_estimate'] == 2 and est['t_estimate'] == 1800              # bodies 1900, 2000 keep the window
     assert CO.estimate_thresholds(frame, CO.CEILING - 10 ** 6)['t_estimate'] == CO.FULL_MIN_T
+    # the reserve shrinks the budget: 2.5 second chunks fit without it, only 1.5 with a reserve of one chunk
+    base = CO.CEILING - int(2.5 * CO.RATE_FULL)
+    assert CO.estimate_thresholds(frame, base, int(CO.RATE_FULL))['k_estimate'] == 1
+    assert CO.RESERVE == 500_000
 
 
 def test_is_thin_base64_needs_placeholders_only():

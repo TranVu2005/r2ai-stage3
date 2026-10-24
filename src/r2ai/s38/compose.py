@@ -22,7 +22,8 @@
 * ``full+w768`` picks T itself: the ZIP grows by about ``RATE_FULL`` bytes per second chunk (S38, J3-thrC), so the
   first candidates sit around the estimate; every round builds its candidates in parallel processes and the next
   round bisects between the highest T over the ceiling and the lowest under it, until they are 1 token apart or
-  ``--rounds`` is used up. Result: the lowest measured T with ZIP < 102,600,000 B.
+  ``--rounds`` is used up. Result: the lowest measured T with ZIP < ``CEILING - RESERVE`` = 102,600,000 - 500,000 B (``--reserve``; the
+  internal ceiling 102,600,000 B is the S29 one, itself 2.26 MB below the BTC cap 104,857,600 B). No hand tuning per bundle.
 
 Steps (``run`` = ``prepare`` + ``write``): ``prepare`` writes ``<out>/<name>.cache.parquet`` (chunks per carrier,
 body tokens) and ``<name>.prepare.json``; ``write --threshold T`` writes ``<name>[-t<T>].zip``, runs the validator
@@ -58,6 +59,7 @@ RULES = {"clean": None, "cap2048": ("window", 2048, 2048), "full+w768": ("full+w
          "clean+cap2048": ("window", 2048, 2048)}
 PLACEHOLDERS = re.compile(r"^(?:\{\w+\}\s*)*$")
 CEILING = 102_600_000
+RESERVE = 500_000   # safety margin: a full+w768 ZIP must stay below CEILING - RESERVE (Vu, 24/10)
 RATE_FULL = 94.3        # B per 768 window: (102,599,152 - 101,181,680) / 15,026 (CH-full+w768-t1849 on J3-thrC)
 FULL_MIN_T = 1536
 PHARM_HANDOFF = Path("runs/s27-pharmacity/handoff/cc-s27-pharmacity")
@@ -438,7 +440,7 @@ def prepare(out: Path, name: str, base_zip: Path, docsel_path: Path | None, rule
 
 # -------------------------------------------------------------------------------------------- write
 
-def write(out: Path, name: str, threshold: int | None, validate: bool = True) -> dict[str, Any]:
+def write(out: Path, name: str, threshold: int | None, validate: bool = True, reserve: int = RESERVE) -> dict[str, Any]:
     started = time.monotonic()
     prep = json.loads((out / f"{name}.prepare.json").read_text(encoding="utf-8"))
     rule = prep["rule"]
@@ -464,7 +466,7 @@ def write(out: Path, name: str, threshold: int | None, validate: bool = True) ->
     paths.assert_writable(target.with_name(target.name + ".tmp"))
     res = write_bundle(new_rows, target, f"{label}.json")
     entry = {"name": label, "rule": rule, "threshold": threshold, "zip": str(target), "zip_bytes": target.stat().st_size,
-             "zip_sha256": _sha256(target), **res, "under_ceiling": target.stat().st_size < CEILING,
+             "zip_sha256": _sha256(target), **res, "limit_bytes": CEILING - reserve, "under_ceiling": target.stat().st_size < CEILING - reserve,
              "docs": sum(len(r["relevant_docs"]) for r in new_rows),
              "chunks": sum(len(r["relevant_chunks"]) for r in new_rows),
              "second_chunks": int((frame["rank"] == 2).sum()),
@@ -503,14 +505,14 @@ def estimate_thresholds(frame: pd.DataFrame, base_zip_bytes: int, margin: int = 
             "t_estimate": t_for(k), "candidates": sorted({t_for(int(k * 1.03)), t_for(k), t_for(int(k * 0.97))})}
 
 
-def run_full(out: Path, name: str, candidates: list[int], rounds: int) -> dict[str, Any]:
+def run_full(out: Path, name: str, candidates: list[int], rounds: int, reserve: int = RESERVE) -> dict[str, Any]:
     """Build candidate thresholds in parallel processes, bisect between over/under, keep the lowest T under."""
     tried: dict[int, dict[str, Any]] = {}
     for r in range(rounds):
         todo = [t for t in candidates if t not in tried]
         _log(f"round {r + 1}: thresholds {todo}")
         procs = [(t, subprocess.Popen([sys.executable, "-m", "r2ai.s38.compose", "write", "--name", name, "--out", str(out),
-                                       "--threshold", str(t)], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE))
+                                       "--threshold", str(t), "--reserve", str(reserve)], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE))
                  for t in todo]
         for t, p in procs:
             _, err = p.communicate()
@@ -557,6 +559,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--skip-docsel-check", action="store_true")
     parser.add_argument("--no-thin", action="store_true", help="keep the placeholder+base64 baophutho carriers")
     parser.add_argument("--threshold", type=int, action="append", default=None, help="full+w768: body tokens above which the window is added")
+    parser.add_argument("--reserve", type=int, default=RESERVE, help="bytes kept free below the ceiling (default 500,000)")
     parser.add_argument("--rounds", type=int, default=3, help="full+w768 run: parallel build rounds")
     parser.add_argument("--no-validate", action="store_true")
     args = parser.parse_args(argv)
@@ -576,17 +579,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     prep = json.loads((out / f"{args.name}.prepare.json").read_text(encoding="utf-8"))
     if args.command == "estimate" or (args.command == "run" and prep["rule"] == "full+w768" and not args.threshold):
-        est = estimate_thresholds(pd.read_parquet(out / f"{args.name}.cache.parquet"), prep["base_zip_bytes"])
+        est = estimate_thresholds(pd.read_parquet(out / f"{args.name}.cache.parquet"), prep["base_zip_bytes"], args.reserve)
         print(json.dumps(est, indent=1))
         if args.command == "estimate":
             return 0
-        res = run_full(out, args.name, est["candidates"], args.rounds)
+        res = run_full(out, args.name, est["candidates"], args.rounds, args.reserve)
+        res["reserve_bytes"] = args.reserve
         res["estimate"] = est
         _atomic_json(out / f"{args.name}.threshold.json", res)
         print(json.dumps(res, indent=1))
         return 0
     for t in (args.threshold or [None]):
-        print(json.dumps(write(out, args.name, t, not args.no_validate), ensure_ascii=False, indent=1))
+        print(json.dumps(write(out, args.name, t, not args.no_validate, args.reserve), ensure_ascii=False, indent=1))
     return 0
 
 

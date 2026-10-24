@@ -179,3 +179,48 @@ def test_run_full_reuses_a_fresh_measurement_and_ignores_a_changed_zip(tmp_path,
     (tmp_path / f"{name}-t1600.zip").write_bytes(b"changed")
     compose.run_full(tmp_path, name, [1600], 1)                  # the ZIP no longer matches its measurement
     assert calls == ["1600", "1600"]
+
+
+def fake_fit_write(tmp_path, name, zip_of):
+    """Stand-in for ``write --threshold NO_WINDOWS --drop N``: the ZIP without windows shrinks 580 B per dropped carrier."""
+    class Proc:
+        def __init__(self, cmd, **_):
+            n = int(cmd[cmd.index("--drop") + 1])
+            label = compose.label_of(name, n, compose.NO_WINDOWS)
+            z = tmp_path / f"{label}.zip"
+            z.write_bytes(b"z")
+            (tmp_path / f"{label}.compose.json").write_text(json.dumps({"zip_bytes": zip_of(n), "zip_sha256": compose._sha256(z)}), encoding="utf-8")
+            self.returncode = 0
+
+        def communicate(self):
+            return b"", b""
+    return Proc
+
+
+def test_fit_carriers_finds_the_smallest_drop_under_the_ceiling(tmp_path, monkeypatch):
+    name, limit = "n", compose.BTC_CEILING - compose.RESERVE
+    (tmp_path / f"{name}.prepare.json").write_text("{}", encoding="utf-8")
+    base = limit + 2_000_000
+    zip_of = lambda n: int(base - n * 612.0)                                    # the real slope is not the RATE_CARRIER estimate
+    monkeypatch.setattr(compose.subprocess, "Popen", fake_fit_write(tmp_path, name, zip_of))
+    fit = compose.fit_carriers(tmp_path, name, base, compose.RESERVE, 6, 100_000, step=10)
+    assert zip_of(fit["drop"]) < limit and fit["drop"] - fit["highest_drop_over"] <= 10 and fit["highest_drop_over"] is not None
+    assert fit["zip_bytes_without_windows"] == zip_of(fit["drop"])
+    # nothing to drop when the estimate and the probe say the base fits
+    (tmp_path / "again").mkdir()
+    (tmp_path / "again" / f"{name}.prepare.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(compose.subprocess, "Popen", fake_fit_write(tmp_path / "again", name, lambda n: limit - 1000))
+    assert compose.fit_carriers(tmp_path / "again", name, limit - 1000, compose.RESERVE, 3, 100_000)["drop"] == 0
+
+
+def test_lowest_p_carriers_and_without(tmp_path):
+    docsel = pd.DataFrame({"query_id": [1, 1, 2, 2], "doc_id": [10, 11, 20, 21], "rank": [1, 2, 1, 2], "p4b": [0.9, 0.3, 0.3, 0.8]})
+    path = tmp_path / "docsel.parquet"
+    docsel.to_parquet(path)
+    frame = pd.DataFrame({"query_id": [1, 1, 2, 2, 1], "doc_id": [10, 11, 20, 21, 11], "rank": [1, 1, 1, 1, 2]})
+    assert compose.lowest_p_carriers({"docsel": str(path)}, frame, 1) == {(2, 20)}             # the tie at 0.3 goes to the later query
+    assert compose.lowest_p_carriers({"docsel": str(path)}, frame, 0) == set()
+    assert compose.lowest_p_carriers({"docsel": str(path)}, frame, 2) == {(2, 20), (1, 11)}
+    kept = compose.without(frame, {(1, 11)})
+    assert len(kept) == 3 and (kept[["query_id", "doc_id"]].values.tolist().count([1, 11]) == 0)           # rank 1 and rank 2 rows both go
+    assert compose.label_of("n", 0, 1700) == "n-t1700" and compose.label_of("n", 40, 1700) == "n-d40-t1700" and compose.label_of("n", 40, None) == "n-d40"

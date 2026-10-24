@@ -28,6 +28,10 @@
   order, one whole-body chunk (S29 rule, ``s29_chunk_texts``) on every carrier (the docsel ``chunk`` flags, or ``--carriers``), kept in
   ``<name>.base.parquet``. No S36 -docread ZIP is needed. Docs of the S37 registry (``r2ai.s38.registry``, 120ask segments) take
   their body from their segment; a doc without a body source is skipped and counted.
+* ``--fit-carriers`` (full+w768 ``run``, S37 data): when the carriers alone do not fit the ceiling, the lowest-P4B carriers are
+  dropped (one global threshold, no K_q): the smallest drop N whose ZIP without windows is under ``BTC_CEILING - reserve``, measured
+  by parallel builds (resolution ``--fit-step`` carriers) and bisected as T is; then T is searched for that N. A dropped carrier loses
+  its chunks, the docs stay.
 * best t256 chunk (CH-t256-1 rule): the S32 chunk judge on the scored answer/body chunks of the canonical owner
   (Pharmacity lots: their own chunks), else cosine(S29 query vector, chunk vector); ties: file order.
 * ``full+w768`` picks T itself: the ZIP grows by about ``RATE_FULL`` bytes per second chunk (S38, J3-thrC), so the
@@ -45,6 +49,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import subprocess
@@ -76,6 +81,7 @@ BTC_CEILING = 104_857_600   # BTC upload limit for new files: 100 MiB (docs/PROG
 RESERVE = 2_257_600   # default margin below BTC_CEILING: ZIP limit 102,600,000 B (the S29 internal ceiling); the only knob
 RATE_FULL = 94.3        # B per 768 window: (102,599,152 - 101,181,680) / 15,026 (CH-full+w768-t1849 on J3-thrC)
 FULL_MIN_T = 1536
+NO_WINDOWS = 10 ** 9     # threshold of a probe build without any second chunk
 RATE_DOC = 2.9          # B per relevant_docs entry in the ZIP: 641,652 / 220,825 (EF2-free)
 RATE_CARRIER = 580.0    # B per whole-body carrier chunk in the ZIP: (101,717,111 - 641,652) / 174,535 (EF2-free base)
 PHARM_HANDOFF = Path("runs/s27-pharmacity/handoff/cc-s27-pharmacity")
@@ -606,18 +612,43 @@ def prepare(out: Path, name: str, base_zip: Path | None, docsel_path: Path | Non
 
 # -------------------------------------------------------------------------------------------- write
 
-def write(out: Path, name: str, threshold: int | None, validate: bool = True, reserve: int = RESERVE) -> dict[str, Any]:
+def label_of(name: str, drop: int, threshold: int | None) -> str:
+    return f"{name}{f'-d{drop}' if drop else ''}{f'-t{threshold}' if threshold is not None else ''}"
+
+
+def lowest_p_carriers(prep: dict[str, Any], frame: pd.DataFrame, drop: int) -> set[tuple[int, int]]:
+    """The ``drop`` carriers with the lowest P4B (ties: later query, later rank first), from the docsel of the prepared run."""
+    if not drop:
+        return set()
+    docsel = pd.read_parquet(prep["docsel"], columns=["query_id", "doc_id", "rank", "p4b"])
+    car = frame[frame["rank"] == 1][["query_id", "doc_id"]].drop_duplicates().merge(docsel, on=["query_id", "doc_id"], how="left")
+    if car.p4b.isna().any():
+        raise ValueError("carriers outside the docsel")
+    worst = car.sort_values(["p4b", "query_id", "rank"], ascending=[True, False, False], kind="stable").head(drop)
+    return set(zip(worst.query_id.astype(int), worst.doc_id.astype(int)))
+
+
+def without(frame: pd.DataFrame, dropped: set[tuple[int, int]]) -> pd.DataFrame:
+    if not dropped:
+        return frame
+    keys = pd.MultiIndex.from_arrays([frame.query_id.astype(int), frame.doc_id.astype(int)])
+    return frame[~keys.isin(list(dropped))]
+
+
+def write(out: Path, name: str, threshold: int | None, validate: bool = True, reserve: int = RESERVE, drop: int = 0) -> dict[str, Any]:
     started = time.monotonic()
     prep = json.loads((out / f"{name}.prepare.json").read_text(encoding="utf-8"))
     rule = prep["rule"]
     frame = pd.read_parquet(out / f"{name}.cache.parquet")
-    label = name
+    dropped = lowest_p_carriers(prep, frame, drop)
+    frame = without(frame, dropped)
+    label = label_of(name, drop, None)
     if rule == "full+w768":
         threshold = threshold if threshold is not None else FULL_MIN_T
         if threshold < FULL_MIN_T:
             raise ValueError(f"threshold below {FULL_MIN_T}: windows not prepared")
         frame = frame[(frame["rank"] == 1) | (frame.body_tokens > threshold)]
-        label = f"{name}-t{threshold}"
+        label = label_of(name, drop, threshold)
     chosen: dict[tuple[int, int], list] = {}
     for q, d, t in zip(frame.query_id.astype(int), frame.doc_id.astype(int), frame.text):
         chosen.setdefault((q, d), []).append(None if t is None or t != t else t)
@@ -625,11 +656,14 @@ def write(out: Path, name: str, threshold: int | None, validate: bool = True, re
     swap_path = out / f"{name}.swap.json"
     rows = apply_swap(rows, json.loads(swap_path.read_text(encoding="utf-8"))) if swap_path.exists() else rows
     new_rows = [replace_chunks(r, chosen) for r in rows]
+    if dropped:
+        for r in new_rows:
+            r["relevant_chunks"] = [c for c in r["relevant_chunks"] if (int(r["id"]), int(c["doc_id"])) not in dropped]
     target = out / f"{label}.zip"
     paths.assert_writable(target)
     paths.assert_writable(target.with_name(target.name + ".tmp"))
     res = write_bundle(new_rows, target, f"{label}.json")
-    entry = {"name": label, "rule": rule, "threshold": threshold, "zip": str(target), "zip_bytes": target.stat().st_size,
+    entry = {"name": label, "rule": rule, "threshold": threshold, "dropped_carriers": drop, "zip": str(target), "zip_bytes": target.stat().st_size,
              "zip_sha256": _sha256(target), **res, "limit_bytes": BTC_CEILING - reserve, "under_ceiling": target.stat().st_size < BTC_CEILING - reserve,
              "docs": sum(len(r["relevant_docs"]) for r in new_rows),
              "chunks": sum(len(r["relevant_chunks"]) for r in new_rows),
@@ -676,17 +710,79 @@ def estimate_thresholds(frame: pd.DataFrame, base_zip_bytes: int, reserve: int =
             "candidates": sorted({t_for_count(bt, int(k * 1.03)), t_for_count(bt, k), t_for_count(bt, int(k * 0.97))})}
 
 
-def reusable(out: Path, name: str, t: int) -> dict[str, Any] | None:
+def reusable(out: Path, name: str, t: int, drop: int = 0, validated: bool = True) -> dict[str, Any] | None:
     """The measurement of an earlier ``write`` at T when its ZIP is still there, unchanged, and newer than the prepared cache."""
-    meta, zip_path, prepared = out / f"{name}-t{t}.compose.json", out / f"{name}-t{t}.zip", out / f"{name}.prepare.json"
+    label = label_of(name, drop, t)
+    meta, zip_path, prepared = out / f"{label}.compose.json", out / f"{label}.zip", out / f"{name}.prepare.json"
     if not (meta.exists() and zip_path.exists() and prepared.exists()) or meta.stat().st_mtime < prepared.stat().st_mtime:
         return None
     entry = json.loads(meta.read_text(encoding="utf-8"))
-    return entry if entry.get("zip_sha256") == _sha256(zip_path) and entry.get("validator") else None
+    return entry if entry.get("zip_sha256") == _sha256(zip_path) and (entry.get("validator") or not validated) else None
+
+
+def fit_carriers(out: Path, name: str, base_bytes: int, reserve: int, rounds: int, n_carriers: int, step: int = 25) -> dict[str, Any]:
+    """Smallest number of lowest-P4B carriers to drop so that the ZIP without any window is under ``BTC_CEILING - reserve``. Probe builds
+    run in parallel (no validator); the next round interpolates between the largest drop still over and the smallest under."""
+    limit = BTC_CEILING - reserve
+    tried: dict[int, int] = {}                                    # drop -> ZIP bytes without windows
+    n0 = max(0, math.ceil((base_bytes - limit) / RATE_CARRIER))
+    clip = lambda n: int(min(max(n, 0), n_carriers - 1))           # noqa: E731
+    candidates = sorted({clip(n0 * 0.97), clip(n0), clip(n0 * 1.03 + 1)})
+    for r in range(rounds):
+        todo = []
+        for n in candidates:
+            old = reusable(out, name, NO_WINDOWS, n, validated=False)
+            if n in tried:
+                continue
+            if old is not None:
+                tried[n] = old["zip_bytes"]
+                _log(f"fit drop={n} reused zip={old['zip_bytes']}")
+            else:
+                todo.append(n)
+        _log(f"fit round {r + 1}: drops {todo}")
+        procs = [(n, subprocess.Popen([sys.executable, "-m", "r2ai.s38.compose", "write", "--name", name, "--out", str(out), "--threshold", str(NO_WINDOWS),
+                                       "--drop", str(n), "--reserve", str(reserve), "--no-validate"], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE))
+                 for n in todo]
+        for n, p in procs:
+            _, err = p.communicate()
+            if p.returncode:
+                raise RuntimeError(f"fit write drop={n} failed: {err.decode('utf-8', 'replace')[-2000:]}")
+            tried[n] = json.loads((out / f"{label_of(name, n, NO_WINDOWS)}.compose.json").read_text(encoding="utf-8"))["zip_bytes"]
+            _log(f"fit drop={n} zip={tried[n]} under={tried[n] < limit}")
+        under = sorted(n for n, z in tried.items() if z < limit)
+        over = sorted(n for n, z in tried.items() if z >= limit)
+        if not under:
+            hi = max(over)
+            candidates = [clip(hi + (tried[hi] - limit) / RATE_CARRIER * f + step) for f in (1.0, 1.03, 1.1)]
+            continue
+        lo_ok = under[0]
+        below = [n for n in over if n < lo_ok]
+        if not below:
+            if lo_ok == 0:
+                break
+            candidates = [clip(lo_ok - (limit - tried[lo_ok]) / RATE_CARRIER * f) for f in (0.9, 1.0, 1.05)]
+            candidates = sorted({n for n in candidates if n < lo_ok})
+            if not candidates:
+                break
+            continue
+        hi_bad = max(below)
+        if lo_ok - hi_bad <= step:
+            break
+        share = (tried[hi_bad] - limit) / max(tried[hi_bad] - tried[lo_ok], 1)
+        mid = hi_bad + share * (lo_ok - hi_bad)
+        candidates = sorted({n for n in (int(mid) - step, int(mid), int(mid) + step) if hi_bad < n < lo_ok})
+        if not candidates:
+            break
+    under = sorted(n for n, z in tried.items() if z < limit)
+    if not under:
+        raise RuntimeError(f"no drop under the ceiling within {rounds} rounds: {tried}")
+    best = under[0]
+    return {"drop": best, "zip_bytes_without_windows": tried[best], "step": step, "tried": {str(n): z for n, z in sorted(tried.items())},
+            "highest_drop_over": max([n for n, z in tried.items() if z >= limit and n < best], default=None)}
 
 
 def run_full(out: Path, name: str, candidates: list[int], rounds: int, reserve: int = RESERVE,
-             bt: np.ndarray | None = None) -> dict[str, Any]:
+             bt: np.ndarray | None = None, drop: int = 0) -> dict[str, Any]:
     """Build candidate thresholds in parallel processes, bisect between over/under, keep the lowest T under. A candidate already
     measured by an earlier run on the same prepared cache is reused. ``bt`` (``second_chunk_tokens``) lets a round without any T
     over the ceiling re-estimate T from the measured slack instead of stepping blindly."""
@@ -696,7 +792,7 @@ def run_full(out: Path, name: str, candidates: list[int], rounds: int, reserve: 
         for t in candidates:
             if t in tried:
                 continue
-            old = reusable(out, name, t)
+            old = reusable(out, name, t, drop)
             if old is not None:
                 tried[t] = old
                 _log(f"t={t} reused zip={old['zip_bytes']} under={old['under_ceiling']}")
@@ -704,13 +800,14 @@ def run_full(out: Path, name: str, candidates: list[int], rounds: int, reserve: 
                 todo.append(t)
         _log(f"round {r + 1}: thresholds {todo}")
         procs = [(t, subprocess.Popen([sys.executable, "-m", "r2ai.s38.compose", "write", "--name", name, "--out", str(out),
-                                       "--threshold", str(t), "--reserve", str(reserve)], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE))
+                                       "--threshold", str(t), "--reserve", str(reserve)] + (["--drop", str(drop)] if drop else []),
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.PIPE))
                  for t in todo]
         for t, p in procs:
             _, err = p.communicate()
             if p.returncode:
                 raise RuntimeError(f"write t={t} failed: {err.decode('utf-8', 'replace')[-2000:]}")
-            tried[t] = json.loads((out / f"{name}-t{t}.compose.json").read_text(encoding="utf-8"))
+            tried[t] = json.loads((out / f"{label_of(name, drop, t)}.compose.json").read_text(encoding="utf-8"))
             _log(f"t={t} zip={tried[t]['zip_bytes']} under={tried[t]['under_ceiling']}")
         under = sorted(t for t, e in tried.items() if e["under_ceiling"])
         over = sorted(t for t, e in tried.items() if not e["under_ceiling"])
@@ -760,6 +857,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--reserve", type=int, default=RESERVE, help="bytes kept free below the BTC ceiling 104,857,600 (default 2,257,600 -> limit 102,600,000)")
     parser.add_argument("--rounds", type=int, default=4, help="full+w768 run: parallel build rounds")
     parser.add_argument("--no-validate", action="store_true")
+    parser.add_argument("--drop", type=int, default=0, help="write: drop this many lowest-P4B carriers (their chunks, not the docs)")
+    parser.add_argument("--fit-carriers", action="store_true", help="run: drop the fewest lowest-P4B carriers that let the ZIP fit, then search T")
+    parser.add_argument("--fit-step", type=int, default=25, help="fit-carriers: resolution in carriers")
     args = parser.parse_args(argv)
     out = paths.resolve_path(args.out or run_root() / "compose")
     if not out.is_relative_to(paths.RUNS_DIR):
@@ -777,20 +877,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     prep = json.loads((out / f"{args.name}.prepare.json").read_text(encoding="utf-8"))
     if args.command == "estimate" or (args.command == "run" and prep["rule"] == "full+w768" and not args.threshold):
-        est = estimate_thresholds(pd.read_parquet(out / f"{args.name}.cache.parquet"),
-                                  prep.get("base_zip_bytes_effective", prep["base_zip_bytes"]), args.reserve)
+        cache = pd.read_parquet(out / f"{args.name}.cache.parquet")
+        base_bytes, drop, fit = prep.get("base_zip_bytes_effective", prep["base_zip_bytes"]), args.drop, None
+        if args.command == "run" and args.fit_carriers and not args.drop:
+            fit = fit_carriers(out, args.name, base_bytes, args.reserve, args.rounds, int((cache["rank"] == 1).sum()), args.fit_step)
+            drop, base_bytes = fit["drop"], fit["zip_bytes_without_windows"]
+            _log(f"fit-carriers: drop {drop} lowest-P4B carriers, ZIP without windows {base_bytes}")
+        cache = without(cache, lowest_p_carriers(prep, cache, drop))
+        est = estimate_thresholds(cache, base_bytes, args.reserve)
         print(json.dumps(est, indent=1))
         if args.command == "estimate":
             return 0
-        res = run_full(out, args.name, est["candidates"], args.rounds, args.reserve,
-                       second_chunk_tokens(pd.read_parquet(out / f"{args.name}.cache.parquet")))
+        res = run_full(out, args.name, est["candidates"], args.rounds, args.reserve, second_chunk_tokens(cache), drop)
+        res["drop"], res["fit_carriers"] = drop, fit
         res["reserve_bytes"] = args.reserve
         res["estimate"] = est
-        _atomic_json(out / f"{args.name}.threshold.json", res)
+        _atomic_json(out / f"{label_of(args.name, drop, None)}.threshold.json", res)
         print(json.dumps(res, indent=1))
         return 0
     for t in (args.threshold or [None]):
-        print(json.dumps(write(out, args.name, t, not args.no_validate, args.reserve), ensure_ascii=False, indent=1))
+        print(json.dumps(write(out, args.name, t, not args.no_validate, args.reserve, args.drop), ensure_ascii=False, indent=1))
     return 0
 
 

@@ -115,3 +115,13 @@ def test_jina_missing_lists_the_s36_pairs_of_rescored_queries_only(tmp_path, mon
 def test_apply_stops_while_an_artifact_is_missing(tmp_path):
     with pytest.raises(FileNotFoundError, match="not there yet"):
         s37.apply({"pairs_new": str(tmp_path / "none.parquet"), "scores_4b": [], "cmax": [], "jina": str(tmp_path / "none2.parquet"), "out": str(tmp_path)})
+
+
+def test_merge_union_drops_unscored_pairs_above_the_coverage_floor():
+    pairs = pd.DataFrame({"pair_id": [1, 2, 3, 4], "query_id": [1, 1, 1, 2], "doc_id": [900, 901, 902, 903], "cosine_score": [0.95, 0.9, 0.8, 0.3]})
+    scores = {1: 0.8, 2: 0.7, 3: 0.6}                                # 75% covered
+    with pytest.raises(ValueError, match="0.7500 covered"):
+        s37.merge_union(union_of(), pairs, scores, 0.98)
+    out = s37.merge_union(union_of(), pairs, scores, 0.7)
+    assert [r["doc_id"] for r in out[2]] == [20]                     # pair 4 (query 2) was not scored: dropped
+    assert {900, 901, 902} <= {r["doc_id"] for r in out[1]}

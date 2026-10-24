@@ -76,10 +76,12 @@ def sigmoid(x: np.ndarray) -> np.ndarray:
 class Frame:
     """pool13 rows of every query in J3 RRF order, with P4B, Jina, language and the lookups of the scored union."""
 
-    def __init__(self, keys: Sequence[str] = J3_KEYS, frame: str = "thrC", data: dict[str, Any] | None = None) -> None:
+    def __init__(self, keys: Sequence[str] = J3_KEYS, frame: str = "thrC", data: dict[str, Any] | None = None,
+                 allow_missing: bool = False) -> None:
         """``frame`` thrC: the pool13 rows; free: the K4-free pools (cosine top-211, deepened); free211: the same pools cut at the
         cosine top-211 for every query (no deepening). ``keys``: the RRF rank sources. ``data`` (S37 apply) replaces the loaded S36
-        inputs: ``pools`` (query -> rows with cosine_rank / judge_score), ``union``, ``jina`` and ``cmax`` lookups."""
+        inputs: ``pools`` (query -> rows with cosine_rank / judge_score), ``union``, ``jina`` and ``cmax`` lookups.
+        ``allow_missing``: a pair without a Jina / C-max score takes the last rank of its pool in that source (counted in ``self.missing``)."""
         if data is None:
             ranked, union, free, _, _, _ = fuse.load_frames(deepen=frame != "free211")
             jina, _ = fuse.load_jina(fuse.run_root() / "extra" / "jina-scores.parquet")
@@ -91,11 +93,14 @@ class Frame:
         self.ranked = ranked
         self.p4b_of = {(q, int(r["doc_id"])): float(r["judge_score"]) for q, rows in union.items() for r in rows}
         self.jina, self.cmax = jina, cmax
+        self.missing = {"jina": 0, "cmax": 0, "queries_jina": 0, "queries_cmax": 0}
         for q, rows in pools.items():
-            if fuse.rank_missing_last(rows, q, self.jina, "jina_score", "jina_rank"):
-                raise ValueError(f"query {q}: pair without Jina score")
-            if fuse.rank_missing_last(rows, q, self.cmax, "cmax_score", "cmax_rank"):
-                raise ValueError(f"query {q}: pair without C-max score")
+            for source, lookup, score_key, rank_key in (("jina", self.jina, "jina_score", "jina_rank"), ("cmax", self.cmax, "cmax_score", "cmax_rank")):
+                n = fuse.rank_missing_last(rows, q, lookup, score_key, rank_key)
+                if n and not allow_missing:
+                    raise ValueError(f"query {q}: pair without {'Jina' if source == 'jina' else 'C-max'} score")
+                self.missing[source] += n
+                self.missing[f"queries_{source}"] += bool(n)
         self.pools = pools
         inputs = _inputs()
         self.base_k = {int(r["id"]): len(r["relevant_docs"]) for r in _load_submission(inputs["baseline"])}
@@ -105,8 +110,9 @@ class Frame:
         self.qids = sorted(pools)
         pairs = [(q, r) for q in self.qids for r in self.order[q]]
         self.p4b13 = np.array([float(r["judge_score"]) for _, r in pairs])
-        self.jina13 = np.array([float(r["jina_score"]) for _, r in pairs])
-        self.sorted_jina, self.sorted_p4b = np.sort(self.jina13), np.sort(self.p4b13)
+        self.jina13 = np.array([float(r["jina_score"]) if r["jina_score"] is not None else np.nan for _, r in pairs])
+        scored = ~np.isnan(self.jina13)
+        self.sorted_jina, self.sorted_p4b = np.sort(self.jina13[scored]), np.sort(self.p4b13[scored])
 
     def jina_prime(self, jina: np.ndarray) -> np.ndarray:
         """Jina score -> P4B value of the same global quantile (pool13 pairs); monotone."""
@@ -181,7 +187,7 @@ class Calibrated:
         for q in frame.qids:
             rows = frame.order[q]
             p4b = np.array([float(r["judge_score"]) for r in rows])
-            jina = np.array([float(r["jina_score"]) for r in rows])
+            jina = np.array([float(r["jina_score"]) if r["jina_score"] is not None else np.nan for r in rows])
             fused = frame.fused(variant, p4b, jina)
             p = sigmoid(a * logit(fused) + b)
             by_cos = p[np.argsort([int(r["cosine_rank"]) for r in rows], kind="stable")]

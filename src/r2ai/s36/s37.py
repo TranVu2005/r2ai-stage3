@@ -52,12 +52,18 @@ def default_inputs() -> dict[str, Any]:
 
 # ---------------------------------------------------------------------------------------------------------- union
 
-def merge_union(union: dict[int, list[dict[str, Any]]], pairs: pd.DataFrame, scores_4b: dict[int, float]) -> dict[int, list[dict[str, Any]]]:
+def merge_union(union: dict[int, list[dict[str, Any]]], pairs: pd.DataFrame, scores_4b: dict[int, float],
+                min_coverage: float = 1.0) -> dict[int, list[dict[str, Any]]]:
     """The scored union of S36 plus the S37 pairs (4B score from ``scores_4b`` by ``pair_id``), cosine order, ``cosine_rank`` renumbered.
-    A new pair whose doc is already in the query's union is dropped."""
-    unscored = pairs[~pairs.pair_id.astype(int).isin(scores_4b)]
+    A new pair whose doc is already in the query's union is dropped. Pairs without a 4B score are dropped (they cannot be judged) when
+    at least ``min_coverage`` of the pairs are scored, else the call refuses."""
+    scored = pairs.pair_id.astype(int).isin(scores_4b)
+    unscored = pairs[~scored]
     if len(unscored):
-        raise ValueError(f"{len(unscored)} S37 pairs have no 4B score, e.g. {unscored.pair_id.head(3).tolist()}")
+        if scored.mean() < min_coverage:
+            raise ValueError(f"{len(unscored)} S37 pairs have no 4B score ({scored.mean():.4f} covered < {min_coverage}), "
+                             f"e.g. {unscored.pair_id.head(3).tolist()}")
+        pairs = pairs[scored]
     new: dict[int, list[dict[str, Any]]] = {}
     for q, d, pid, cos in zip(pairs.query_id.astype(int), pairs.doc_id.astype(int), pairs.pair_id.astype(int), pairs.cosine_score.astype(float)):
         new.setdefault(q, []).append({"pair_id": pid, "doc_id": d, "cosine_score": cos, "judge_score": float(scores_4b[pid]),
@@ -133,41 +139,54 @@ def load_scores(files: Sequence[str | Path], key: str, value: str) -> dict[int, 
 
 def apply(cfg: dict[str, Any]) -> dict[str, Any]:
     spec = {**default_inputs(), **{k: v for k, v in cfg.items() if v is not None}}
+    last = spec.get("missing", "strict") == "last"          # "last": a pair without a Jina / C-max score takes the last rank of its pool
+    min_4b = float(spec.get("min_4b_coverage", 1.0))
+    no_jina = last and not Path(spec["jina"]).exists()       # S37 rescoring not there yet: the S35 + S36 scores, new docs rank last
     name = spec.get("name", DEFAULT_NAME)
     out = paths.resolve_path(spec["out"]) if spec.get("out") else fuse.run_root() / "s37"
     paths.assert_writable(out)
     out.mkdir(parents=True, exist_ok=True)
     t_c = float(spec.get("t_c", FUSE4_FREE_T_C))
     rule = {"rule": "threshold", **spec.get("carriers", {})}
-    inputs = {"pairs_new": [spec["pairs_new"]], "scores_4b": list(spec["scores_4b"]), "cmax": list(spec["cmax"]), "jina": [spec["jina"]]}
+    inputs = {"pairs_new": [spec["pairs_new"]], "scores_4b": list(spec["scores_4b"]), "cmax": list(spec["cmax"]),
+              "jina": [] if no_jina else [spec["jina"]]}
     for key, files in inputs.items():
-        if not files or not all(Path(f).exists() for f in files):
+        if (not files and not (key == "jina" and no_jina)) or not all(Path(f).exists() for f in files):
             raise FileNotFoundError(f"{key}: {files} (artifact not there yet)")
     pairs = pd.read_parquet(spec["pairs_new"], columns=["pair_id", "query_id", "doc_id", "cosine_score"])
     _, union, _, _, _, _ = fuse.load_frames()
-    union = merge_union(union, pairs, load_scores(spec["scores_4b"], "pair_id", "score"))
+    scores_4b = load_scores(spec["scores_4b"], "pair_id", "score")
+    coverage_4b = float(pairs.pair_id.astype(int).isin(scores_4b).mean())
+    union = merge_union(union, pairs, scores_4b, min_4b)
+    pairs = pairs[pairs.pair_id.astype(int).isin(scores_4b)]
     pools, _, pool_report = s31_build.free_adaptive(union)
     # sources: the S36 lookups; Jina rescored per query by S37, C-max pointwise so the S37 pairs are simply added
     jina_base, jina_files = fuse.load_jina(fuse.run_root() / "extra" / "jina-scores.parquet")
-    s37_jina = pd.read_parquet(spec["jina"], columns=["query_id", "doc_id", "score"])
-    jina = assemble_jina(jina_base, dict(zip(zip(s37_jina.query_id.astype(int), s37_jina.doc_id.astype(int)), s37_jina.score.astype(float))))
+    if no_jina:
+        s37_jina, jina = pd.DataFrame({"query_id": []}), dict(jina_base)
+    else:
+        s37_jina = pd.read_parquet(spec["jina"], columns=["query_id", "doc_id", "score"])
+        jina = assemble_jina(jina_base, dict(zip(zip(s37_jina.query_id.astype(int), s37_jina.doc_id.astype(int)), s37_jina.score.astype(float))))
     cmax, cmax_files = fuse.load_cmax(fuse.run_root() / "extra" / "cmax-scores.parquet")
     by_pair = dict(zip(pairs.pair_id.astype(int), zip(pairs.query_id.astype(int), pairs.doc_id.astype(int))))
     for pid, value in load_scores(spec["cmax"], "pair_id", "cmax").items():
-        cmax[by_pair[pid]] = value
+        if pid in by_pair:
+            cmax[by_pair[pid]] = value
     missing = {}
     for source, lookup in (("jina", jina), ("cmax", cmax)):
         gap = missing_pairs(pools, lookup)
         if len(gap):
             target = out / f"missing-{name}-{source}.parquet"
             gap.to_parquet(target, index=False)
-            missing[source] = {"pairs": int(len(gap)), "queries": int(gap.query_id.nunique()), "path": str(target)}
-    if missing:
+            new_docs = set(pairs.doc_id.astype(int))
+            missing[source] = {"pairs": int(len(gap)), "queries": int(gap.query_id.nunique()), "path": str(target),
+                               "pairs_of_new_docs": int(gap.doc_id.isin(new_docs).sum())}
+    if missing and not last:
         raise MissingScores(f"pool pairs without a score: {json.dumps(missing)}")
     fitted = json.loads((cal.cal_root() / "cal.json").read_text(encoding="utf-8"))["variants"]["p4b"]
     a, b = fitted["fit"]["a"], fitted["fit"]["b"]
     s_free = float(json.loads((cal.cal_root() / "ef2-free.json").read_text(encoding="utf-8"))["s_free"])
-    frame = cal.Frame(fuse.FOUR_KEYS, "free", data={"pools": pools, "union": union, "jina": jina, "cmax": cmax})
+    frame = cal.Frame(fuse.FOUR_KEYS, "free", data={"pools": pools, "union": union, "jina": jina, "cmax": cmax}, allow_missing=last)
     calibrated = cal.Calibrated(frame, "p4b", a, b, s_free, use_tail=True, g_depth=cal.FREE_G_DEPTH)
     keep = cal.ef2_keep(calibrated)
     chosen = cal.chosen_rows(frame, keep)
@@ -193,7 +212,8 @@ def apply(cfg: dict[str, Any]) -> dict[str, Any]:
     pins = {key: {str(f): _sha256(Path(f)) for f in files} for key, files in inputs.items()}
     report = {"name": name, "inputs": pins, "s36_sources": {"jina": jina_files, "cmax": cmax_files}, "global": {"a": a, "b": b, "s_free": s_free, "t_c": t_c, "p_free": s31_build.P_FREE, "t_free": s31_build.T_FREE},
               "pool": pool_report, "new_pairs": int(len(pairs)), "queries_with_new_pairs": int(pairs.query_id.nunique()),
-              "queries_jina_rescored": int(s37_jina.query_id.nunique()),
+              "queries_jina_rescored": int(s37_jina.query_id.nunique()), "coverage_4b": coverage_4b,
+              "missing_policy": "last" if last else "strict", "missing_scores": missing, "pool_pairs": int(sum(len(v) for v in pools.values())),
               "docs_per_query": cal.keep_stats(keep), "predicted": calibrated.expected(keep), "carriers": {**carrier_info, **carrier_rules.describe(carriers)},
               "vs_EF2-free_docsel": diff,
               "outputs": {p.name: _sha256(p) for p in sorted(out.glob(f"*{name}*")) if p.is_file() and not p.name.endswith(".apply.json")}}
@@ -211,14 +231,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--pairs-new", default=None)
     parser.add_argument("--scores-4b", nargs="*", default=None)
     parser.add_argument("--cmax", nargs="*", default=None)
+    parser.add_argument("--missing", choices=("strict", "last"), default=None, help="pair without a Jina / C-max score: refuse (default) or rank last")
+    parser.add_argument("--min-4b-coverage", type=float, default=None, help="share of S37 pairs that must have a 4B score (default 1.0)")
     args = parser.parse_args(argv)
     if args.command == "jina-missing":
         print(json.dumps(jina_missing(), indent=2, ensure_ascii=False))
         return 0
     cfg = json.loads(args.config.read_text(encoding="utf-8")) if args.config else {}
     for key, value in (("name", args.name), ("out", str(args.out) if args.out else None), ("jina", args.jina),
-                       ("pairs_new", args.pairs_new), ("scores_4b", args.scores_4b), ("cmax", args.cmax)):
-        if value:
+                       ("pairs_new", args.pairs_new), ("scores_4b", args.scores_4b), ("cmax", args.cmax),
+                       ("missing", args.missing), ("min_4b_coverage", args.min_4b_coverage)):
+        if value is not None and value != "":
             cfg[key] = value
     print(json.dumps(apply(cfg), indent=2, ensure_ascii=False, default=str))
     return 0

@@ -82,3 +82,25 @@ def test_cmax_round_trip_chunk_rows_fallback_and_reduce(small):
     assert cm['pair_id'].to_list() == [1000000, 1000001, 1000002] and cm['n_chunks'].to_list() == [2, 1, 1]
     assert cm['cmax'].to_list() == pytest.approx([0.9, 0.4, 0.6]) and cm['fallback'].to_list() == [False, False, True]
     assert json.loads((pool / 'manifest.json').read_text('utf-8'))['rows'] == 4
+
+
+def test_kagglepack_and_import4b_validate_scores(small, tmp_path):
+    E.export_kaggle4b('t', ['b0001'])
+    pack = E.kaggle_package(['t'], 'someone')
+    root = small / 'kaggle-4b' / 'kaggle-dataset'
+    assert pack['dataset_id'] == 'someone/r2ai-s37-4b-pairs' and (root / 'judge_score.py').exists() and (root / 'dataset-metadata.json').exists()
+    assert (root / 't' / 'extra_pairs.parquet').exists() and (root / 't' / 'shards' / E.SHARD_NAME).exists()
+    ex = pl.read_parquet(small / 'kaggle-4b' / 't' / 'extra_pairs.parquet')
+    scores = pl.DataFrame({'pair_id': ex['pair_id'], 'query_id': ex['query_id'], 'doc_id': ex['doc_id'], 'score': [0.7, 0.1], 'logit_diff': [1.0, -2.0]})
+    sp = tmp_path / 'scores-extra.parquet'
+    scores.write_parquet(sp)
+    rp = tmp_path / 'collect-extra-report.json'
+    rp.write_text(json.dumps({'model': 'qwen3-reranker-4b', 'revisions': [E.REV4B], 'scores_sha256': E.sha256_file(sp),
+                              'scoring_gpu_seconds_total_all_parts': 12.5}), encoding='utf-8')
+    res = E.import4b('t', sp, rp)
+    assert res['pairs'] == 2 and (small / 'kaggle-4b' / 't' / 'gpu' / 'qwen3-reranker-4b' / 'scores-extra.parquet').exists()
+    assert json.loads((small / 'kaggle-4b' / 't' / 'manifest.json').read_text('utf-8'))['scores_sha256'] == res['scores_sha256']
+    scores.head(1).write_parquet(sp)                                                    # a missing pair must be refused
+    rp.write_text(json.dumps({'model': 'qwen3-reranker-4b', 'revisions': [E.REV4B], 'scores_sha256': E.sha256_file(sp)}), encoding='utf-8')
+    with pytest.raises(SystemExit):
+        E.import4b('t', sp, rp)

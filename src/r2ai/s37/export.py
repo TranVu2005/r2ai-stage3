@@ -3,6 +3,8 @@
     python -m r2ai.s37.export kaggle4b --tag s37-b001-003      # Qwen3-Reranker-4B subset for Kaggle (S31 pool-extra layout)
     python -m r2ai.s37.export cmax                              # Qwen3-Reranker-0.6B chunk rows for C-max (S32 layout)
     python -m r2ai.s37.export reduce                            # C-max per pair from the collected chunk scores
+    python -m r2ai.s37.export kagglepack --user <kaggle-user>  # one Kaggle dataset folder holding every kaggle-4b subset + judge_score.py
+    python -m r2ai.s37.export import4b --tag T --scores scores-extra.parquet --report collect-extra-report.json   # validate + store Kaggle 4B scores
 
 Both exports read out/runs/s37/pairs_new.parquet (pair_id registry, >= 1,000,000) and the segments' docs/chunks.
 Query text, prompt and truncation follow S29/S31/S32: doc text cut to 512 Qwen3 tokens with truncate_document
@@ -210,6 +212,64 @@ def reduce_cmax(scores_path: Path | None = None, tag: str = 'cmax') -> dict:
     return {'pairs': out.height, 'fallback': int(out['fallback'].sum()), 'cmax_p10_p50_p90': [float(out['cmax'].quantile(x)) for x in (0.1, 0.5, 0.9)]}
 
 
+def kaggle_package(tags: list[str], user: str) -> dict:
+    """out/runs/s37/kaggle-4b/kaggle-dataset/: judge_score.py once, one folder per subset, dataset-metadata.json (private dataset)."""
+    check_judge()
+    base = RUN / 'kaggle-4b'
+    out = base / 'kaggle-dataset'
+    assert_writable(out)
+    out.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(JUDGE_SCORE, out / 'judge_score.py')
+    info = {}
+    for tag in tags:
+        src, dst = base / tag, out / tag
+        (dst / 'shards').mkdir(parents=True, exist_ok=True)
+        for rel in ('extra_pairs.parquet', 'manifest.json', f'shards/{SHARD_NAME}'):
+            shutil.copyfile(src / rel, dst / rel)
+        man = json.loads((dst / 'manifest.json').read_text('utf-8'))
+        assert sha256_file(dst / 'extra_pairs.parquet') == man['extra_pairs_sha256'] and sha256_file(dst / 'shards' / SHARD_NAME) == man['shard_sha256']
+        info[tag] = {'pairs': man['pairs'], 'bytes': sum(f.stat().st_size for f in dst.rglob('*') if f.is_file())}
+    meta = {'title': 'r2ai-s37-4b-pairs', 'id': f'{user}/r2ai-s37-4b-pairs', 'licenses': [{'name': 'CC0-1.0'}]}
+    (out / 'dataset-metadata.json').write_text(json.dumps(meta, indent=2), encoding='utf-8')
+    return {'dir': str(out), 'judge_score_sha256': JUDGE_SHA, 'subsets': info, 'dataset_id': meta['id']}
+
+
+def import4b(tag: str, scores: Path, report: Path) -> dict:
+    """Validate Kaggle 4B scores against the subset's extra_pairs/manifest and store them next to the subset (gpu/qwen3-reranker-4b/)."""
+    d = RUN / 'kaggle-4b' / tag
+    assert_writable(d)
+    man = json.loads((d / 'manifest.json').read_text('utf-8'))
+    rep = json.loads(report.read_text('utf-8'))
+    sc = pl.read_parquet(scores)
+    ex = pl.read_parquet(d / 'extra_pairs.parquet')
+    sha = sha256_file(scores)
+    errors = []
+    if sha != rep.get('scores_sha256'):
+        errors.append(f"scores SHA256 {sha} != report {rep.get('scores_sha256')}")
+    if rep.get('revisions') != [REV4B] or rep.get('model') != 'qwen3-reranker-4b':
+        errors.append(f"report model/revision {rep.get('model')} {rep.get('revisions')} != qwen3-reranker-4b {REV4B}")
+    if sc.height != man['pairs'] or sc['pair_id'].n_unique() != sc.height:
+        errors.append(f"{sc.height} rows / {sc['pair_id'].n_unique()} unique pair_id, expected {man['pairs']}")
+    if set(sc['pair_id'].to_list()) != set(ex['pair_id'].to_list()):
+        errors.append('pair_id set differs from extra_pairs.parquet')
+    else:
+        j = sc.join(ex.select('pair_id', 'query_id', 'doc_id'), on='pair_id', suffix='_ex')
+        if (j['query_id'] != j['query_id_ex']).any() or (j['doc_id'] != j['doc_id_ex']).any():
+            errors.append('query_id/doc_id disagree with extra_pairs.parquet')
+    if sc['score'].null_count() or sc['score'].is_nan().any():
+        errors.append('NaN scores')
+    if errors:
+        raise SystemExit('import4b refused: ' + '; '.join(errors))
+    dest = d / 'gpu' / 'qwen3-reranker-4b'
+    dest.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(scores, dest / 'scores-extra.parquet')
+    shutil.copyfile(report, dest / 'collect-extra-report.json')
+    man.update({'status': 'scored', 'scores_sha256': sha, 'scores_gpu_seconds': rep.get('scoring_gpu_seconds_total_all_parts'),
+                'imported_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())})
+    atomic_json(d / 'manifest.json', man)
+    return {'tag': tag, 'pairs': sc.height, 'scores_sha256': sha, 'score_min_max': [float(sc['score'].min()), float(sc['score'].max())], 'dir': str(dest)}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -219,11 +279,23 @@ def main(argv=None) -> int:
     c = sub.add_parser('cmax')
     c.add_argument('--tag', default='cmax', help='run name; non-default writes out/runs/s37/cmax-<tag>')
     c.add_argument('--batches', nargs='*', help='batch ids (b0004 ...); default every pair in pairs_new')
+    kp = sub.add_parser('kagglepack')
+    kp.add_argument('--user', default='YOUR_KAGGLE_USERNAME')
+    kp.add_argument('--tags', nargs='*', default=['s37-b001-003', 's37-b004-006'])
+    im = sub.add_parser('import4b')
+    im.add_argument('--tag', required=True)
+    im.add_argument('--scores', type=Path, required=True)
+    im.add_argument('--report', type=Path, required=True)
     r = sub.add_parser('reduce')
     r.add_argument('--tag', default='cmax')
     r.add_argument('--scores', type=Path)
     a = ap.parse_args(argv)
-    out = export_kaggle4b(a.tag, a.batches) if a.cmd == 'kaggle4b' else export_cmax(a.tag, a.batches) if a.cmd == 'cmax' else reduce_cmax(a.scores, a.tag)
+    if a.cmd == 'kagglepack':
+        out = kaggle_package(a.tags, a.user)
+    elif a.cmd == 'import4b':
+        out = import4b(a.tag, a.scores, a.report)
+    else:
+        out = export_kaggle4b(a.tag, a.batches) if a.cmd == 'kaggle4b' else export_cmax(a.tag, a.batches) if a.cmd == 'cmax' else reduce_cmax(a.scores, a.tag)
     print(json.dumps(out, ensure_ascii=False, indent=1, default=str))
     return 0
 

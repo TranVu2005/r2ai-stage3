@@ -163,7 +163,7 @@ def export_cmax(tag: str = 'cmax', batches: list[str] | None = None) -> dict:
         'pair_id': pl.Series(range(CHUNK_ROW_BASE, CHUNK_ROW_BASE + n), dtype=pl.Int64), 'query_id': chunk['query_id'], 'doc_id': chunk['doc_id'],
         'cosine_rank': chunk['cosine_rank'].cast(pl.Int32), 'cosine_score': chunk['cosine_score'], 'in_pool13': chunk['in_pool13'],
         'lang': pl.Series(['zh'] * n), 'query_text': [queries[q] for q in chunk['query_id'].to_list()], 'doc_text': texts,
-        'doc_tokens': pl.Series(toks, dtype=pl.Int32), 'chunk_id': chunk['chunk_id'], 'chunk_rank': chunk['rank'],
+        'doc_tokens': pl.Series(toks, dtype=pl.Int32), 'chunk_id': chunk['chunk_id'], 'chunk_rank': chunk['rank'].cast(pl.Int32),
         'chunk_cosine': chunk['chunk_cosine'], 'field': chunk['field'], 'src_pair_id': chunk['pair_id'],
         'prompt_tokens': pl.Series([0] * n, dtype=pl.Int32), 'source': pl.Series(['s37-chunk'] * n)})
     fb = pairs.filter(~pl.col('pair_id').is_in(sorted(picked)))

@@ -75,6 +75,74 @@ def build() -> dict:
     return man
 
 
+FINAL = RUN / 'jina-final'
+S36_EXTRA_POOL = RUNS_DIR / 's36-fuse4' / 'extra' / 'jina' / 'pool.parquet'
+S36_MISSING = RUNS_DIR / 's36-fuse4' / 'cal' / 'jina-missing-pairs.parquet'
+S36_MISSING_SHA = '42f7fc9e0025e5b54154419cd4494df4482c30974382b80e6a3832cdf5e67aa6'
+S36_MISSING_PAIRS, S36_MISSING_QUERIES = 21311, 174
+
+
+def final_pool() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Final Jina pool: S35 pool + every S37 pair (b1-b7) + the S36 missing pairs (Vu's file, SHA pinned).
+    Returns (full pool of every affected query, rows of the queries still to score, first-run scores that stay valid)."""
+    if sha256_file(S36_MISSING) != S36_MISSING_SHA:
+        raise SystemExit('jina-missing-pairs.parquet SHA differs from the one Vu gave')
+    miss = pd.read_parquet(S36_MISSING)
+    if len(miss) != S36_MISSING_PAIRS or miss.query_id.nunique() != S36_MISSING_QUERIES:
+        raise SystemExit('jina-missing-pairs.parquet pair/query counts differ from the ones Vu gave')
+    s36 = pd.read_parquet(S36_EXTRA_POOL).drop_duplicates(['query_id', 'doc_id'])
+    sup = miss[['query_id', 'doc_id']].merge(s36, on=['query_id', 'doc_id'], how='left', validate='one_to_one')
+    if sup.doc_text.isna().any():
+        raise SystemExit(f'{int(sup.doc_text.isna().sum())} S36 missing pairs have no text in the S36 extra Jina pool')
+    old = pd.read_parquet(S35 / 'pool.parquet')
+    new = new_pairs()
+    add_new = pd.DataFrame({
+        'query_id': new.query_id, 'doc_id': new.doc_id, 'cosine_rank': 20_000 + new.cosine_rank, 'cosine_score': new.cosine_score,
+        'p4b': np.nan, 'in_pool211': new.in_top211, 'in_pool13': new.in_pool13, 'lang': new.lang, 'query_text': new.query_text,
+        'doc_text': new.doc_text, 'doc_tokens': new.doc_tokens, 'source': 's37'})
+    add_sup = pd.DataFrame({
+        'query_id': sup.query_id, 'doc_id': sup.doc_id, 'cosine_rank': 30_000 + sup.cosine_rank, 'cosine_score': sup.cosine_score,
+        'p4b': np.nan, 'in_pool211': False, 'in_pool13': False, 'lang': sup.lang, 'query_text': sup.query_text,
+        'doc_text': sup.doc_text, 'doc_tokens': sup.doc_tokens, 'source': 's36'})
+    affected = np.array(sorted(set(new.query_id) | set(sup.query_id)))
+    base = old[old.query_id.isin(affected)].assign(source='s35')
+    keep = pd.concat([base, add_new, add_sup], ignore_index=True).drop_duplicates(['query_id', 'doc_id'], keep='first')
+    pool = keep.sort_values(['query_id', 'cosine_score', 'doc_id'], ascending=[True, False, True], kind='stable').reset_index(drop=True)
+    # queries already scored in the first (partial) run whose pool did not change keep those scores: Jina seeds the block split by
+    # query_id over that query's own rows, so identical ordered rows give identical scores.
+    parts = sorted((OUT / 'parts-b10s0').glob('part-*.parquet'))
+    done = pd.concat([pd.read_parquet(f) for f in parts], ignore_index=True) if parts else pd.DataFrame(columns=['query_id', 'doc_id', 'score'])
+    prev = pd.read_parquet(OUT / 'pool.parquet')[['query_id', 'doc_id']]
+    same = set()
+    prev_docs = prev.groupby('query_id').doc_id.apply(tuple)
+    new_docs = pool.groupby('query_id').doc_id.apply(tuple)
+    done_q = done.groupby('query_id').size()
+    for q, docs in new_docs.items():
+        if q in prev_docs.index and prev_docs[q] == docs and done_q.get(q, 0) == len(docs):
+            same.add(q)
+    todo = pool[~pool.query_id.isin(same)].reset_index(drop=True)
+    return pool, todo, done[done.query_id.isin(same)].reset_index(drop=True)
+
+
+def build_final() -> dict:
+    pool, todo, reused = final_pool()
+    assert_writable(FINAL)
+    FINAL.mkdir(parents=True, exist_ok=True)
+    pool.to_parquet(FINAL / 'pool_full.parquet', index=False)
+    todo.to_parquet(FINAL / 'pool.parquet', index=False)
+    reused.to_parquet(FINAL / 'reused_scores.parquet', index=False)
+    per_q = todo.groupby('query_id').size()
+    man = {'queries_in_final_pool': int(pool.query_id.nunique()), 'pairs_final_pool': len(pool),
+           'pairs_by_source': {k: int(v) for k, v in pool.source.value_counts().items()},
+           'queries_reused_from_first_run': int(reused.query_id.nunique()), 'pairs_reused': len(reused),
+           'queries_to_score': int(todo.query_id.nunique()), 'pairs_to_score': len(todo),
+           'pairs_per_query_to_score': {'mean': float(per_q.mean()), 'min': int(per_q.min()), 'max': int(per_q.max())},
+           'layout': 'b10s0', 's36_missing_sha256': S36_MISSING_SHA, 'first_run_pool_sha256': sha256_file(OUT / 'pool.parquet'),
+           'pool_full_sha256': sha256_file(FINAL / 'pool_full.parquet'), 'pool_sha256': sha256_file(FINAL / 'pool.parquet')}
+    atomic_json(FINAL / 'pool_manifest.json', man)
+    return man
+
+
 def compare(tol: float = 2e-3) -> dict:
     """Control queries: new b10s0 scores vs the S35 b10s0 parts for the same (query, doc) rows."""
     new = pd.concat([pd.read_parquet(f) for f in sorted((CHECK / 'parts-b10s0').glob('part-*.parquet'))], ignore_index=True)
@@ -93,9 +161,10 @@ def compare(tol: float = 2e-3) -> dict:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('command', choices=('build', 'compare'))
+    ap.add_argument('command', choices=('build', 'compare', 'final'))
     a = ap.parse_args(argv)
-    print(json.dumps(build() if a.command == 'build' else compare(), indent=1, ensure_ascii=False, default=str))
+    res = {'build': build, 'compare': compare, 'final': build_final}[a.command]()
+    print(json.dumps(res, indent=1, ensure_ascii=False, default=str))
     return 0
 
 

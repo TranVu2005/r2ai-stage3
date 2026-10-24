@@ -124,13 +124,18 @@ def export_kaggle4b(tag: str, batches: list[str] | None) -> dict:
     return {**man, 'dir': str(out)}
 
 
-def export_cmax() -> dict:
+def cmax_names(tag: str) -> tuple[Path, Path]:
+    """Run dir and per-pair score file of a C-max run; the first run (batches 1-3) keeps the plain `cmax` names."""
+    return (RUN / 'cmax', RUN / 'cmax_scores.parquet') if tag == 'cmax' else (RUN / f'cmax-{tag}', RUN / f'cmax_scores-{tag}.parquet')
+
+
+def export_cmax(tag: str = 'cmax', batches: list[str] | None = None) -> dict:
     """Rows for Qwen3-Reranker-0.6B: the top-3 t256 body/answer chunks of every pair (cmax_top3.parquet), plus the
     doc_text of pairs whose doc has no body/answer chunk (S32 fallback: doc score instead of chunk scores)."""
     check_judge()
-    out = RUN / 'cmax'
+    out = cmax_names(tag)[0]
     assert_writable(out)
-    pairs = load_pairs()
+    pairs = load_pairs(batches)
     queries = dict(pl.read_parquet(QUERY).iter_rows())
     tok = tokenizer()
     t0 = time.time()
@@ -187,12 +192,13 @@ def export_cmax() -> dict:
     return {**man, 'dir': str(pool)}
 
 
-def reduce_cmax(scores_path: Path | None = None) -> dict:
+def reduce_cmax(scores_path: Path | None = None, tag: str = 'cmax') -> dict:
     """C-max per source pair = max P(yes) over its chunk rows; fallback rows carry the doc_text score."""
-    scores_path = scores_path or RUN / 'cmax' / 'gpu' / 'qwen3-reranker-0.6b' / 'scores-all.parquet'
+    run, dest = cmax_names(tag)
+    scores_path = scores_path or run / 'gpu' / 'qwen3-reranker-0.6b' / 'scores-all.parquet'
     sc = pl.read_parquet(scores_path)
     col = next(c for c in ('p_yes', 'score', 'yes_prob') if c in sc.columns)
-    pool = pl.read_parquet(RUN / 'cmax' / 'pool' / 'shards' / SHARD_NAME, columns=['pair_id', 'src_pair_id', 'chunk_rank', 'source'])
+    pool = pl.read_parquet(run / 'pool' / 'shards' / SHARD_NAME, columns=['pair_id', 'src_pair_id', 'chunk_rank', 'source'])
     j = pool.join(sc.select('pair_id', pl.col(col).alias('p')), on='pair_id', how='left')
     if j['p'].null_count():
         raise SystemExit(f"{j['p'].null_count()} rows without score")
@@ -200,7 +206,7 @@ def reduce_cmax(scores_path: Path | None = None) -> dict:
          .agg(pl.col('p').first().alias('cmax'), pl.col('p').head(2).mean().alias('ctop2'), pl.len().alias('n_chunks'),
               (pl.col('source').first() == 's37-fallback-doc').alias('fallback')))
     out = g.rename({'src_pair_id': 'pair_id'}).sort('pair_id')
-    atomic_parquet(out, RUN / 'cmax_scores.parquet')
+    atomic_parquet(out, dest)
     return {'pairs': out.height, 'fallback': int(out['fallback'].sum()), 'cmax_p10_p50_p90': [float(out['cmax'].quantile(x)) for x in (0.1, 0.5, 0.9)]}
 
 
@@ -210,11 +216,14 @@ def main(argv=None) -> int:
     k = sub.add_parser('kaggle4b')
     k.add_argument('--tag', required=True)
     k.add_argument('--batches', nargs='*', help='batch ids (b0001 ...); default every pair in pairs_new')
-    sub.add_parser('cmax')
+    c = sub.add_parser('cmax')
+    c.add_argument('--tag', default='cmax', help='run name; non-default writes out/runs/s37/cmax-<tag>')
+    c.add_argument('--batches', nargs='*', help='batch ids (b0004 ...); default every pair in pairs_new')
     r = sub.add_parser('reduce')
+    r.add_argument('--tag', default='cmax')
     r.add_argument('--scores', type=Path)
     a = ap.parse_args(argv)
-    out = export_kaggle4b(a.tag, a.batches) if a.cmd == 'kaggle4b' else export_cmax() if a.cmd == 'cmax' else reduce_cmax(a.scores)
+    out = export_kaggle4b(a.tag, a.batches) if a.cmd == 'kaggle4b' else export_cmax(a.tag, a.batches) if a.cmd == 'cmax' else reduce_cmax(a.scores, a.tag)
     print(json.dumps(out, ensure_ascii=False, indent=1, default=str))
     return 0
 

@@ -42,8 +42,10 @@
 
 Steps (``run`` = ``prepare`` + ``write``): ``prepare`` writes ``<out>/<name>.cache.parquet`` (chunks per carrier,
 body tokens) and ``<name>.prepare.json``; ``write --threshold T`` writes ``<name>[-t<T>].zip``, runs the validator
-and ``<name>[-t<T>].compose.json``. Validator: ``scripts/s26/validate_pa3.py`` with the S27 Pharmacity handoff,
-``--max-chunks-per-doc 2`` for full+w768.
+and ``<name>[-t<T>].compose.json``. Validator: ``scripts/s26/validate_pa3.py`` with the S27 Pharmacity handoff and, for a bundle
+holding S37 registry docs, their 120ask segments (``<label>.validator-extra/``, ``registry.validator_extra``) as extra verbatim sources,
+``--max-chunks-per-doc 2`` for full+w768. ``validate --name N [--threshold T]`` re-runs it on an existing ZIP and records the result in
+``<label>.compose.json``.
 """
 from __future__ import annotations
 
@@ -635,6 +637,43 @@ def without(frame: pd.DataFrame, dropped: set[tuple[int, int]]) -> pd.DataFrame:
     return frame[~keys.isin(list(dropped))]
 
 
+def run_validator(out: Path, label: str, rule: str, target: Path, doc_ids) -> dict[str, Any]:
+    """S26 validator on ``target`` (report in ``<label>.validate.json``); the 120ask segments of the registry docs among ``doc_ids`` are extra sources."""
+    cmd = [sys.executable, "-u", str(paths.ROOT / VALIDATOR)]
+    if rule == "full+w768":
+        cmd += ["--max-chunks-per-doc", "2"]
+    cmd += [str(target), str(paths.OUT_DIR / PHARM_HANDOFF)]
+    extra = reg.validator_extra(out / f"{label}.validator-extra", reg.registry_index(), doc_ids)
+    if extra is not None:
+        cmd.append(str(extra))
+    res_v = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+    (out / f"{label}.validate.json").write_text(res_v.stdout, encoding="utf-8")
+    try:
+        v = json.loads(res_v.stdout)
+        return {"ok": v["ok"], "errors": {k: n for k, n in v["errors"].items() if n}, "chunk_check": v["chunk_check"],
+                "extra_sources": sorted(p.parent.parent.name for p in extra.glob("lots/*/chunks/docs.parquet")) if extra else []}
+    except (ValueError, KeyError):
+        return {"ok": False, "stderr_tail": res_v.stderr[-2000:]}
+
+
+def validate(out: Path, name: str, threshold: int | None = None, drop: int = 0) -> dict[str, Any]:
+    """Re-run the validator on the ZIP already written for ``name`` (same label rule as ``write``) and record it in its compose.json."""
+    prep = json.loads((out / f"{name}.prepare.json").read_text(encoding="utf-8"))
+    rule = prep["rule"]
+    if rule == "full+w768":
+        threshold = threshold if threshold is not None else FULL_MIN_T
+    label = label_of(name, drop, threshold if rule == "full+w768" else None)
+    target, entry_path = out / f"{label}.zip", out / f"{label}.compose.json"
+    entry = json.loads(entry_path.read_text(encoding="utf-8"))
+    if entry.get("zip_sha256") != _sha256(target):
+        raise ValueError(f"{target.name} differs from the ZIP its compose.json describes")
+    docsel = prep.get("docsel")
+    ids = set(pd.read_parquet(docsel, columns=["doc_id"]).doc_id.astype(int)) if docsel and Path(docsel).exists() else set(reg.registry_index())
+    entry["validator"] = run_validator(out, label, rule, target, ids)
+    _atomic_json(entry_path, entry)
+    return entry["validator"]
+
+
 def write(out: Path, name: str, threshold: int | None, validate: bool = True, reserve: int = RESERVE, drop: int = 0) -> dict[str, Any]:
     started = time.monotonic()
     prep = json.loads((out / f"{name}.prepare.json").read_text(encoding="utf-8"))
@@ -671,18 +710,7 @@ def write(out: Path, name: str, threshold: int | None, validate: bool = True, re
              "carriers_changed": sum(any(t is not None for t in v) for v in chosen.values()),
              "docs_equal_base": all(a["relevant_docs"] == b["relevant_docs"] for a, b in zip(rows, new_rows))}
     if validate:
-        cmd = [sys.executable, "-u", str(paths.ROOT / VALIDATOR)]
-        if rule == "full+w768":
-            cmd += ["--max-chunks-per-doc", "2"]
-        cmd += [str(target), str(paths.OUT_DIR / PHARM_HANDOFF)]
-        res_v = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
-        (out / f"{label}.validate.json").write_text(res_v.stdout, encoding="utf-8")
-        try:
-            v = json.loads(res_v.stdout)
-            entry["validator"] = {"ok": v["ok"], "errors": {k: n for k, n in v["errors"].items() if n},
-                                  "chunk_check": v["chunk_check"]}
-        except (ValueError, KeyError):
-            entry["validator"] = {"ok": False, "stderr_tail": res_v.stderr[-2000:]}
+        entry["validator"] = run_validator(out, label, rule, target, {int(d) for r in new_rows for d in r["relevant_docs"]})
     entry["seconds"] = round(time.monotonic() - started, 1)
     _atomic_json(out / f"{label}.compose.json", entry)
     return entry
@@ -843,7 +871,7 @@ def run_full(out: Path, name: str, candidates: list[int], rounds: int, reserve: 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["prepare", "write", "run", "estimate"])
+    parser.add_argument("command", choices=["prepare", "write", "run", "estimate", "validate"])
     parser.add_argument("--name", required=True)
     parser.add_argument("--out", type=Path, default=None, help="default RUNS_DIR/s38-chunk-metric-v2/compose")
     parser.add_argument("--base-zip", type=Path)
@@ -875,6 +903,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(rep, ensure_ascii=False, indent=1))
     if args.command == "prepare":
         return 0
+    if args.command == "validate":
+        res = validate(out, args.name, (args.threshold or [None])[0], args.drop)
+        print(json.dumps(res, indent=1))
+        return 0 if res.get("ok") else 1
     prep = json.loads((out / f"{args.name}.prepare.json").read_text(encoding="utf-8"))
     if args.command == "estimate" or (args.command == "run" and prep["rule"] == "full+w768" and not args.threshold):
         cache = pd.read_parquet(out / f"{args.name}.cache.parquet")

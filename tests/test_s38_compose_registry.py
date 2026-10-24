@@ -224,3 +224,69 @@ def test_lowest_p_carriers_and_without(tmp_path):
     kept = compose.without(frame, {(1, 11)})
     assert len(kept) == 3 and (kept[["query_id", "doc_id"]].values.tolist().count([1, 11]) == 0)           # rank 1 and rank 2 rows both go
     assert compose.label_of("n", 0, 1700) == "n-t1700" and compose.label_of("n", 40, 1700) == "n-d40-t1700" and compose.label_of("n", 40, None) == "n-d40"
+
+
+def _segments(tmp_path):
+    store = tmp_path / "store"
+    for seg, ids in (("segA", [1, 2]), ("segB", [3])):
+        (store / seg).mkdir(parents=True)
+        pd.DataFrame({"doc_id": ids, "lang": "vi", "doc_text": [f"text{i}" for i in ids]}).to_parquet(store / seg / "docs.parquet")
+    return store, {1: "segA", 2: "segA", 3: "segB"}
+
+
+def test_validator_extra_holds_the_registry_docs_in_the_lots_layout(tmp_path):
+    store, index = _segments(tmp_path)
+    target = tmp_path / "extra"
+    assert registry.validator_extra(target, index, [2, 9], store) == target
+    got = pd.read_parquet(target / "lots" / "segA" / "chunks" / "docs.parquet")
+    assert got.doc_id.tolist() == [2] and got.doc_text.tolist() == ["text2"] and list(got.columns) == ["doc_id", "doc_text"]
+    assert not (target / "lots" / "segB").exists()
+    registry.validator_extra(target, index, [3], store)                              # rewritten, not appended
+    assert not (target / "lots" / "segA").exists() and (target / "lots" / "segB" / "chunks" / "docs.parquet").exists()
+    assert registry.validator_extra(tmp_path / "none", index, [9], store) is None and not (tmp_path / "none").exists()
+
+
+def test_run_validator_passes_the_pharmacity_handoff_and_the_120ask_segments(tmp_path, monkeypatch):
+    store, index = _segments(tmp_path)
+    seen = {}
+
+    class Done:
+        stdout = json.dumps({"ok": True, "errors": {"x": 0}, "chunk_check": {"p1_pair": 1}})
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        seen["cmd"] = cmd
+        return Done()
+
+    monkeypatch.setattr(compose.subprocess, "run", fake_run)
+    monkeypatch.setattr(compose.reg, "registry_index", lambda: index)
+    monkeypatch.setattr(compose.reg, "STORE", store)
+    zip_path = tmp_path / "b.zip"
+    res = compose.run_validator(tmp_path, "b", "full+w768", zip_path, {2, 3, 77})
+    assert res == {"ok": True, "errors": {}, "chunk_check": {"p1_pair": 1}, "extra_sources": ["segA", "segB"]}
+    cmd = seen["cmd"]
+    assert cmd[cmd.index("--max-chunks-per-doc") + 1] == "2"
+    assert cmd[-1] == str(tmp_path / "b.validator-extra")
+    assert cmd[-2].replace("\\", "/").endswith("cc-s27-pharmacity")
+    assert (tmp_path / "b.validate.json").exists()
+    seen.clear()
+    compose.run_validator(tmp_path, "c", "full+w768", zip_path, {77})               # no registry doc: no extra dir
+    assert seen["cmd"][-1].replace("\\", "/").endswith("cc-s27-pharmacity")
+
+
+def test_validate_rechecks_an_existing_zip_and_refuses_a_changed_one(tmp_path, monkeypatch):
+    zip_path = tmp_path / "n-t1536.zip"
+    zip_path.write_bytes(b"zip")
+    (tmp_path / "n.prepare.json").write_text(json.dumps({"rule": "full+w768", "docsel": str(tmp_path / "none.parquet")}), encoding="utf-8")
+    (tmp_path / "n-t1536.compose.json").write_text(json.dumps({"zip_sha256": compose._sha256(zip_path), "validator": {"ok": False}}), encoding="utf-8")
+    monkeypatch.setattr(compose.reg, "registry_index", lambda: {5: "segA"})
+    monkeypatch.setattr(compose, "run_validator", lambda out, label, rule, target, ids: {"ok": True, "ids": sorted(ids), "label": label})
+    assert compose.validate(tmp_path, "n", 1536) == {"ok": True, "ids": [5], "label": "n-t1536"}
+    assert json.loads((tmp_path / "n-t1536.compose.json").read_text(encoding="utf-8"))["validator"]["ok"] is True
+    zip_path.write_bytes(b"other")
+    try:
+        compose.validate(tmp_path, "n", 1536)
+    except ValueError as err:
+        assert "differs" in str(err)
+    else:
+        raise AssertionError("no error")

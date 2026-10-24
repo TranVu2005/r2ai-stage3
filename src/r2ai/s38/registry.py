@@ -13,6 +13,7 @@ A registry doc never reads the canonical docs (ids are disjoint); nothing here w
 """
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -133,6 +134,22 @@ def body_chunk_spans(index: dict[int, str], ids, store: Path | None = None) -> d
     """doc -> answer/body t256 rows (``field, char_start, char_end``) for ``window._body_span``."""
     chunks = load_t256(index, ids, store)
     return {int(d): g for d, g in chunks.groupby("doc_id")}
+
+
+def validator_extra(target: Path, index: dict[int, str], ids, store: Path | None = None) -> Path | None:
+    """Extra verbatim source of ``scripts/s26/validate_pa3.py`` for the registry docs among ``ids``: ``target/lots/<segment>/chunks/docs.parquet``
+    (``doc_id, doc_text``, the layout of the S15 lots). None when no id is a registry doc. Rewritten on every call."""
+    store = store or STORE
+    groups = _by_segment(index, ids)
+    if not groups:
+        return None
+    paths.assert_writable(target)
+    shutil.rmtree(target / "lots", ignore_errors=True)
+    for seg, docs in groups.items():
+        dest = target / "lots" / seg / "chunks" / "docs.parquet"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        pq.write_table(pq.read_table(store / seg / "docs.parquet", columns=["doc_id", "doc_text"], filters=[("doc_id", "in", docs)]), dest)
+    return target
 
 
 def describe(index: dict[int, str]) -> dict[str, Any]:

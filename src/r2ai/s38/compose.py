@@ -18,6 +18,12 @@
   chunk source as in the S29 builder (P1 chunk of the query, else first P1 chunk of the doc, else the body span of a
   doc with canonical chunks or of a Pharmacity lot doc), not empty and not itself thin. The new chunk sits at its
   rank among the query's chunks and then goes through the rule like any carrier. Kept in ``<name>.swap.json``.
+* carriers override (Vu, 24/10, ``--carriers carriers.parquet`` with ``query_id, doc_id``): the chunk carriers become exactly that
+  set (it must lie inside the docsel docs). Carriers of the base bundle that are not in the set lose their chunk, new carriers
+  get the whole-body chunk of the S29 builder (``s29_chunk_texts``; a pair without a chunk source is skipped and counted).
+  Thin is then computed on the modified carriers and everything is folded into ``<name>.swap.json`` relative to the base
+  bundle, so ``write`` is unchanged. The docsel and its docs stay as they are. The T estimate takes the carrier change into
+  account (``RATE_CARRIER``).
 * best t256 chunk (CH-t256-1 rule): the S32 chunk judge on the scored answer/body chunks of the canonical owner
   (Pharmacity lots: their own chunks), else cosine(S29 query vector, chunk vector); ties: file order.
 * ``full+w768`` picks T itself: the ZIP grows by about ``RATE_FULL`` bytes per second chunk (S38, J3-thrC), so the
@@ -65,6 +71,7 @@ BTC_CEILING = 104_857_600   # BTC upload limit for new files: 100 MiB (docs/PROG
 RESERVE = 2_257_600   # default margin below BTC_CEILING: ZIP limit 102,600,000 B (the S29 internal ceiling); the only knob
 RATE_FULL = 94.3        # B per 768 window: (102,599,152 - 101,181,680) / 15,026 (CH-full+w768-t1849 on J3-thrC)
 FULL_MIN_T = 1536
+RATE_CARRIER = 580.0    # B per whole-body carrier chunk in the ZIP: (101,717,111 - 641,652) / 174,535 (EF2-free base)
 PHARM_HANDOFF = Path("runs/s27-pharmacity/handoff/cc-s27-pharmacity")
 VALIDATOR = Path("scripts/s26/validate_pa3.py")
 
@@ -209,6 +216,38 @@ def thin_swap(rows: list[dict[str, Any]], docsel: pd.DataFrame) -> dict[str, Any
             "t_c_after": float(min(docsel[docsel.chunk & ~docsel.doc_id.isin(thin_docs)].p4b.min(), min(a["p4b"] for a in added)))}
 
 
+def compose_swaps(first: dict[str, Any], second: dict[str, Any]) -> dict[str, Any]:
+    """One swap relative to the base bundle from ``first`` (applied to the base) and ``second`` (computed on the result of
+    ``first``): a chunk added by ``first`` and removed by ``second`` simply disappears."""
+    added_keys = {(int(a["query_id"]), int(a["doc_id"])) for a in first.get("added", [])}
+    removed2 = {(int(q), int(d)) for q, d in second.get("removed", [])}
+    removed = [[int(q), int(d)] for q, d in first.get("removed", [])]
+    removed += [[int(q), int(d)] for q, d in second.get("removed", []) if (int(q), int(d)) not in added_keys]
+    added = [a for a in first.get("added", []) if (int(a["query_id"]), int(a["doc_id"])) not in removed2] + list(second.get("added", []))
+    return {"removed": removed, "added": added}
+
+
+def carrier_swap(rows: list[dict[str, Any]], docsel: pd.DataFrame, target: pd.DataFrame) -> dict[str, Any]:
+    """Swap that turns the base carriers into the ``target`` (query_id, doc_id) set; docs are untouched."""
+    base = {(int(r["id"]), int(c["doc_id"])) for r in rows for c in r["relevant_chunks"]}
+    want = set(zip(target.query_id.astype(int), target.doc_id.astype(int)))
+    sel = docsel.set_index(["query_id", "doc_id"])
+    outside = [k for k in want if k not in sel.index]
+    if outside:
+        raise ValueError(f"{len(outside)} target carriers are not docs of the docsel, e.g. {outside[:3]}")
+    todo = sorted(want - base)
+    texts = s29_chunk_texts(pd.DataFrame(todo, columns=["query_id", "doc_id"])) if todo else {}
+    added, skipped = [], []
+    for q, d in todo:
+        src, body = texts.get((q, d), (None, ""))
+        if src is None or not body.strip():
+            skipped.append([q, d])
+            continue
+        added.append({"query_id": q, "doc_id": d, "rank": int(sel.loc[(q, d), "rank"]), "p4b": float(sel.loc[(q, d), "p4b"]),
+                      "source": src, "body": body})
+    return {"removed": [[q, d] for q, d in sorted(base - want)], "added": added, "skipped_no_source": skipped}
+
+
 def doc_texts(doc_ids: set[int]) -> tuple[dict[int, str], dict[int, str], dict[int, int], set[int], dict[int, int]]:
     """(text by carrier doc, lang, owner, Pharmacity ids, text key): own canonical row, else the alias owner's
     (validator S26 rule); Pharmacity lot docs take their lot doc_text."""
@@ -319,13 +358,15 @@ def best_t256(carriers: pd.DataFrame, text: dict[int, str], owner: dict[int, int
 # ------------------------------------------------------------------------------------------ prepare
 
 def prepare(out: Path, name: str, base_zip: Path, docsel_path: Path | None, rule: str, base64: bool,
-            skip_check: bool, thin: bool = True) -> dict[str, Any]:
+            skip_check: bool, thin: bool = True, carriers: Path | None = None) -> dict[str, Any]:
     started = time.monotonic()
     rows = read_bundle(base_zip)
     report: dict[str, Any] = {"name": name, "rule": rule, "base_zip": str(base_zip), "base_zip_bytes": base_zip.stat().st_size,
                               "base_zip_sha256": _sha256(base_zip), "docsel": str(docsel_path) if docsel_path else None,
                               "base64_baophutho": base64 if rule.startswith("clean") else None, "thin": thin}
     swap: dict[str, Any] = {"removed": [], "added": []}
+    if carriers is not None and docsel_path is None:
+        raise ValueError("--carriers needs the docsel")
     if docsel_path is not None:
         report["docsel_sha256"] = _sha256(docsel_path)
         docsel = pd.read_parquet(docsel_path, columns=["query_id", "doc_id", "rank", "chunk", "p4b"])
@@ -333,8 +374,27 @@ def prepare(out: Path, name: str, base_zip: Path, docsel_path: Path | None, rule
         report["docsel_check"] = check
         if not skip_check and (check["queries_docs_differ"] or check["carriers_only_base"] or check["carriers_only_docsel"]):
             raise ValueError(f"base bundle differs from the docsel: {check}")
-        if thin:
-            swap = thin_swap(rows, docsel)
+        first: dict[str, Any] = {"removed": [], "added": []}
+        carrier_info = None
+        if carriers is not None:
+            target = pd.read_parquet(carriers, columns=["query_id", "doc_id"])
+            first = carrier_swap(rows, docsel, target)
+            report["carriers"] = str(carriers)
+            report["carriers_sha256"] = _sha256(carriers)
+            carrier_info = {"target": len(target), "removed": len(first["removed"]), "added": len(first["added"]),
+                            "skipped_no_source": len(first["skipped_no_source"])}
+            rows = apply_swap(rows, first)
+            kept = set(zip(target.query_id.astype(int), target.doc_id.astype(int))) - {tuple(x) for x in first["skipped_no_source"]}
+            docsel = docsel.assign(chunk=[(int(q), int(d)) in kept for q, d in zip(docsel.query_id, docsel.doc_id)])
+        second = thin_swap(rows, docsel) if thin else {"removed": [], "added": []}
+        if carriers is None:
+            swap = second
+        else:
+            swap = {**second, **compose_swaps(first, second), "thin_removed": second["removed"], "thin_added": second["added"],
+                    "carriers": carrier_info}
+            rows = read_bundle(base_zip)       # the swap is relative to the base bundle
+            report["base_zip_bytes_effective"] = int(report["base_zip_bytes"] + RATE_CARRIER * (len(swap["added"]) - len(swap["removed"])))
+            report["carrier_swap"] = {**carrier_info, "removed_total": len(swap["removed"]), "added_total": len(swap["added"])}
     elif thin:
         raise ValueError("thin needs the docsel (or pass --no-thin)")
     _atomic_json(out / f"{name}.swap.json", swap)
@@ -534,12 +594,13 @@ def run_full(out: Path, name: str, candidates: list[int], rounds: int, reserve: 
         over = sorted(t for t, e in tried.items() if not e["under_ceiling"])
         if not under:
             hi = max(over)
-            candidates = [hi + 25, hi + 50, hi + 100]
+            candidates = [hi + 25 * 4 ** r, hi + 50 * 4 ** r, hi + 100 * 4 ** r]
             continue
         lo_ok = under[0]
         below = [t for t in over if t < lo_ok]
         if not below:
-            candidates = [max(FULL_MIN_T, lo_ok - 25), max(FULL_MIN_T, lo_ok - 10)] if lo_ok > FULL_MIN_T else []
+            candidates = [max(FULL_MIN_T, lo_ok - 25 * 4 ** r), max(FULL_MIN_T, lo_ok - 10 * 4 ** r)] if lo_ok > FULL_MIN_T else []
+            candidates = [t for t in candidates if t < lo_ok]
             if not candidates:
                 break
             continue
@@ -567,6 +628,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--rule", choices=list(RULES))
     parser.add_argument("--no-base64", action="store_true", help="clean: no base64 cut on baophutho.vn")
     parser.add_argument("--skip-docsel-check", action="store_true")
+    parser.add_argument("--carriers", type=Path, default=None, help="parquet (query_id, doc_id): the chunk carriers (default: those of the base bundle)")
     parser.add_argument("--no-thin", action="store_true", help="keep the thin (base64 / placeholder) carriers")
     parser.add_argument("--threshold", type=int, action="append", default=None, help="full+w768: body tokens above which the window is added")
     parser.add_argument("--reserve", type=int, default=RESERVE, help="bytes kept free below the BTC ceiling 104,857,600 (default 2,257,600 -> limit 102,600,000)")
@@ -583,13 +645,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.error("prepare needs --base-zip and --rule (and normally --docsel)")
         rep = prepare(out, args.name, paths.resolve_path(args.base_zip),
                       paths.resolve_path(args.docsel) if args.docsel else None, args.rule, not args.no_base64,
-                      args.skip_docsel_check, not args.no_thin)
+                      args.skip_docsel_check, not args.no_thin, paths.resolve_path(args.carriers) if args.carriers else None)
         print(json.dumps(rep, ensure_ascii=False, indent=1))
     if args.command == "prepare":
         return 0
     prep = json.loads((out / f"{args.name}.prepare.json").read_text(encoding="utf-8"))
     if args.command == "estimate" or (args.command == "run" and prep["rule"] == "full+w768" and not args.threshold):
-        est = estimate_thresholds(pd.read_parquet(out / f"{args.name}.cache.parquet"), prep["base_zip_bytes"], args.reserve)
+        est = estimate_thresholds(pd.read_parquet(out / f"{args.name}.cache.parquet"),
+                                  prep.get("base_zip_bytes_effective", prep["base_zip_bytes"]), args.reserve)
         print(json.dumps(est, indent=1))
         if args.command == "estimate":
             return 0

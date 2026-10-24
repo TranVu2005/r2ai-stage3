@@ -14,7 +14,11 @@ $env:R2AI_OUT_DIR = 'D:/GitHub/r2ai-stage3/out'; $env:R2AI_DATA_DIR = 'D:/GitHub
 $env:PYTORCH_CUDA_ALLOC_CONF = 'expandable_segments:True'   # fewer fragmentation OOMs (a no-op with a warning on Windows builds without support)
 $env:R2AI_LOG_DIR ='D:/GitHub/r2ai-stage3/out/logs'; $env:HF_HOME = 'C:/Users/Admin/.cache/huggingface'; $env:HF_HUB_OFFLINE = '1'
 $log = "$Run\supervisor.log"
-function Note($m) { "$(Get-Date -Format s) supervisor_pid=$PID $m" | Add-Content -Encoding utf8 $log }
+function Note($m) {   # a reader (tail, Get-Content) can hold the file for a moment: retry instead of losing the line
+    for ($i = 0; $i -lt 5; $i++) {
+        try { "$(Get-Date -Format s) supervisor_pid=$PID $m" | Add-Content -Encoding utf8 $log -ErrorAction Stop; return } catch { Start-Sleep -Milliseconds 300 }
+    }
+}
 $parts = "$Run\parts-$Layout"
 $total = (& $Python -c "import pandas as pd,sys; print(pd.read_parquet(sys.argv[1], columns=['query_id']).query_id.nunique())" "$Run\pool.parquet" | Select-Object -Last 1)
 $t0 = Get-Date

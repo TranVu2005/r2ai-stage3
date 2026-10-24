@@ -10,7 +10,11 @@ param(
     [int]$CheckSeconds = 120
 )
 $log = "$Run\watchdog.log"
-function Note($m) { "$(Get-Date -Format s) watchdog_pid=$PID $m" | Add-Content -Encoding utf8 $log }
+function Note($m) {   # retry when a reader holds the log
+    for ($i = 0; $i -lt 5; $i++) {
+        try { "$(Get-Date -Format s) watchdog_pid=$PID $m" | Add-Content -Encoding utf8 $log -ErrorAction Stop; return } catch { Start-Sleep -Milliseconds 300 }
+    }
+}
 function Procs() { @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'run_jina\.ps1' -or ($_.CommandLine -match 'r2ai\.s35\.jina' -and $_.CommandLine -match [regex]::Escape((Split-Path $Run -Leaf))) }) }
 function Parts() { @(Get-ChildItem "$Run\parts-b10s0\*.parquet" -ErrorAction SilentlyContinue).Count }
 function StartRun() {

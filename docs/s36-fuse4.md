@@ -307,3 +307,5 @@ Vu: LB p4b-CRfair175 0,3918 hơn khung free 0,0057, nên dựng khung p4b thuầ
 
 Kết quả docsel: 281.924 doc trong pool (36.160 doc cũ bị đẩy ra ở 958 query; 36.160 cặp mới thiếu Jina), 193.547 doc được chọn (P10/P50/P90 = 60/159/267), trong đó 12.653 doc 120ask (10.471 doc khác nhau, TB 10,54 mỗi query, 784 query có ≥1), Doc F2 dự đoán 0,4191 (mô hình, G_q kiểu thrC).
 
+Compose (25/10, 02:30 đến 03:12): `120A-p4b-v0-full+w768-t1536.zip`, 100.664.783 B (trần 102.600.000), SHA256 `dd8d4d76cfe4bf7cc9664ce9db984705633e0c537d916f9aafc790d821463a22`. T = 1536 (`FULL_MIN_T`, sàn của luật; ZIP còn dư 1,9 MB), 35.220 cửa sổ 768 token, 174.894 carrier sau thin (thin theo nội dung: 17 doc, 20 carrier đổi), 210.114 chunk, 193.547 doc (bằng docsel). Validator S26 (`--max-chunks-per-doc 2`) chạy lại bằng `compose validate` với 7 segment 120ask làm nguồn verbatim: ok, 0 lỗi, `p1_pair` 91.546, `canonical_substring` 118.568. Log: `out/runs/s36-fuse4/validate-120A-p4b-v0.log`. Chưa nộp (Vu nộp). Chưa tính phân bố ngôn ngữ/host của 36.160 doc cũ bị đẩy khỏi pool13.
+

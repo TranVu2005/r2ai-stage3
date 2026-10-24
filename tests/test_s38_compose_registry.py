@@ -1,5 +1,8 @@
 """S38 compose: carriers override, base bundle from a docsel (S37 mode) and the 120ask registry body sources."""
+import json
 from pathlib import Path
+
+import numpy as np
 
 import pandas as pd
 
@@ -119,3 +122,60 @@ def test_registry_chunk_scores_read_every_cmax_run(tmp_path):
         pd.DataFrame({"pair_id": [pair_id, pair_id + 10], "score": [score, 0.1]}).to_parquet(tmp_path / name / registry.SCORES)
     # the doc_text fallback rows have no chunk and are left out
     assert registry.chunk_scores(tmp_path) == {(3, 30, 6): 0.7, (3, 31, 6): 0.4}
+
+
+def test_t_for_count_follows_the_body_token_quantiles():
+    bt = np.array([1600, 1700, 1800, 1900, 2000])
+    assert compose.t_for_count(bt, 2) == 1800 and compose.t_for_count(bt, 5) == compose.FULL_MIN_T and compose.t_for_count(bt, 0) == 2000
+    assert compose.t_for_count(np.array([1540, 1550]), 1) == 1540 and compose.t_for_count(np.array([1500]), 0) == compose.FULL_MIN_T
+
+
+def fake_write(tmp_path, name, limit, zip_of):
+    """A stand-in for the ``write`` subprocess: the ZIP size is a function of T, the ceiling is ``limit``."""
+    class Proc:
+        def __init__(self, cmd, **_):
+            t = int(cmd[cmd.index("--threshold") + 1])
+            z = tmp_path / f"{name}-t{t}.zip"
+            z.write_bytes(b"z")
+            size = zip_of(t)
+            entry = {"zip": str(z), "zip_bytes": size, "zip_sha256": compose._sha256(z), "limit_bytes": limit, "under_ceiling": size < limit,
+                     "second_chunks": 3535 - t, "chunks": 0, "validator": {"ok": True}}
+            (tmp_path / f"{name}-t{t}.compose.json").write_text(json.dumps(entry), encoding="utf-8")
+            self.returncode = 0
+
+        def communicate(self):
+            return b"", b""
+    return Proc
+
+
+def test_run_full_reestimates_from_the_slack_when_every_candidate_is_under(tmp_path, monkeypatch):
+    name, limit = "n", 1_000_000
+    (tmp_path / f"{name}.prepare.json").write_text("{}", encoding="utf-8")
+    bt = np.arange(1536, 3536)                                   # windows at T = #(bt > T) = 3535 - T
+    zip_of = lambda t: 900_000 + int((3535 - t) * compose.RATE_FULL)           # lower T -> more windows -> bigger ZIP
+    monkeypatch.setattr(compose.subprocess, "Popen", fake_write(tmp_path, name, limit, zip_of))
+    res = compose.run_full(tmp_path, name, [3000, 3100], 4, bt=bt)
+    assert res["lowest_t_under_ceiling"] is not None and res["exact_to_one_token"]
+    best = res["lowest_t_under_ceiling"]
+    assert zip_of(best) < limit <= zip_of(best - 1)
+
+
+def test_run_full_reuses_a_fresh_measurement_and_ignores_a_changed_zip(tmp_path, monkeypatch):
+    name = "n"
+    (tmp_path / f"{name}.prepare.json").write_text("{}", encoding="utf-8")
+    calls = []
+    base = fake_write(tmp_path, name, 10, lambda t: 5)
+
+    class Counting(base):
+        def __init__(self, cmd, **kw):
+            calls.append(cmd[cmd.index("--threshold") + 1])
+            super().__init__(cmd, **kw)
+
+    monkeypatch.setattr(compose.subprocess, "Popen", Counting)
+    compose.run_full(tmp_path, name, [1600], 1)
+    assert calls == ["1600"]
+    compose.run_full(tmp_path, name, [1600], 1)                  # second run: reused
+    assert calls == ["1600"]
+    (tmp_path / f"{name}-t1600.zip").write_bytes(b"changed")
+    compose.run_full(tmp_path, name, [1600], 1)                  # the ZIP no longer matches its measurement
+    assert calls == ["1600", "1600"]

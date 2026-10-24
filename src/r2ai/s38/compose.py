@@ -654,26 +654,54 @@ def write(out: Path, name: str, threshold: int | None, validate: bool = True, re
     return entry
 
 
+def second_chunk_tokens(frame: pd.DataFrame) -> np.ndarray:
+    """Ascending body tokens of the carriers that have a window (rank 2): second chunks at T = #(bt > T)."""
+    return np.sort(frame[frame["rank"] == 2].body_tokens.to_numpy())
+
+
+def t_for_count(bt: np.ndarray, count: int) -> int:
+    """Lowest T (>= FULL_MIN_T) that leaves about ``count`` windows."""
+    if count >= len(bt):
+        return FULL_MIN_T
+    return max(int(bt[len(bt) - max(count, 0) - 1]), FULL_MIN_T)
+
+
 def estimate_thresholds(frame: pd.DataFrame, base_zip_bytes: int, reserve: int = RESERVE) -> dict[str, Any]:
     """T so that (number of second chunks) x RATE_FULL fits under ``BTC_CEILING - reserve``, and two neighbours."""
-    bt = np.sort(frame[frame["rank"] == 2].body_tokens.to_numpy())    # ascending; second chunks at T = #(bt > T)
+    bt = second_chunk_tokens(frame)
     budget = BTC_CEILING - reserve - base_zip_bytes
     k = int(max(budget, 0) / RATE_FULL)
-
-    def t_for(count: int) -> int:
-        if count >= len(bt):
-            return FULL_MIN_T
-        return max(int(bt[len(bt) - count - 1]), FULL_MIN_T)
-
     return {"second_chunks_at_min_t": int(len(bt)), "budget_bytes": int(budget), "k_estimate": k,
-            "t_estimate": t_for(k), "candidates": sorted({t_for(int(k * 1.03)), t_for(k), t_for(int(k * 0.97))})}
+            "t_estimate": t_for_count(bt, k),
+            "candidates": sorted({t_for_count(bt, int(k * 1.03)), t_for_count(bt, k), t_for_count(bt, int(k * 0.97))})}
 
 
-def run_full(out: Path, name: str, candidates: list[int], rounds: int, reserve: int = RESERVE) -> dict[str, Any]:
-    """Build candidate thresholds in parallel processes, bisect between over/under, keep the lowest T under."""
+def reusable(out: Path, name: str, t: int) -> dict[str, Any] | None:
+    """The measurement of an earlier ``write`` at T when its ZIP is still there, unchanged, and newer than the prepared cache."""
+    meta, zip_path, prepared = out / f"{name}-t{t}.compose.json", out / f"{name}-t{t}.zip", out / f"{name}.prepare.json"
+    if not (meta.exists() and zip_path.exists() and prepared.exists()) or meta.stat().st_mtime < prepared.stat().st_mtime:
+        return None
+    entry = json.loads(meta.read_text(encoding="utf-8"))
+    return entry if entry.get("zip_sha256") == _sha256(zip_path) and entry.get("validator") else None
+
+
+def run_full(out: Path, name: str, candidates: list[int], rounds: int, reserve: int = RESERVE,
+             bt: np.ndarray | None = None) -> dict[str, Any]:
+    """Build candidate thresholds in parallel processes, bisect between over/under, keep the lowest T under. A candidate already
+    measured by an earlier run on the same prepared cache is reused. ``bt`` (``second_chunk_tokens``) lets a round without any T
+    over the ceiling re-estimate T from the measured slack instead of stepping blindly."""
     tried: dict[int, dict[str, Any]] = {}
     for r in range(rounds):
-        todo = [t for t in candidates if t not in tried]
+        todo = []
+        for t in candidates:
+            if t in tried:
+                continue
+            old = reusable(out, name, t)
+            if old is not None:
+                tried[t] = old
+                _log(f"t={t} reused zip={old['zip_bytes']} under={old['under_ceiling']}")
+            else:
+                todo.append(t)
         _log(f"round {r + 1}: thresholds {todo}")
         procs = [(t, subprocess.Popen([sys.executable, "-m", "r2ai.s38.compose", "write", "--name", name, "--out", str(out),
                                        "--threshold", str(t), "--reserve", str(reserve)], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE))
@@ -694,6 +722,10 @@ def run_full(out: Path, name: str, candidates: list[int], rounds: int, reserve: 
         below = [t for t in over if t < lo_ok]
         if not below:
             candidates = [max(FULL_MIN_T, lo_ok - 25 * 4 ** r), max(FULL_MIN_T, lo_ok - 10 * 4 ** r)] if lo_ok > FULL_MIN_T else []
+            if bt is not None and lo_ok > FULL_MIN_T:
+                e = tried[lo_ok]
+                k = int(e["second_chunks"] + max(e["limit_bytes"] - e["zip_bytes"], 0) / RATE_FULL)   # windows the measured slack still buys
+                candidates = sorted({t_for_count(bt, int(k * 1.02)), t_for_count(bt, k), t_for_count(bt, int(k * 0.98))})
             candidates = [t for t in candidates if t < lo_ok]
             if not candidates:
                 break
@@ -726,7 +758,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--no-thin", action="store_true", help="keep the thin (base64 / placeholder) carriers")
     parser.add_argument("--threshold", type=int, action="append", default=None, help="full+w768: body tokens above which the window is added")
     parser.add_argument("--reserve", type=int, default=RESERVE, help="bytes kept free below the BTC ceiling 104,857,600 (default 2,257,600 -> limit 102,600,000)")
-    parser.add_argument("--rounds", type=int, default=3, help="full+w768 run: parallel build rounds")
+    parser.add_argument("--rounds", type=int, default=4, help="full+w768 run: parallel build rounds")
     parser.add_argument("--no-validate", action="store_true")
     args = parser.parse_args(argv)
     out = paths.resolve_path(args.out or run_root() / "compose")
@@ -750,7 +782,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(est, indent=1))
         if args.command == "estimate":
             return 0
-        res = run_full(out, args.name, est["candidates"], args.rounds, args.reserve)
+        res = run_full(out, args.name, est["candidates"], args.rounds, args.reserve,
+                       second_chunk_tokens(pd.read_parquet(out / f"{args.name}.cache.parquet")))
         res["reserve_bytes"] = args.reserve
         res["estimate"] = est
         _atomic_json(out / f"{args.name}.threshold.json", res)

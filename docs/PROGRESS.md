@@ -1,8 +1,8 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-24 13:25 (UTC+7)
+- Cập nhật: 2026-10-24 13:38 (UTC+7)
 - Model thực hiện: Claude Opus 5.5
-- Commit HEAD đã kiểm trước cập nhật này: `3b91286`, nhánh `feat/s38-chunk-metric-v2` (base `feat/s36-fuse4` `e5567b4`)
+- Commit HEAD đã kiểm trước cập nhật này: `880f88e`, nhánh `feat/s38-chunk-metric-v2` (base `feat/s36-fuse4` `e5567b4`)
 - **S38 (23–24/10): BTC đổi metric chunk (thêm vế LCS/|c| ≥ 0,4).** Scorer dùng v2 mặc định. Theo metric mới (Vu): nguyên body (K4-thr-C) Chunk F2 0,3594 · CH-win768 0,3433 · CH-win384 0,1805 · CH-sec-1 0,0904 → gold chunk dài, nguyên body tốt nhất. Trên J3-thrC, chưa nộp, validator ok: CH-pre1024, CH-cap2048, CH-full+w768-t1849, CH-clean. **Ghép cuối trên EF2-cut-p4b** (`scripts/s38/compose.sh EF2-cut-p4b <rule>`), cache sẵn cho clean / cap2048 / full+w768 / clean+cap2048, có thin theo nội dung (mọi host); **đã ghi ZIP EF2-cut-p4b + full+w768 T=1907 (102.593.008 B, validator 0 lỗi, chưa nộp)**; các quy tắc khác chờ Vu. Chi tiết `docs/s38-chunk-metric-v2.md`.
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp
 - **Best mới đã đo: R1m 0,2673** (Qwen3-Reranker-0,6B + RRF trên phía zh, D16; người dùng cung cấp 15/10). **R1m chưa tích hợp vào repo này**: chờ phía vi (S15, sáng 16/10) rồi tích hợp một lần, kèm pin model Qwen3 (revision `e61197ed…`) và cache điểm. Trong repo, best tái tạo được vẫn là **C1 0,2655**. **C3 (S6-f + zh đợt 3) đã vào `main` local theo S14b: replay JSON `6cf9284d…3436` và ZIP `1c2472d1…1af9` khớp, chưa có điểm LB.** Chi tiết mục 5 (S14b).
@@ -263,6 +263,8 @@ Cả hai: doc/query 136,48, 0 doc thêm do bảo vệ, chunk CC/query 9,34 (h1) 
 **Chưa làm (chờ Vu):** `feat/zh-v2` có thêm 6 commit mới (trích xuất lại, supersede) và `feat/en-pubmed`, `feat/reranker-trial` chưa được merge vào `main`; C3 không cần chúng (nguồn zh được pin theo SHA). Gộp R1m: xem đầu file.
 
 ## 6. Lệch so với `R2AI_STAGE3_CONTEXT.md`
+
+Cập nhật 2026-10-24 13:38 (UTC+7), Claude Sonnet 5.5, HEAD kiểm trước cập nhật `880f88e`, nhánh `feat/s38-chunk-metric-v2`. S38, Vu chốt: giữ thin theo nội dung (`THIN_JUNK_SHARE` 0,5) cho mọi host, không thêm bộ lọc host; chấp nhận bắt thêm 352 doc baothanhhoa.vn và mất phần chữ thật ở cuối doc thin (tác động không đáng kể). **S35 khi dựng EF2-free phải báo số carrier thin và host của chúng; > 50 carrier thì báo Vu trước khi đóng gói.** Hướng cải tiến ghi ở `docs/s38-chunk-metric-v2.md`. Không còn việc ở S38.
 
 Cập nhật 2026-10-24 13:25 (UTC+7), Claude Sonnet 5.5, HEAD kiểm trước cập nhật `3b91286`, nhánh `feat/s38-chunk-metric-v2`. S38 fix `r2ai.s38.compose`, theo Vu, không dựng lại ZIP T=1907. (1) **Trần kích thước một tham số**: ZIP < `BTC_CEILING` 104.857.600 B (100 MiB, trần BTC cho file mới, nguồn mục giới hạn upload của PROGRESS) − `reserve`, `--reserve` mặc định 2.257.600 B ⇒ 102.600.000 B như `CEILING` cũ; bỏ cách chồng `CEILING` + reserve 500.000 B; bản T=1907 (102.593.008 B) hợp lệ theo mặc định mới. (2) **Thin theo nội dung, mọi host** (thay cho lọc baophutho.vn): carrier có ≥ 50% ký tự là dòng base64 hoặc token `{placeholder}`. Trên EF2-cut-p4b junk share thin 0,79–0,96, còn lại ≤ 0,059 (không có giá trị ở giữa). **Kiểm diff trên docsel EF2-cut-p4b = 0**: đúng 24 carrier / 20 doc, 24 doc nhận thay trùng từng byte. Đếm toàn corpus (không dựng): canonical 887.151 doc → 979 thin (baophutho.vn 627, baothanhhoa.vn 352, host mới nhưng không có carrier nào trong EF2-cut-p4b); 120ask 55.991 doc → 0 thin. Chưa nộp.
 
@@ -557,6 +559,7 @@ Cập nhật 2026-10-17 20:25 (UTC+7), GPT-6 (Codex, S24 recovery): D21 bỏ qua
 
 | Thời gian (UTC+7) | Ai | Thay đổi |
 |---|---|---|
+| 2026-10-24 13:38 | Claude Sonnet 5.5 | S38: ghi quyết định thin theo nội dung mọi host, việc báo thin cho S35 (> 50 carrier báo Vu), mục hướng cải tiến. |
 | 2026-10-24 13:25 | Claude Sonnet 5.5 | S38: compose dùng một tham số trần (`BTC_CEILING` 104.857.600 − `reserve` 2.257.600 = 102.600.000), thin chuyển sang quy tắc theo nội dung mọi host (diff trên EF2-cut-p4b = 0); đếm thin toàn corpus; không dựng lại ZIP. |
 | 2026-10-24 13:20 | Claude Sonnet 5.5 | S38: `r2ai.s38.compose` chọn T tự động có dự phòng (`--reserve`, mặc định 500.000 B, ZIP < 102.100.000 B); ghi rõ T=1907 do agent tự chọn vì trần, probe t1849 không có thin; Vu quyết định nộp bản T=1907 (reserve 0). |
 | 2026-10-24 12:58 | Claude Sonnet 5.5 | S38: ghi ZIP EF2-cut-p4b + full+w768 T=1907 (102.593.008 B), validator 0 lỗi, kiểm id/relevant_docs/phân phối so với probe t1849; chưa nộp. |

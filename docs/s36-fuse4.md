@@ -368,3 +368,26 @@ Manifest S37 (SHA `995a77ed…8dff`, `final=true`, 22:07): Jina 1.002/1.002 quer
 
 **120A-free-v2 đã dựng (25/10, 22:27 đến 23:57)**: `120A-free-v2-full+w768-t1536.zip`, 100.285.047 B (trần 102.600.000), SHA256 `fba176c65f98b733ce879e932ab245905d9899e96eea867583af5ae85caada3f`. T = 1536 (sàn), 34.186 cửa sổ 768 token, 174.990 carrier sau thin (11 doc thin, 15 carrier đổi), 209.176 chunk, 220.599 doc (bằng docsel). Validator S26 (`compose validate`, 9 segment 120ask làm nguồn verbatim): ok, 0 lỗi, `p1_pair` 88.506, `canonical_substring` 120.670. Log: `out/runs/s36-fuse4/validate-120A-free-v2.log`. Doc F2 dự đoán 0,4250 (khung free; không so trực tiếp với p4b). Chưa nộp (Vu quyết).
 
+
+## Ba ablation trên 120A-p4b-v3 (26/10)
+
+Mỗi bản bỏ đúng một thành phần của `configs/s36-handoff-120A-p4b-v3.json`; mọi thứ khác giữ nguyên: cùng pool (cosine top-n_q), cùng quy tắc hoà cosine, cùng a, b, s, cùng cắt EF2 theo P4B, cùng phân bổ carrier CR-fair tổng 175.548, cùng thin, T tự tìm (compose `full+w768`, `--fit-carriers`). Không bản nào được nộp LB. Mã: `apply` nhận thêm khoá `rrf_keys` (tập con của bốn nguồn RRF, bắt buộc giữ `cosine_rank` và `judge_rank`; vắng khoá thì dùng đủ bốn nguồn, nên các bản cũ không đổi); cấu hình `configs/s36-abl-p4b-v3-noJina.json`, `configs/s36-abl-p4b-v3-noCmax.json`; script `scripts/s36/run_abl_p4b_v3.sh`.
+
+| bản | thay đổi | ZIP (B) | SHA256 | T | cửa sổ | carrier sau thin | chunk | doc | Doc F2 dự đoán | validator |
+|---|---|---:|---|---:|---:|---:|---:|---:|---:|---|
+| 120A-p4b-v3 (đối chứng) | không | 99.417.831 | `34d235f6…37e2` | 1536 | 34.709 | 174.956 | 209.665 | 192.742 | 0,4206 | ok |
+| ABL-nowin | chunk chỉ là full body, bỏ cửa sổ 768 thứ hai | 95.948.993 | `1e858826…bbe7` | không có | 0 | 174.956 | 174.956 | 192.742 | 0,4206 (docsel không đổi) | ok, `p1_pair` 90.252, `canonical_substring` 84.704 |
+| ABL-noJina | RRF 3 nguồn = cosine + 4B + C-max | 99.000.704 | `43da59f5…5dba` | 1536 | 34.317 | 174.949 | 209.266 | 193.821 | 0,4196 | ok, `p1_pair` 89.541, `canonical_substring` 119.725 |
+| ABL-noCmax | RRF 3 nguồn = cosine + 4B + Jina | 99.513.915 | `77490996…b59f` | 1536 | 34.587 | 174.940 | 209.527 | 191.631 | 0,4207 | ok, `p1_pair` 89.967, `canonical_substring` 119.560 |
+
+SHA đầy đủ: nowin `1e858826b71e64d3ef3ed517ee1af96019327bd0db4d1d1344ae1769b97cbbe7`, noJina `43da59f5423d0fe5de447de3565dbd38357d64aaa33186f00dfb50b4535c5dba`, noCmax `774909966a3252ed61e08b30b312d6a5e5f06dcef15050a09584e95db69fb59f`. ZIP ở `out/runs/s38-chunk-metric-v2/compose/` (`ABL-nowin-p4b-v3.zip` là bản sao byte-đồng-nhất của `120A-p4b-v3-full+w768-t1000000000.zip`, bản dò T không cửa sổ của p4b-v3; validator S26 chạy trên chính tệp đó bằng `compose validate --threshold 1000000000`). Cả hai bản noJina và noCmax tìm ra T = 1536 (sàn) như p4b-v3, vòng T chỉ thử một ngưỡng.
+
+**Doc khác p4b-v3** (cắt EF2 dùng P4B nên chỉ thứ tự RRF đổi; số doc mỗi query đổi từ vùng biên):
+
+| bản | doc có ở p4b-v3 mà không có ở bản này, TB/query | doc có ở bản này mà không có ở p4b-v3, TB/query | query có khác | carrier khác, TB/query (một phía) |
+|---|---:|---:|---:|---:|
+| ABL-nowin | 0 | 0 | 0/1.200 | 0 |
+| ABL-noJina | 5,911 | 6,810 | 1.064/1.200 | 5,154 |
+| ABL-noCmax | 7,637 | 6,711 | 1.106/1.200 | 5,657 |
+
+Tổng doc: p4b-v3 192.742, noJina 193.821, noCmax 191.631 (số doc mỗi query: p10/p50/p90 = 60/156/268 so với 62/159/266 và 61/156/265). Doc F2 dự đoán đổi −0,0010 (noJina) và +0,0002 (noCmax) so với p4b-v3: dự đoán chỉ phản ánh thứ tự RRF tới việc doc nào lọt top-k (xác suất p_cal vẫn tính từ P4B), không phản ánh giá trị thật của Jina và C-max; việc đo giá trị đó cần điểm LB, do Vu nộp.

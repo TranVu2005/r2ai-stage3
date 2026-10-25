@@ -341,3 +341,7 @@ S37 embed xong 239.771 doc en (`seg37900-en-pubmed/vectors.npz`, SHA `9edfe699�
 
 **120A-p4b-v2 đã dựng (25/10, 16:13 đến 17:10)**: `120A-p4b-v2-full+w768-t1536.zip`, 99.441.444 B (trần 102.600.000), SHA256 `e78838a1616f1af16e9ac3c4dbd4e9ba303a179dfdb090564de950506de245c7`. T = 1536 (sàn của luật), 34.702 cửa sổ 768 token, 174.946 carrier sau thin (17 doc thin, 20 carrier đổi), 209.648 chunk, 193.273 doc (bằng docsel). Validator S26 (`compose validate`, 9 segment 120ask làm nguồn verbatim): ok, 0 lỗi, `p1_pair` 90.297, `canonical_substring` 119.351. Log: `out/runs/s36-fuse4/validate-120A-p4b-v2.log`. Doc F2 dự đoán 0,4202 (mô hình). Chưa nộp (Vu nộp).
 
+## 120A-p4b-v3: Jina bù đủ (25/10, 21:15)
+
+S37 xong Jina bù (`jina-final2`, 21:15): `scores-all.parquet` (858 query) cộng `reused_scores.parquet` (144 query) = 349.497 cặp của 1.002 query (976 cũ cộng 26 query mới), không trùng, phủ hết pool; gộp thành `out/runs/s36-fuse4/s37/jina-final2-scores.parquet`. **120A-p4b-v3** (`configs/s36-s37-120A-p4b-v3.json` = p4b-v2 với Jina mới, `scripts/s36/run_120a_p4b_v3.sh`): không còn cặp nào thiếu Jina hay C-max; 192.742 doc chọn (P10/P50/P90 = 60/156/268), 17.569 doc 120ask (14.233 doc khác nhau, TB 14,64 mỗi query, 847 query có ≥1), Doc F2 dự đoán 0,4206 (v2 0,4202), carrier CR-fair 175.546 (ρ 0,9076; P10/P50/P90 = 55/142/244, top-100 15,11%). So với v2: 188.807 cặp chung, v2 có 4.466 cặp không còn, v3 thêm 3.935. Ứng viên bản cuối, Vu nộp.
+

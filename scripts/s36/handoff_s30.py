@@ -2,6 +2,7 @@
 
     PYTHONPATH=src python scripts/s36/handoff_s30.py            # writes out/runs/s36-fuse4/handoff-s30/{manifest.json, *.config.json}
     PYTHONPATH=src python scripts/s36/handoff_s30.py --verify   # also re-runs `apply` from the fixed configs and compares docsel / carriers SHA256
+    PYTHONPATH=src python scripts/s36/handoff_s30.py --verify --out DIR   # release check: writes only below DIR, leaves configs/ and the pinned hand-off alone
 
 The two builds: ``120A-p4b-v3`` (main: EF2-cut-p4b frame, pool = cosine top-n_q of the union) and ``120A-free-v2`` (general: free frame, pool =
 corpus cosine top-300). The fixed configs (``configs/s36-handoff-*.json``) list every input file explicitly (no globbing).
@@ -72,8 +73,10 @@ def base_inputs() -> dict[str, str]:
 
 def main() -> None:
     verify = "--verify" in sys.argv
-    paths.assert_writable(OUT)
-    OUT.mkdir(parents=True, exist_ok=True)
+    out = Path(sys.argv[sys.argv.index("--out") + 1]) if "--out" in sys.argv else OUT      # --out: a scratch run, the repo configs are not rewritten
+    write_configs = "--out" not in sys.argv
+    paths.assert_writable(out)
+    out.mkdir(parents=True, exist_ok=True)
     manifest: dict = {"schema": "r2ai.s36.handoff-s30.v1", "builds": {}, "base_inputs_sha256": base_inputs(),
                       "code": {"s36": {"branch": "feat/s36-fuse4", "commit": git(WT / "s35-part-jina", "rev-parse", "HEAD")},
                                "s38": {"branch": "feat/s38-chunk-metric-v2", "commit": git(WT / "s38-chunk-metric-v2", "rev-parse", "HEAD"),
@@ -103,17 +106,18 @@ def main() -> None:
             "zip": {"path": compose["zip"], "bytes": compose["zip_bytes"], "sha256": compose["zip_sha256"], "T": compose["threshold"], "windows": compose["second_chunks"],
                     "chunks": compose["chunks"], "docs": compose["docs"], "carriers_after_thin": prepare["carriers"], "thin": prepare["thin"],
                     "validator": {k: v for k, v in compose["validator"].items() if k != "extra_sources"}, "validator_extra_segments": len(compose["validator"]["extra_sources"])}}
-        (OUT / f"{name}.config.json").write_text(json.dumps(fixed, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        (root / "configs" / f"s36-handoff-{name}.json").write_text(json.dumps(fixed, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        (out / f"{name}.config.json").write_text(json.dumps(fixed, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        if write_configs:
+            (root / "configs" / f"s36-handoff-{name}.json").write_text(json.dumps(fixed, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         if verify:
-            scratch = OUT / f"verify-{name}"
+            scratch = out / f"verify-{name}"
             paths.assert_writable(scratch)
             s37.apply({**fixed, "out": str(scratch)})
             same = {f: sha(scratch / f) == outputs[f] for f in outputs if (scratch / f).exists() and not f.startswith("missing")}
             manifest["builds"][name]["verify_apply_same_sha256"] = same
             assert all(same.values()) and len(same) >= 3, (name, same)
-    (OUT / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(json.dumps({"manifest": str(OUT / "manifest.json"), "sha256": sha(OUT / "manifest.json"),
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(json.dumps({"manifest": str(out / "manifest.json"), "sha256": sha(out / "manifest.json"),
                       "verify": {n: all(b.get("verify_apply_same_sha256", {}).values()) for n, b in manifest["builds"].items()} if verify else None}, indent=1))
 
 

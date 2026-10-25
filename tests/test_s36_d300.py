@@ -74,3 +74,25 @@ def test_pair_keys_refuses_a_pair_id_that_means_two_pairs(tmp_path):
         assert "two different pairs" in str(err)
     else:
         raise AssertionError("no error")
+
+
+def test_en_lane_top_pairs_scorer_line_and_ids():
+    import pytest
+    from r2ai.s36 import enlane
+
+    rng = np.random.default_rng(0)
+    docs = rng.normal(size=(500, 8)).astype(np.float32)
+    docs /= np.linalg.norm(docs, axis=1, keepdims=True)
+    q = docs[[3, 7]] + 0.01
+    ids = np.arange(1000, 1500, dtype=np.int64)
+    got = enlane.top_pairs(np.array([11, 12]), q, ids, docs.astype(np.float16), top=5, block=130)
+    want = docs.astype(np.float16).astype(np.float32) @ q.astype(np.float32).T
+    for k, qid in enumerate((11, 12)):
+        sub = got[got.query_id == qid]
+        assert sub.doc_id.tolist() == (1000 + np.argsort(-want[:, k], kind="stable")[:5]).tolist() and sub.en_rank.tolist() == [1, 2, 3, 4, 5]
+    base = 'x\nINSTRUCTIONS = {\n' + enlane.ZH_LINE + '}\n'
+    out = enlane.scorer_text(base)
+    assert out.count('"en": "Given a Vietnamese medical question, judge whether the English passage answers it"') == 1 and out.replace(
+        '    "en": "Given a Vietnamese medical question, judge whether the English passage answers it",\n', "") == base
+    with pytest.raises(ValueError):
+        enlane.scorer_text("no zh line here")

@@ -25,6 +25,7 @@ FOURB_DIR = RUN / 'gpu' / 'qwen3-reranker-4b'
 MERGED_4B = FOURB_DIR / 'scores-120ask-4b.parquet'
 JINA_FINAL = RUN / 'jina-final'
 JINA_FINAL2 = RUN / 'jina-final2'
+D300_CMAX = RUN / 'cmax_scores-d300.parquet'        # S36 d300 pairs: keyed by (query_id, doc_id), not by S37 pair_id
 PAIRS_V1 = RUN / 'pairs_new_final.parquet'
 PAIRS_V2 = RUN / 'pairs_new_final_v2.parquet'
 PAIRS_FINAL = PAIRS_V2 if PAIRS_V2.exists() else PAIRS_V1     # v2 = after the last crawl batches (b0008, b0009)
@@ -84,7 +85,7 @@ def fourb(pairs: pd.DataFrame) -> dict:
 
 
 def cmax(pairs: pd.DataFrame) -> dict:
-    files = sorted(RUN.glob('cmax_scores*.parquet'))
+    files = [f for f in sorted(RUN.glob('cmax_scores*.parquet')) if f.name != D300_CMAX.name]     # registry pairs keyed by pair_id
     ids = set(pd.concat([pd.read_parquet(f, columns=['pair_id']) for f in files]).pair_id) if files else set()
     return {'model': 'qwen3-reranker-0.6b', 'revision': 'e61197ed45024b0ed8a2d74b80b4d909f1255473', 'files': {f.name: file_entry(f) for f in files},
             'pairs_scored': len(ids & set(pairs.pair_id)), 'pairs_total': len(pairs),
@@ -130,7 +131,7 @@ def manifest() -> dict:
         if sc.exists():
             ids4 |= set(pd.read_parquet(sc, columns=['pair_id']).pair_id)
     idsc = set()
-    for f in RUN.glob('cmax_scores*.parquet'):
+    for f in (f for f in RUN.glob('cmax_scores*.parquet') if f.name != D300_CMAX.name):
         idsc |= set(pd.read_parquet(f, columns=['pair_id']).pair_id)
     flags = pairs[['pair_id', 'query_id', 'doc_id', 'batch', 'in_top211', 'in_pool13']].copy()
     flags['has_4b'] = flags.pair_id.isin(ids4)
@@ -148,7 +149,10 @@ def manifest() -> dict:
         'pairs': {'file': file_entry(PAIRS_FINAL), 'pairs': len(pairs), 'queries': int(pairs.query_id.nunique()),
                   'docs': int(pairs.doc_id.nunique()), 'pair_id_range': [int(pairs.pair_id.min()), int(pairs.pair_id.max())],
                   'in_top211': int(pairs.in_top211.sum()), 'in_pool13': int(pairs.in_pool13.sum())},
-        'scores': {'4b': fourb(pairs), 'cmax': cmax(pairs), 'jina': jina},
+        'scores': {'4b': fourb(pairs), 'cmax': cmax(pairs), 'jina': jina, **({'cmax_d300': {'model': 'qwen3-reranker-0.6b', 'revision': 'e61197ed45024b0ed8a2d74b80b4d909f1255473', 'key': ['query_id', 'doc_id'],
+                                                 'rows': int(len(pd.read_parquet(D300_CMAX, columns=['query_id']))), 'file': file_entry(D300_CMAX),
+                                                 'pool_manifest': file_entry(RUN / 'cmax-d300' / 'pool' / 'manifest.json'),
+                                                 'source_pair_list': 'out/runs/s36-fuse4/d300/cmax_pairs.parquet'}} if D300_CMAX.exists() else {})},
         'coverage_pct_of_pairs': {'4b': round(100 * flags.has_4b.mean(), 2), 'cmax': round(100 * flags.has_cmax.mean(), 2), 'jina': round(100 * flags.has_jina.mean(), 2)},
         'flags': {'pairs_score_flags': file_entry(OUT / 'pairs_score_flags.parquet'), 'jina_queries_scored': file_entry(OUT / 'jina_queries_scored.parquet')},
         'final': bool(jina['status'] == 'complete' and flags.has_cmax.all()),

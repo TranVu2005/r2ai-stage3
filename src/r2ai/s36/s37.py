@@ -301,7 +301,10 @@ def apply(cfg: dict[str, Any]) -> dict[str, Any]:
     a, b = fitted["fit"]["a"], fitted["fit"]["b"]
     if pool_kind in ("pool13", "cosine13"):
         s_free = float(fitted["g_scale"])
-        frame = cal.Frame(cal.J3_KEYS if pool_kind == "pool13" else fuse.FOUR_KEYS, "thrC", data={"ranked": ranked, "pools": pools, "union": union, "jina": jina, "cmax": cmax}, allow_missing=last)
+        rrf_keys = tuple(spec.get("rrf_keys") or fuse.FOUR_KEYS)         # ablations: drop one RRF source (cosine and 4B stay)
+        if not set(rrf_keys) <= set(fuse.FOUR_KEYS) or not {"cosine_rank", "judge_rank"} <= set(rrf_keys):
+            raise ValueError(f"rrf_keys {rrf_keys}: must be a subset of {fuse.FOUR_KEYS} that keeps cosine_rank and judge_rank")
+        frame = cal.Frame(cal.J3_KEYS if pool_kind == "pool13" else rrf_keys, "thrC", data={"ranked": ranked, "pools": pools, "union": union, "jina": jina, "cmax": cmax}, allow_missing=last)
         calibrated = cal.Calibrated(frame, "p4b", a, b, s_free, use_tail=True)
     else:
         s_free = float(json.loads((cal.cal_root() / "ef2-free.json").read_text(encoding="utf-8"))["s_free"])

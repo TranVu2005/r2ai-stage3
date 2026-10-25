@@ -189,7 +189,7 @@ RATES = {
     "cmax_rows_per_second": 28.6,              # d300 C-max: 84,124 rows in 49 min on the local GPU (S32: 24-27 rows/s)
     "cmax_rows_per_pair": 2.67,                # 84,124 rows / 31,495 pairs
     "jina_queries_per_minute": (1.49, 1.96),   # S37 jina (975 queries, with CUDA crashes) and jina-final2 (858 queries in 7.3 h), 300 pairs per query
-    "compose_write_seconds": 776,              # 120A-p4b-v3 full+w768 write + validator
+    "release_build_seconds": 1209,             # r2ai.release build, 26/10: 1,173 s (p4b-v3) and 1,209 s (free-v2), apply + prepare + write + validator
     "query_embed_seconds": None,
     "pool_cosine_seconds": None,
 }
@@ -210,7 +210,7 @@ def private_plan(queries: int, new_queries: int, depth: int = 300) -> dict[str, 
     if not new_queries:
         return {"case": "same 1,200 queries as the public set", "gpu": False,
                 "steps": [{"step": "python -m r2ai.release build --config configs/s36-handoff-120A-<p4b-v3|free-v2>.json",
-                           "estimate_hours": round((RATES["compose_write_seconds"] + 600) / 3600, 2), "note": "CPU only; see README_RELEASE.md for the measured times"}]}
+                           "estimate_hours": round(RATES["release_build_seconds"] / 3600, 2), "note": "CPU only; see README_RELEASE.md for the measured times"}]}
     pairs = new_queries * depth
     cmax_hours = pairs * RATES["cmax_rows_per_pair"] / RATES["cmax_rows_per_second"] / 3600
     jina_lo, jina_hi = (new_queries / r / 60 for r in RATES["jina_queries_per_minute"][::-1])
@@ -227,7 +227,7 @@ def private_plan(queries: int, new_queries: int, depth: int = 300) -> dict[str, 
         {"step": f"5. Jina Reranker v3.5 listwise on {new_queries:,} queries (r2ai.s37.jinapool, scripts/s37/run_jina.ps1, layout b10s0)", "where": "local GPU",
          "estimate_hours": f"{jina_lo:.1f} to {jina_hi:.1f}", "note": "6 GiB GPU shared with the desktop: OOM restarts happened; not parallel with step 4"},
         {"step": "6. apply (free frame, pool fixed depth 300) -> compose -> validator: copy configs/s36-handoff-120A-free-v2.json, point pairs_new / scores_4b / cmax / jina "
-                 "at the new files", "where": "CPU", "estimate_hours": round((RATES["compose_write_seconds"] + 600) / 3600, 2),
+                 "at the new files", "where": "CPU", "estimate_hours": round(RATES["release_build_seconds"] / 3600, 2),
          "note": "the p4b frame cannot be used: its pool is the old pool13 of the public queries (K_q of the baseline)"},
     ]
     return {"case": f"{new_queries:,} new queries", "gpu": True, "prerequisites_present": present,

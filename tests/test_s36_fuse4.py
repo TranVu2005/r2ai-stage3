@@ -57,3 +57,15 @@ def test_variant_table():
     assert s36_build.VARIANTS["FUSE4-thrC"]["keys"] == fuse.FOUR_KEYS == ("cosine_rank", "judge_rank", "jina_rank", "cmax_rank")
     with pytest.raises(ValueError):
         s36_build.run_settings(["FUSE4-thrC", "Check-FUSE4-thrC-pre"])
+
+
+def test_docsel_writer_columns_ranks_and_chunk_flag(tmp_path, monkeypatch):
+    monkeypatch.setattr(s36_build.paths, "assert_writable", lambda p: None)
+    chosen = {7: [{"doc_id": 2, "rrf_score": 0.05, "cosine_score": 0.7, "judge_score": 0.9, "jina_score": 0.3, "cmax_score": None,
+                   "cosine_rank": 3, "judge_rank": 1, "jina_rank": 2, "cmax_rank": 9},
+                  {"doc_id": 5, "rrf_score": 0.04, "cosine_score": 0.8, "judge_score": 0.05, "jina_score": None, "cmax_score": 0.6,
+                   "cosine_rank": 1, "judge_rank": 4, "jina_rank": 9, "cmax_rank": 2}]}
+    s36_build.docsel_writer(tmp_path, "-docread", None)("FUSE4-thrC-docread", chosen, {7: [2]}, {"t_c": 0.5})
+    frame = pd.read_parquet(tmp_path / "docsel-FUSE4-thrC.parquet")
+    assert frame["rank"].tolist() == [1, 2] and frame.chunk.tolist() == [True, False] and frame.p4b_ge_tc.tolist() == [True, False]
+    assert np.isnan(frame.cmax.iat[0]) and np.isnan(frame.jina.iat[1]) and (frame.t_c == 0.5).all()

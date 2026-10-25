@@ -1,0 +1,267 @@
+{
+  "schema": "r2ai.s36.handoff-s30.v1",
+  "builds": {
+    "120A-p4b-v3": {
+      "role": "main",
+      "frame": "EF2-cut-p4b (pool = cosine top-n_q, n_q = round(1.3 K_q))",
+      "lb": null,
+      "fixed_config": "configs/s36-handoff-120A-p4b-v3.json",
+      "tie_rule": "The pool of a query is the first n_q rows of its scored union sorted by (-cosine_score, order). `order` is a tuple: (0, old pool13 cosine_rank) for the S29/S31 pool13 docs, (1, pair_id) for the pool13 pairs evicted by the Pharmacity merge, (2, pair_id) for the S31 pool-extra pairs, (3, pair_id) for the S37 / S36 pairs (pair_id ascending: S37 1,000,000+, final-4b 5,000,000+). Docs with exactly the same cosine (duplicate content under several doc_ids) therefore keep the pool13 doc first, then evicted, extra, new pairs by ascending pair_id. A new pair whose doc is already in the query's union is dropped. n_q = the size of the old pool13 of the query. Rule code: r2ai.s36.s37.merge_union + cosine13_pools.",
+      "inputs_sha256": {
+        "pairs_new": {
+          "pairs_new_final_v2.parquet": "6d2c08e56b76a1b424e00512bab04edfe337959ce550f150916d63d03975d4ae",
+          "pairs_final.parquet": "43c1a2d399cecf02e9f3e87a8f8404613ea34385d32de9ec844eaa086fe1cd38"
+        },
+        "scores_4b": {
+          "s37-b001-003/scores-extra.parquet": "9ba2ca4fb997e568c32f8b07ae40ade7d374814e29791687eddf4a8ce4fc08d7",
+          "s37-b004-006/scores-extra.parquet": "0b54d6c4ead67e1addb6cefd90c732166f985f918a55c3c266bb1984dcbbd8fc",
+          "s37-b007/scores-extra.parquet": "c6804adf4292ee94b5e1728110d3445835c23dc208ac68f04fca4508aeecf732",
+          "final-4b/scores-extra.parquet": "3b1a60671be5b55e8faaed0cb442d687736742a88c1eb0be94d48e807e7c19d9"
+        },
+        "cmax": {
+          "cmax_scores-b0004.parquet": "24e8cca77930d64bfe512f69c2820a65f929a6a57dad17441c531ecec2edd358",
+          "cmax_scores-b0005.parquet": "5b5a7b1b6648ce0a336658a2c299011962eca59247bf8e215ccf5d74a78649fe",
+          "cmax_scores-b0006.parquet": "401a3d19160c99ec18b06bdde3a3099e03ce4d5955388d71c6bbb23efbbc7d10",
+          "cmax_scores-b0007.parquet": "c2af890c158a77bb59f67c74eb6c4cbbf62d00f5477013d07ef6f34b7c376567",
+          "cmax_scores-b0008.parquet": "eb0c99bd782ed36b157679508e8a7612371a9bf97fbd3f3f0a7ca856d66af6b1",
+          "cmax_scores-b0009.parquet": "68e2f687afb6ad69d38879e8d49392c744c949d5213ae1c46771ff568169c1be",
+          "cmax_scores.parquet": "7966fca4099179f83759e140b15e21e8f9dc0c87393101cc614587bafe4e5f85"
+        },
+        "jina": {
+          "jina-final2-scores.parquet": "45bfb54d3c6fce7a72dde0a690d56594396cf6103af4b745c8080c90bc886ba0"
+        }
+      },
+      "apply_outputs_sha256": {
+        "carriers-120A-p4b-v3.parquet": "e9f543c952a8248e469ca812b536a2625cbde1e2e9ed2265743a5e796ae7360f",
+        "docsel-120A-p4b-v3.parquet": "69540d841b9b4a6ed04a3ea867c690e42bc68daaf3a50326c8a06a4c3fb2d463",
+        "keep-120A-p4b-v3.json": "53b0e7a6ae308dda8b8a4a4ba064e70f321a58ddc57a68f9bf7f2b20502913d7",
+        "pcal-120A-p4b-v3.parquet": "61bbf0366b7a1e35aee4f3d0eb744f4f59408f14f42ea333f5964407129eac18"
+      },
+      "apply_report": "out/runs/s36-fuse4/s37/120A-p4b-v3.apply.json",
+      "predicted": {
+        "precision": 0.24274867135314818,
+        "recall": 0.5289662054188642,
+        "f2": 0.4205686657870847
+      },
+      "docs_per_query": {
+        "total": 192742,
+        "p10": 60.0,
+        "p50": 156.0,
+        "p90": 268.10000000000014,
+        "min": 20.0,
+        "max": 331.0
+      },
+      "carriers": {
+        "rho": 0.9075630252100924,
+        "target": 175548,
+        "carriers": 175546,
+        "queries": 1200,
+        "per_query_p10_p50_p90": [
+          55.0,
+          142.0,
+          244.10000000000014
+        ],
+        "top100_queries_share": 0.15105442448133252
+      },
+      "pool": {
+        "mode": "cosine13",
+        "pool13_docs_new": 281924,
+        "pool13_docs_old": 281924,
+        "old_pool13_docs_pushed_out": 42577,
+        "queries_with_docs_pushed_out": 986,
+        "pool": "cosine13"
+      },
+      "missing_scores": {},
+      "zip": {
+        "path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\s38-chunk-metric-v2\\compose\\120A-p4b-v3-full+w768-t1536.zip",
+        "bytes": 99417831,
+        "sha256": "34d235f6f37704d11b803e83e9eddeabbf4c6100a38497c2728b56cb614937e2",
+        "T": 1536,
+        "windows": 34709,
+        "chunks": 209665,
+        "docs": 192742,
+        "carriers_after_thin": 174956,
+        "thin": {
+          "removed": 20,
+          "added": 20,
+          "thin_docs": 17,
+          "t_c_before": 0.00020743838339156175,
+          "t_c_after": 0.00020743838339156175
+        },
+        "validator": {
+          "ok": true,
+          "errors": {},
+          "chunk_check": {
+            "p1_pair": 90252,
+            "canonical_substring": 119413
+          }
+        },
+        "validator_extra_segments": 9
+      },
+      "verify_apply_same_sha256": {
+        "carriers-120A-p4b-v3.parquet": true,
+        "docsel-120A-p4b-v3.parquet": true,
+        "keep-120A-p4b-v3.json": true,
+        "pcal-120A-p4b-v3.parquet": true
+      }
+    },
+    "120A-free-v2": {
+      "role": "general",
+      "frame": "free (pool = corpus cosine top-300)",
+      "lb": {
+        "final": 0.4101,
+        "doc": 0.4402,
+        "chunk": 0.38
+      },
+      "fixed_config": "configs/s36-handoff-120A-free-v2.json",
+      "tie_rule": "The pool of a query is the corpus cosine top-300 in the corpus order of r2ai.s36.d300.merged_top: the canonical + Pharmacity cosines of out/runs/s37/pool.npz (top-400, stored cosine-descending order) followed by the 120ask segments (sorted segment name, then vector file order), stable argsort by -cosine: on an exact cosine tie the canonical doc comes first (pool.npz order), then 120ask docs by segment name and file order. The union rows are reordered to this order (r2ai.s36.s37.fixed_pools(union, 300, order)); every doc of the corpus top-300 must have a 4B score (error otherwise). 25/10: 20 queries (913 docs per side) differed before this rule (tie blocks of duplicate-content docs straddling rank 300); now 0.",
+      "inputs_sha256": {
+        "pairs_new": {
+          "pairs_new_final_v2.parquet": "6d2c08e56b76a1b424e00512bab04edfe337959ce550f150916d63d03975d4ae",
+          "pairs_final.parquet": "43c1a2d399cecf02e9f3e87a8f8404613ea34385d32de9ec844eaa086fe1cd38"
+        },
+        "scores_4b": {
+          "s37-b001-003/scores-extra.parquet": "9ba2ca4fb997e568c32f8b07ae40ade7d374814e29791687eddf4a8ce4fc08d7",
+          "s37-b004-006/scores-extra.parquet": "0b54d6c4ead67e1addb6cefd90c732166f985f918a55c3c266bb1984dcbbd8fc",
+          "s37-b007/scores-extra.parquet": "c6804adf4292ee94b5e1728110d3445835c23dc208ac68f04fca4508aeecf732",
+          "final-4b/scores-extra.parquet": "3b1a60671be5b55e8faaed0cb442d687736742a88c1eb0be94d48e807e7c19d9"
+        },
+        "cmax": {
+          "cmax_scores.parquet": "7966fca4099179f83759e140b15e21e8f9dc0c87393101cc614587bafe4e5f85",
+          "cmax_scores-b0004.parquet": "24e8cca77930d64bfe512f69c2820a65f929a6a57dad17441c531ecec2edd358",
+          "cmax_scores-b0005.parquet": "5b5a7b1b6648ce0a336658a2c299011962eca59247bf8e215ccf5d74a78649fe",
+          "cmax_scores-b0006.parquet": "401a3d19160c99ec18b06bdde3a3099e03ce4d5955388d71c6bbb23efbbc7d10",
+          "cmax_scores-b0007.parquet": "c2af890c158a77bb59f67c74eb6c4cbbf62d00f5477013d07ef6f34b7c376567",
+          "cmax_scores-b0008.parquet": "eb0c99bd782ed36b157679508e8a7612371a9bf97fbd3f3f0a7ca856d66af6b1",
+          "cmax_scores-b0009.parquet": "68e2f687afb6ad69d38879e8d49392c744c949d5213ae1c46771ff568169c1be",
+          "cmax_scores-d300.parquet": "832aec532893b24d570972d5c776eae23e03ea19dff90e348744b90cb80ad8f9"
+        },
+        "jina": {
+          "jina-final2-scores.parquet": "45bfb54d3c6fce7a72dde0a690d56594396cf6103af4b745c8080c90bc886ba0"
+        }
+      },
+      "apply_outputs_sha256": {
+        "carriers-120A-free-v2.parquet": "47b646de6d92b6ba82db4171c64ee7136707c68134510ed7de79dfff0cd38d86",
+        "docsel-120A-free-v2.parquet": "c547b9d9b9e22911ff40db17219f4a575c1132bb787f6c827b76b97236c58707",
+        "keep-120A-free-v2.json": "eb8989e07e3702a8f6933117f2321779c094a71d03b432829670a16ceab90cce",
+        "missing-120A-free-v2-cmax.parquet": "b47796f245c84d3de6c7c9782cfd7440359ef85f1cf7c13c8c61b96dfd4975a8",
+        "missing-120A-free-v2-jina.parquet": "4e6f269f548994f34f745e98411909f85e992e78dbc0ff800905cff72d931612",
+        "pcal-120A-free-v2.parquet": "2806cfaac6a5e4724fa622d26219c67db3af1196c7503b7e9394e2b1d23c35a1"
+      },
+      "apply_report": "out/runs/s36-fuse4/s37/120A-free-v2.apply.json",
+      "predicted": {
+        "precision": 0.23500749478043512,
+        "recall": 0.5489740836062292,
+        "f2": 0.4249924309301298
+      },
+      "docs_per_query": {
+        "total": 220599,
+        "p10": 81.9,
+        "p50": 188.0,
+        "p90": 281.0,
+        "min": 20.0,
+        "max": 300.0
+      },
+      "carriers": {
+        "rho": 0.7931034482758678,
+        "target": 175548,
+        "carriers": 175547,
+        "queries": 1200,
+        "per_query_p10_p50_p90": [
+          65.9,
+          150.0,
+          223.0
+        ],
+        "top100_queries_share": 0.13271089793616525
+      },
+      "pool": {
+        "mode": "fixed",
+        "depth": 300,
+        "order": "corpus",
+        "queries_bottom_doc_p4b_at_or_above_t_free": 563,
+        "check_vs_corpus": {
+          "queries_differing": 0,
+          "docs_differing": 0
+        },
+        "pool": "fixed"
+      },
+      "missing_scores": {
+        "jina": {
+          "pairs": 31645,
+          "queries": 599
+        }
+      },
+      "zip": {
+        "path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\s38-chunk-metric-v2\\compose\\120A-free-v2-full+w768-t1536.zip",
+        "bytes": 100285047,
+        "sha256": "fba176c65f98b733ce879e932ab245905d9899e96eea867583af5ae85caada3f",
+        "T": 1536,
+        "windows": 34186,
+        "chunks": 209176,
+        "docs": 220599,
+        "carriers_after_thin": 174990,
+        "thin": {
+          "removed": 15,
+          "added": 15,
+          "thin_docs": 11,
+          "t_c_before": 0.0005442132624325576,
+          "t_c_after": 0.0005442132624325576
+        },
+        "validator": {
+          "ok": true,
+          "errors": {},
+          "chunk_check": {
+            "p1_pair": 88506,
+            "canonical_substring": 120670
+          }
+        },
+        "validator_extra_segments": 9
+      },
+      "verify_apply_same_sha256": {
+        "carriers-120A-free-v2.parquet": true,
+        "docsel-120A-free-v2.parquet": true,
+        "keep-120A-free-v2.json": true,
+        "pcal-120A-free-v2.parquet": true
+      }
+    }
+  },
+  "base_inputs_sha256": {
+    "s31:pool13_index": "ecf0ea1b3e179a8553f7b549a13dc0c0ff7daa6b0cb3b38260bba9afd4ac3e3f",
+    "s31:q06": "3b04a00fdea5646286189ebce4a9a9cda453053bd4c0dc2f6cf16b43f7f0118d",
+    "s31:judge": "ddf24b91718d6fe7b24ef36ce8f2b3a16dbb1d1f765134d9f6e97cdfb100db0f",
+    "s31:pool_index": "71ae4ad0468790bd407de32d256871b06b780540b48ef0dc64a1828b22df515d",
+    "s31:orig": "39d554f2996e44db6a915ff39eaf10f9720d4614215022f5a58999a068ea84fb",
+    "s31:extra_pairs": "389f6d39568916104546d9d52968671536959c563ff30aa46f58d4e79b674c04",
+    "s31:extra_scores": "84cf53fa8b90f7db2d34bf23f25999554a899dd7a66df0529fa32b598286f0e3",
+    "s35_jina_scores": "e9a4818eeb720b83711616b497c94f87e3c5d1cceffa6fd26b655f6c6489cf39",
+    "s32_doc_scores": "bd64145ec258ce6b5b93d1072563d307ce3d5a3940fd895a532af704589912b0",
+    "s36_extra_jina": "a4fac30a7d29ed1601e07e442edb1a6f8d56649a58711aab792ab4350aac93b6",
+    "s36_extra_cmax": "af3f2e84e9fdf78f7bf5ec4c7f00613241b8b5bafc996b0d9013df69cb7d013f",
+    "cal.json": "a1517b501b12873b14bef3b3c0d60daf905f21f4e0e1d088bd012096bbaab006",
+    "ef2-free.json": "88856110a7f8ce070ddb28632c45baffed9f96131c0c4e74f70199051ac98490",
+    "pool.npz": "45f69e563d2df74b983bc5441aeccad18251fe9606b5694bea335b2c87c31cdd",
+    "query_vectors.npz": "eed0e1046ffce6925987d21fdf832b99d548a7837c592ef21cf75e48cb02edca",
+    "baseline_submission": "b291124fa22e9f07fbddaeb3891455ff2c71757f3de1a1c0404fb82382389c6e",
+    "p1_submission": "9e83ac7b634aeecfb2cfe91ef522249753b7ac3a845c330cdfbdc1d366221009",
+    "canonical_docs.parquet": "80c52371d31093de717123004a44ec510019e74b272d1d64a57e458e00eaed7b",
+    "s37_handoff_manifest": "995a77ed655281c1e4367a228218048dae340a697dd7d883c71f700c17f88dff"
+  },
+  "code": {
+    "s36": {
+      "branch": "feat/s36-fuse4",
+      "commit": "4fd745b5e47e55bc26803eb720102a440df9927a"
+    },
+    "s38": {
+      "branch": "feat/s38-chunk-metric-v2",
+      "commit": "74722ad5e5ee90adee7a5d4d7638d38ed947268f",
+      "compose_commit_used": "a4b57c1b7ddd6c194b6672ea91568464cc8a4fdc"
+    }
+  },
+  "s37_manifest_sha256": "995a77ed655281c1e4367a228218048dae340a697dd7d883c71f700c17f88dff",
+  "compose": {
+    "command": "cd <s38 worktree>; PYTHONPATH=src python -m r2ai.s38.compose run --name <name>-full+w768 --docsel <docsel> --rule full+w768 --carriers <carriers> --fit-carriers --rounds 10; then `compose validate --name <name>-full+w768 --out <compose dir>`",
+    "rule": "full+w768",
+    "ceiling_bytes": 102600000,
+    "T": 1536
+  }
+}

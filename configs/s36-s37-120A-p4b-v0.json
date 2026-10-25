@@ -1,0 +1,33 @@
+{
+  "name": "120A-p4b-v0",
+  "pairs_new": "D:/GitHub/r2ai-stage3/out/runs/s37/pairs_new.parquet",
+  "scores_4b": [
+    "D:/GitHub/r2ai-stage3/out/runs/s37/kaggle-4b/s37-b001-003/gpu/qwen3-reranker-4b/scores-extra.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/kaggle-4b/s37-b004-006/gpu/qwen3-reranker-4b/scores-extra.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/kaggle-4b/s37-b007/gpu/qwen3-reranker-4b/scores-extra.parquet"
+  ],
+  "cmax": [
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-b0004.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-b0005.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-b0006.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-b0007.parquet"
+  ],
+  "jina": false,
+  "missing": "last",
+  "min_4b_coverage": 0.98,
+  "t_c": 0.2030746281894702,
+  "pool": "cosine13",
+  "carriers": {"rule": "fair", "target": 175548},
+  "frozen": {
+    "status": "LB 0,4111 (Doc 0,4394 / Chunk 0,3828), 25/10: best so far, fallback for the private set",
+    "note": "Explicit inputs (no globbing): later 4B / Jina files do not change this build. Jina: only the S35 + S36 scores, the 36,160 pool pairs of the 120ask v0 docs rank last in the Jina source.",
+    "inputs_sha256": {"pairs_new.parquet": "76c0ea60145143af0b62e722fa95986e4d50392ca120d823910912a963cf63ef"},
+    "docsel_sha256": "8a24b9b184d8fa15f38de316e388a6dd9e2ea26fb39ba5c03559240a4073cca4",
+    "carriers_sha256": "f5830f267f76d70b6fb3dd3aa52038b0c0a801bb45ed349b48397bb248281bd0",
+    "compose": {"branch": "feat/s38-chunk-metric-v2 (dev a4b57c1)", "command": "bash scripts/s36/run_120a_p4b_v0.sh", "rule": "full+w768", "T": 1536, "windows": 35220, "carriers_after_thin": 174894, "fit_carriers_drop": 0},
+    "zip": "out/runs/s38-chunk-metric-v2/compose/120A-p4b-v0-full+w768-t1536.zip",
+    "zip_bytes": 100664783,
+    "zip_sha256": "dd8d4d76cfe4bf7cc9664ce9db984705633e0c537d916f9aafc790d821463a22"
+  }
+}

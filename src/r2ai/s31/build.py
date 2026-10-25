@@ -255,14 +255,14 @@ def thr_ext_pools(
     return pools, keep, report
 
 
-def free_adaptive(union: dict[int, list[dict[str, Any]]]) -> tuple[dict[int, list[dict[str, Any]]], dict[int, int], dict[str, Any]]:
-    """K4-free: top-P_FREE; deepen to every scored pair when the 211th doc has P4B >= T_FREE."""
+def free_adaptive(union: dict[int, list[dict[str, Any]]], deepen: bool = True) -> tuple[dict[int, list[dict[str, Any]]], dict[int, int], dict[str, Any]]:
+    """K4-free: top-P_FREE; deepen to every scored pair when the 211th doc has P4B >= T_FREE (``deepen`` False: always the top-P_FREE)."""
     pools, keep, deepened, still = {}, {}, [], []
     for qid, rows in union.items():
         if len(rows) < P_FREE:
             raise ValueError(f"Query {qid}: only {len(rows)} scored pairs < {P_FREE}")
         pool = rows[:P_FREE]
-        if pool[-1]["judge_score"] >= T_FREE and len(rows) > P_FREE:
+        if deepen and pool[-1]["judge_score"] >= T_FREE and len(rows) > P_FREE:
             pool = rows
             deepened.append(qid)
         if pool[-1]["judge_score"] >= T_FREE:  # bottom of the scored pool still at or above t
@@ -364,6 +364,7 @@ def threshold_chunk_selector(score_of: dict[int, dict[int, float]], target: int,
         result = {qid: [(d, c) for pos, (d, c, has_text) in enumerate(offered_q) if (qid, pos) in keep]
                   for qid, offered_q in offered.items()}
         counts = np.array([len(result[q]) for q in sorted(result)])
+        info["chunk_doc_ids"] = {qid: [d for d, _ in pairs] for qid, pairs in result.items()}
         info.update({
             "t_c": float(t_c),
             "chunks": int(counts.sum()),
@@ -534,6 +535,9 @@ def build(
     chunk_mode_override: dict[str, str] | None = None,
     rank_weights: dict[str, tuple[float, ...]] | None = None,
     chunk_target: int | None = None,
+    docsel_hook: Any = None,
+    keep_override: dict[str, dict[int, int]] | None = None,
+    free_deepen: bool = True,
 ) -> list[dict[str, Any]]:
     """``rank_hook(ranked)`` may add rank keys to the pool13 rows and returns a sidecar dict;
     ``rank_keys_override`` replaces the RRF keys of a variant; ``variant_alias`` maps an output
@@ -541,7 +545,10 @@ def build(
     S36: ``pool_hook(name, pool)`` adds rank keys to the rows of a K4-free / top-K pool (returns a sidecar dict);
     ``chunk_t_c`` replaces ``T_C_FIXED`` in the fixed chunk selectors; ``chunk_mode_override`` maps an output name
     to its chunk mode (e.g. ``fixed-whole``); ``rank_weights`` gives weighted RRF (one weight per rank key);
-    ``chunk_target`` replaces ``THR_C_CHUNKS`` for the ``threshold`` chunk mode (calibration of a new t_c)."""
+    ``chunk_target`` replaces ``THR_C_CHUNKS`` for the ``threshold`` chunk mode (calibration of a new t_c);
+    ``keep_override`` maps an output name to its docs-per-query (the pool rows are taken in RRF order);
+    ``free_deepen`` False cuts every K4-free pool at the cosine top-P_FREE (EF2-free-d211);
+    ``docsel_hook(name, chosen, chunk_doc_ids, chunk_info)`` receives the selected rows (RRF order) of each built bundle."""
     started = time.monotonic()
     judge_tag = JUDGE_TAGS.get(judge) if judge else None
     variant_alias = variant_alias or {}
@@ -625,7 +632,7 @@ def build(
             pools[name], keep_by_variant[name], keep_reports[name] = thr_ext_pools(
                 ranked, union, base_k, thr_keep, thr_cache["t"])
         elif mode == "free":
-            pools[name], keep_by_variant[name], keep_reports[name] = free_adaptive(union)
+            pools[name], keep_by_variant[name], keep_reports[name] = free_adaptive(union, free_deepen)
         elif mode and mode.startswith("topk:"):
             k = int(mode.split(":")[1])
             pools[name], keep_by_variant[name] = topk_pools(union, k)
@@ -635,6 +642,13 @@ def build(
             keep_by_variant[name], keep_reports[name] = free_keep(pools[name])
         elif mode:
             keep_by_variant[name], keep_reports[name], thr_cache = variable_keep(ranked, base_k, mode, thr_cache)
+    for name, override in (keep_override or {}).items():
+        sizes = {q: len(pools.get(name, ranked)[q]) for q in override}
+        if set(override) != set(ranked) or any(not 0 <= k <= sizes[q] for q, k in override.items()):
+            raise ValueError(f"keep_override of {name} does not fit the pool")
+        keep_by_variant[name] = {int(q): int(k) for q, k in override.items()}
+        keep_reports[name] = {"mode": "custom", "total": int(sum(override.values())),
+                              "docs_per_query": _quantiles(np.array([override[q] for q in sorted(override)], dtype=np.float64))}
     pool_infos = {name: pool_hook(name, pool) for name, pool in pools.items()} if pool_hook else {}
     j4_ids = None
     if keep_by_variant:
@@ -686,7 +700,10 @@ def build(
                 fixed_k=name not in keep_by_variant, thin_texts=thin_texts, chunk_selector=selector,
             )
             chunk_doc_ids = chunk_info.pop("chunk_doc_ids", None)
+            if docsel_hook is not None:
+                docsel_hook(name, chosen, chunk_doc_ids, chunk_info)
         except _Calibrated:
+            chunk_info.pop("chunk_doc_ids", None)
             result = {"name": name, "status": "calibrated_not_built", "target_chunks": tc_target,
                       "keep": keep_reports.get(name), **chunk_info}
             print(json.dumps(result, ensure_ascii=False), flush=True)

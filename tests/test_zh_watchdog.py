@@ -178,6 +178,25 @@ def test_network_retry_uses_bounded_exponential_backoff():
     assert [delay(i) for i in (1, 2, 3, 4, 10)] == [60, 120, 240, 480, 600]
 
 
+def test_network_probe_is_online_when_any_target_connects(monkeypatch):
+    import contextlib
+    import r2ai.zh_full.watchdog as watchdog
+    seen = []
+
+    def connect(target, timeout):
+        seen.append(target)
+        if target[0] != '8.8.8.8':
+            raise OSError('timeout')
+        return contextlib.nullcontext()
+
+    monkeypatch.setattr(watchdog.socket, 'create_connection', connect)
+    assert watchdog._network_available()
+    assert seen == [('1.1.1.1', 443), ('8.8.8.8', 53)]
+    monkeypatch.setattr(watchdog.socket, 'create_connection',
+                        lambda target, timeout: (_ for _ in ()).throw(OSError('down')))
+    assert not watchdog._network_available()
+
+
 def test_network_gate_holds_restart_and_probe_respects_retry_time():
     import r2ai.zh_full.watchdog as watchdog
     gate = getattr(watchdog, 'gate_network_restart', None)

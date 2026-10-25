@@ -1,0 +1,11 @@
+{
+  "name": "120A-free-v1",
+  "jina": "D:/GitHub/r2ai-stage3/out/runs/s36-fuse4/s37/jina-final-scores.parquet",
+  "missing": "last",
+  "min_4b_coverage": 0.98,
+  "t_c": 0.2030746281894702,
+  "carriers": {
+    "rule": "fair",
+    "target": 175548
+  }
+}

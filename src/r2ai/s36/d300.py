@@ -3,6 +3,7 @@
 ``python -m r2ai.s36.d300 count --depth 300 400``   counts only (no export, no scoring)
 ``python -m r2ai.s36.d300 export --depth 300``      writes the Kaggle 4B subset ``d300`` and the C-max pair list; scoring is NOT started
 ``python -m r2ai.s36.d300 export-final --depth 300`` one subset ``final-4b``: the top-D pairs and the unscored ``pairs_new_final_v2`` pairs, deduplicated
+``python -m r2ai.s36.d300 export-en``              subset ``final-4b-B``: the top-20 en docs per query (en-enabled scorer); ``final-4b`` is A (vi/zh, pinned scorer)
 ``python -m r2ai.s36.d300 import4b --tag final-4b --scores scores-extra.parquet --report collect-extra-report.json``
 
 Merged ranking: per query, the canonical + Pharmacity cosine top-400 of ``out/runs/s37/pool.npz`` (S26 doc vectors, the pool the S29/S31
@@ -241,9 +242,10 @@ def write_subset(todo: pd.DataFrame, out: Path, tag: str, shard_name: str, summa
                  top: pd.DataFrame | None = None, scorer: tuple[Path, str] | None = None) -> dict[str, Any]:
     """Kaggle 4B subset (S31 pool-extra layout) of ``todo`` under ``out/kaggle`` or ``out/<tag>``, plus ``pairs_<tag>.parquet`` and the C-max list."""
     sub = out / ("kaggle" if tag == TAG else tag)
-    pairs_name = "pairs_d300.parquet" if tag == TAG else "pairs_final.parquet"
+    pairs_name = {TAG: "pairs_d300.parquet", "final-4b-B": "pairs_final_B.parquet"}.get(tag, "pairs_final.parquet")
+    cmax_name = "cmax_pairs_en.parquet" if tag == "final-4b-B" else "cmax_pairs.parquet"
     for target in (out, sub, sub / "shards" / shard_name, sub / "extra_pairs.parquet", sub / "judge_score.py", sub / "manifest.json",
-                   out / pairs_name, out / "cmax_pairs.parquet", out / "counts.json"):
+                   out / pairs_name, out / cmax_name, out / "counts.json"):
         paths.assert_writable(target)
     scorer_path, scorer_sha = scorer or (JUDGE_SCORE, JUDGE_SHA)
     if _sha256(scorer_path) != scorer_sha:
@@ -269,11 +271,9 @@ def write_subset(todo: pd.DataFrame, out: Path, tag: str, shard_name: str, summa
         ["pair_id", "query_id", "doc_id", "cosine_rank", "cosine_score", "in_pool13", "lang", "segment", "in_top211", "is_ask", "batch", "lane"]
     ].to_parquet(out / pairs_name, index=False)
     if top is not None:
-        need_cmax = top[~top.has_cmax][["query_id", "doc_id", "cosine_rank", "cosine_score", "is_ask", "has_4b"]].assign(lane="main")
-        if is_en.any():                                                       # en abstracts are short: one chunk each, no C-max score exists yet
-            en = todo[is_en][["query_id", "doc_id", "cosine_rank", "cosine_score", "is_ask"]].assign(has_4b=False, lane="en")
-            need_cmax = pd.concat([need_cmax, en], ignore_index=True)
-        need_cmax.to_parquet(out / "cmax_pairs.parquet", index=False)
+        top[~top.has_cmax][["query_id", "doc_id", "cosine_rank", "cosine_score", "is_ask", "has_4b"]].to_parquet(out / cmax_name, index=False)
+    elif is_en.any():                                                         # en abstracts are short: one chunk each, no C-max score exists yet
+        todo[is_en][["query_id", "doc_id", "cosine_rank", "cosine_score", "is_ask"]].assign(has_4b=False).to_parquet(out / cmax_name, index=False)
     shutil.copyfile(scorer_path, sub / "judge_score.py")
     manifest = {"status": "prepared", "tag": tag, **summary, "model": "qwen3-reranker-4b", "revision": REVISION_4B, "pairs": int(len(todo)),
                 "pair_id_range": [int(todo.pair_id.min()), int(todo.pair_id.max())] if len(todo) else None,
@@ -284,8 +284,8 @@ def write_subset(todo: pd.DataFrame, out: Path, tag: str, shard_name: str, summa
                 "judge_score_py_sha256": scorer_sha, "judge_score_base_sha256": JUDGE_SHA, f"{pairs_name.split('.')[0]}_sha256": _sha256(out / pairs_name),
                 "seconds": round(time.monotonic() - started, 1),
                 "note": "nothing is scored here; Jina is not requested for these pairs (rank last in the Jina source)"}
-    if top is not None:
-        manifest["cmax_pairs_sha256"] = _sha256(out / "cmax_pairs.parquet")
+    if top is not None or is_en.any():
+        manifest["cmax_pairs_sha256"] = _sha256(out / cmax_name)
     _atomic_json(sub / "manifest.json", manifest)
     return manifest
 
@@ -300,7 +300,7 @@ def export(depth: int) -> dict[str, Any]:
     return write_subset(todo, out_dir(), TAG, SHARD, {"depth": depth, **summarize(top, depth)}, started, top)
 
 
-def export_final(depth: int, registry: Path | None = None, en: bool = False) -> dict[str, Any]:
+def export_final(depth: int, registry: Path | None = None) -> dict[str, Any]:
     """Kaggle subset ``final-4b`` (S35, 25/10): ONE subset holding (a) the cosine top-``depth`` pairs of the current corpus without a 4B score and
     (b) the unscored pairs of the registry (``pairs_new_final_v2``: the newly crawled 120ask docs), duplicates removed. Ids: the registry's,
     else those of an earlier ``pairs_d300``/``pairs_final`` export, else new ones above the highest."""
@@ -325,7 +325,6 @@ def export_final(depth: int, registry: Path | None = None, en: bool = False) -> 
             known.update({(int(q), int(d)): int(i) for i, q, d in zip(old.pair_id, old.query_id, old.doc_id)})
     # registry docs are 120ask docs: flag them so the text comes from their segment
     todo = combine_needs(depth_pairs, reg, known, PAIR_ID_BASE)
-    todo["is_en"] = False
     ask = set(top.loc[top.is_ask, "doc_id"].astype(int)) | set(pd.read_parquet(registry, columns=["doc_id"]).doc_id.astype(int))
     todo["is_ask"] = todo.doc_id.astype(int).isin(ask)
     free_keys = set(zip(*[top[top.cosine_rank <= depth][c].astype(int) for c in ("query_id", "doc_id")])) - scored["4b"]
@@ -345,20 +344,25 @@ def export_final(depth: int, registry: Path | None = None, en: bool = False) -> 
                     "eta_hours_p4b_frame": round(len(p4b_keys) / KAGGLE_PAIRS_PER_S / 3600, 2),
                     "eta_hours_either_frame": round(len(both_frames) / KAGGLE_PAIRS_PER_S / 3600, 2),
                     "pool13_size_max": int(max(size13.values())), "coverage_checked": True})
-    scorer = None
-    if en:                                                                    # English lane: the top-20 en docs per query, appended to the same subset
-        en_pairs = enlane.pairs()
-        if int(en_pairs.pair_id.max()) >= 20_000_000 or set(en_pairs.pair_id) & set(todo.pair_id):
-            raise ValueError("en pair_id range collides with the vi/zh pairs")
-        en_rows = en_pairs.assign(origin="en", is_ask=False, is_en=True)[
-            ["pair_id", "query_id", "doc_id", "cosine_rank", "cosine_score", "origin", "is_ask", "is_en"]]
-        n_vi_zh = len(todo)
-        todo = pd.concat([todo, en_rows], ignore_index=True)
-        made = enlane.make_scorer(out_dir() / "final-4b-scorer" / "judge_score.py")
-        scorer = (Path(made["path"]), made["sha256"])
-        summary.update({"en_lane": True, "pairs_en": int(len(en_pairs)), "pairs_vi_zh": int(n_vi_zh), "en_docs": int(en_pairs.doc_id.nunique()),
-                        "eta_hours_en": round(len(en_pairs) / KAGGLE_PAIRS_PER_S / 3600, 2), "en_scorer_added_line": made["added_line"]})
-    return write_subset(todo, out_dir(), "final-4b", "pool-93003.parquet", summary, started, top, scorer)
+    return write_subset(todo, out_dir(), "final-4b", "pool-93003.parquet", summary, started, top)
+
+
+def export_en() -> dict[str, Any]:
+    """Kaggle subset ``final-4b-B`` (S35, 25/10): the top-20 en docs per query (``r2ai.s36.enlane``), alone, scored with the en-enabled scorer
+    (the pinned S31 scorer plus one INSTRUCTIONS line). ``final-4b`` (A) stays the vi/zh subset with the pinned scorer."""
+    started = time.monotonic()
+    en_pairs = enlane.pairs()
+    taken = {int(i) for f in (out_dir() / "pairs_final.parquet", out_dir() / "pairs_d300.parquet") if f.exists()
+             for i in pd.read_parquet(f, columns=["pair_id"]).pair_id}
+    if taken & set(en_pairs.pair_id):
+        raise ValueError("en pair_id collides with the pairs of final-4b / d300")
+    todo = en_pairs.assign(origin="en", is_ask=False, is_en=True)[["pair_id", "query_id", "doc_id", "cosine_rank", "cosine_score", "origin", "is_ask", "is_en"]]
+    made = enlane.make_scorer(out_dir() / "final-4b-B-scorer" / "judge_score.py")
+    summary = {"depth": enlane.TOP, "lane": "en", "queries": int(en_pairs.query_id.nunique()), "en_docs": int(en_pairs.doc_id.nunique()),
+               "pairs_needed_en": int(len(en_pairs)), "eta_hours_en": round(len(en_pairs) / KAGGLE_PAIRS_PER_S / 3600, 2),
+               "en_segment": enlane.SEG.name, "en_vectors_sha256": _sha256(enlane.SEG / "vectors.npz"),
+               "en_scorer_added_line": made["added_line"], "en_pairs_cosine_p10_p50_p90": [float(x) for x in en_pairs.cosine_score.quantile([.1, .5, .9])]}
+    return write_subset(todo, out_dir(), "final-4b-B", "pool-93004.parquet", summary, started, None, (Path(made["path"]), made["sha256"]))
 
 
 def import4b(tag: str, scores: Path, report: Path) -> dict[str, Any]:
@@ -401,7 +405,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     f = sub.add_parser("export-final")
     f.add_argument("--depth", type=int, default=300)
     f.add_argument("--registry", type=Path, default=None, help="default out/runs/s37/pairs_new_final_v2.parquet")
-    f.add_argument("--en", action="store_true", help="append the English lane: the top-20 en docs per query (needs the S37 en vectors; en scorer)")
+    sub.add_parser("export-en")
     i = sub.add_parser("import4b")
     i.add_argument("--tag", required=True)
     i.add_argument("--scores", type=Path, required=True)
@@ -412,7 +416,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.cmd == "export":
         result = export(args.depth)
     elif args.cmd == "export-final":
-        result = export_final(args.depth, paths.resolve_path(args.registry) if args.registry else None, args.en)
+        result = export_final(args.depth, paths.resolve_path(args.registry) if args.registry else None)
+    elif args.cmd == "export-en":
+        result = export_en()
     else:
         result = import4b(args.tag, args.scores, args.report)
     print(json.dumps(result, indent=1, ensure_ascii=False, default=str))

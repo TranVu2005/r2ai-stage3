@@ -79,7 +79,7 @@ def s37_chunk_rows(pairs: pd.DataFrame, queries: dict, tok) -> tuple[pd.DataFram
                 fb_rows.append({**base, 'doc_text': t, 'doc_tokens': n, 'chunk_id': -1, 'chunk_rank': 0, 'chunk_cosine': np.nan, 'field': 'doc_text',
                                 'origin': 's', 'chunk_source': 'fallback'})
             handled.add((int(r.query_id), int(r.doc_id)))
-    return pd.DataFrame(chunk_rows), pd.DataFrame(fb_rows), handled
+    return pd.DataFrame(chunk_rows).assign(pair_id=-1), pd.DataFrame(fb_rows).assign(pair_id=-1), handled
 
 
 def cpu_encoder() -> None:

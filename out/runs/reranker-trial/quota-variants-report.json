@@ -1,0 +1,1341 @@
+{
+  "task": "P1/P2 VI quota variants",
+  "status": "local_variants_prepared_native_release_pending",
+  "created_utc": "2026-10-18T11:18:29Z",
+  "source_pins": {
+    "bases": {
+      "P1": {
+        "zip": {
+          "path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\release\\P1.zip",
+          "bytes": 90002148,
+          "sha256": "6a96fe9858babe3e4b0e35a8f64d077d2a2eb8362a74da9c2f23a98c696ab7f3"
+        },
+        "approval": {
+          "path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\release\\P1.approval.json",
+          "bytes": 191738,
+          "sha256": "b52b6e941880e0af16562ec90a3fe5af78bd8b02fa9af3d64d84d2936af25aea"
+        },
+        "validator": {
+          "path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\release\\P1.validator.json",
+          "bytes": 1373,
+          "sha256": "f56f462e26757ffb1a389befbf4dcd440a22fb59dab10c6a8a03dd68fd13abc5"
+        },
+        "base_json_sha256": "a95ab159caab5db93d11246513b213033bb879bbca50e7f048146b108eea4c27",
+        "base_approval_stage": "P1"
+      },
+      "P2": {
+        "zip": {
+          "path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\release\\P2.zip",
+          "bytes": 90203999,
+          "sha256": "e202470b7d568c5e1a26f67083794b1059af896b074078cdd94d34fafe08120f"
+        },
+        "approval": {
+          "path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\release\\P2.approval.json",
+          "bytes": 7238,
+          "sha256": "4fe5394421c49ce952d463527941844ca5dd2d60ef573d6d1ed214ac69882d8b"
+        },
+        "validator": {
+          "path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\release\\P2.validator.json",
+          "bytes": 455,
+          "sha256": "0b5d25cc8000e82501157587adb141b69bb3d854827542effb6b2e1bda52e87a"
+        },
+        "base_json_sha256": "47515fd7efa1ab63107f6027e580d10c983a336fb428374d6a3230baaf2888ff",
+        "base_approval_stage": null
+      }
+    },
+    "corpus_v2_ids": {
+      "path": "D:\\GitHub\\r2ai-stage3\\data\\corpus_v2_ids.parquet",
+      "bytes": 19947666,
+      "sha256": "dad50fb81c812a5c68386a2313f880db488b457e85707b92d7c478c29523374a"
+    },
+    "snapshot": {
+      "path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\vi-snapshots\\564eb3511ebc1c06-s23-cumulative\\snapshot.json",
+      "bytes": 8410,
+      "sha256": "c68400171440eafdf47ef366a44144a4eaf20a9113859120079f909f0fe0f3e4"
+    },
+    "probe_summary": {
+      "path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\vi-snapshots\\564eb3511ebc1c06-s23-cumulative\\probe-summary.json",
+      "bytes": 2124,
+      "sha256": "76d164b17b6a7d2b6c36522c5a9dfaab648303aa7ac2b276170e959e11eec9e0"
+    },
+    "candidate_docs": {
+      "path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\vi-snapshots\\564eb3511ebc1c06-s23-cumulative\\vi_cand.docs.parquet",
+      "bytes": 2893779,
+      "sha256": "d80b0834f11ca0c15bf66dbedbc836646683ad63884e863a1bdd379e2b253116"
+    },
+    "candidate_chunks": {
+      "path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\vi-snapshots\\564eb3511ebc1c06-s23-cumulative\\vi_cand.chunks.parquet",
+      "bytes": 8719252,
+      "sha256": "28316e5c18bf06b6bf95d1093e811371f8da3a46b6677dcdbcd8ac50934995de"
+    },
+    "delta_pairs": {
+      "path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\vi-snapshots\\564eb3511ebc1c06-s23-cumulative\\delta_pairs.parquet",
+      "bytes": 47649989,
+      "sha256": "9f86d508694f6f471bd4cc13e26802b9d127c7f51827e12cffb01d4df2ed9c43"
+    },
+    "qwen_score_db": {
+      "path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\vi-snapshots\\564eb3511ebc1c06-s23-cumulative\\qwen-full\\scores.sqlite",
+      "bytes": 8990720,
+      "sha256": "a77de0f04cfcad648067e2241e16945f409705de37535f9907daf53fde00db44"
+    },
+    "qwen_score_report": {
+      "path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\vi-snapshots\\564eb3511ebc1c06-s23-cumulative\\qwen-full\\full-score-report.json",
+      "bytes": 1017,
+      "sha256": "04357a39306b5cba61a5999e87b80bd38f1604771ccb48869dc9b8036e308b4e"
+    },
+    "bge_score_db": {
+      "path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\vi-snapshots\\564eb3511ebc1c06-s23-cumulative\\bge-delta.sqlite",
+      "bytes": 7442432,
+      "sha256": "11b57f5f33e95c9c983734f4a6117582802ebe4a205b7a31c6a6131e3020b07d"
+    },
+    "bge_score_report": {
+      "path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\vi-snapshots\\564eb3511ebc1c06-s23-cumulative\\bge-delta-report.json",
+      "bytes": 936,
+      "sha256": "e84611199c593d8f9c26976cce72c4d18e5b9f587191a622610ee26ce33ede4d"
+    },
+    "alias_groups": {
+      "path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\cc-longchau\\B\\chunks\\docs.parquet",
+      "bytes": 945931147,
+      "sha256": "d42bd85e29524cca99c0e61bf9c81668bf1d2fc6ddb72a1fc2daa780f5a8b807"
+    },
+    "model_revision": "e61197ed45024b0ed8a2d74b80b4d909f1255473",
+    "instruction": "Given a Vietnamese medical question, judge whether the Vietnamese passage answers it",
+    "bge_pair_count": 169404
+  },
+  "candidate_docs_by_query_mean": 259.2033333333333,
+  "candidate_doc_ids": 157891,
+  "candidate_group_rows": 133588,
+  "outputs": {
+    "P1-vi+10": {
+      "zip_path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\release\\P1-vi+10.zip",
+      "zip_bytes": 90064079,
+      "zip_sha256": "9e83ac7b634aeecfb2cfe91ef522249753b7ac3a845c330cdfbdc1d366221009",
+      "json_sha256": "e3d2231bef6d2ac71b64f0f5577aafb812918a11aac82360e804dfc28eccda74",
+      "header": {
+        "method": "ZIP_LZMA",
+        "dictionary_mib": 256,
+        "dictionary_bytes": 268435456,
+        "lc": 3,
+        "lp": 0,
+        "pb": 2,
+        "zip_lzma_version": [
+          9,
+          4
+        ],
+        "properties_hex": "5d00000010"
+      },
+      "validator": {
+        "rows": 1200,
+        "chunks": 126228,
+        "errors": 0,
+        "ok": true,
+        "zip_sha256": "9e83ac7b634aeecfb2cfe91ef522249753b7ac3a845c330cdfbdc1d366221009",
+        "json_sha256": "e3d2231bef6d2ac71b64f0f5577aafb812918a11aac82360e804dfc28eccda74",
+        "v2": true,
+        "cap_bytes": 102600000,
+        "native_checks": "all schema/v2/protection/dedupe/near-duplicate/verbatim checks active",
+        "bge_tokenizer_pin": {
+          "model_id": "BAAI/bge-m3",
+          "revision": "5617a9f61b028005a4858fdac845db406aefb181",
+          "hf_home": "C:\\Users\\Admin\\.cache\\huggingface",
+          "hub_cache": "C:\\Users\\Admin\\.cache\\huggingface\\hub",
+          "snapshot_path": "C:\\Users\\Admin\\.cache\\huggingface\\hub\\models--BAAI--bge-m3\\snapshots\\5617a9f61b028005a4858fdac845db406aefb181",
+          "files": {
+            "tokenizer.json": {
+              "bytes": 17098108,
+              "sha256": "21106b6d7dab2952c1d496fb21d5dc9db75c28ed361a05f5020bbba27810dd08"
+            },
+            "tokenizer_config.json": {
+              "bytes": 444,
+              "sha256": "a62b2b6784f990259fddef5f16388693a8043be4f69179e6a5257eeb3f9abac4"
+            },
+            "special_tokens_map.json": {
+              "bytes": 964,
+              "sha256": "8c785abebea9ae3257b61681b4e6fd8365ceafde980c21970d001e834cf10835"
+            },
+            "sentencepiece.bpe.model": {
+              "bytes": 5069051,
+              "sha256": "cfc8146abe2a0488e9e2a0c56de7952f7c11ab059eca145a0a727afce0db2865"
+            }
+          }
+        }
+      },
+      "release_check": {
+        "passed": false,
+        "derived_mode": true,
+        "skip_hf": false,
+        "log_path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\P1-vi+10.release-check.log",
+        "block_reason": "cannot reach HF to verify revision: ConnectError('[Errno 11001] getaddrinfo failed')"
+      },
+      "vi_docs_per_query": {
+        "before_mean": 150.05333333333334,
+        "target_mean": 165.13166666666666,
+        "after_mean": 165.075,
+        "added_mean": 15.021666666666667,
+        "added_p10": 9,
+        "added_p50": 16,
+        "added_p90": 19,
+        "min_after": 85,
+        "max_after": 246
+      },
+      "queries_below_target": 12,
+      "shortfall_ids_total": 68,
+      "gate_status": "native_pass_release_check_blocked"
+    },
+    "P1-vi+20": {
+      "zip_path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\release\\P1-vi+20.zip",
+      "zip_bytes": 90134899,
+      "zip_sha256": "bc71fa4dfff1835a3e247184a6b3e6eee90542aac9bafa8764ff8a2c602d1efb",
+      "json_sha256": "98be91d2907f616011dfbaff4cb68e5c5b499eacca0998cf8ddb2376187c658f",
+      "header": {
+        "method": "ZIP_LZMA",
+        "dictionary_mib": 256,
+        "dictionary_bytes": 268435456,
+        "lc": 3,
+        "lp": 0,
+        "pb": 2,
+        "zip_lzma_version": [
+          9,
+          4
+        ],
+        "properties_hex": "5d00000010"
+      },
+      "local_validation": {
+        "stage": "P1-vi+20",
+        "local_checks_passed": true,
+        "validator_kind": "streaming local structure, quota, alias-rank, preservation, ZIP CRC; native validator not run",
+        "native_validator_passed": false,
+        "release_check_passed": false,
+        "submission_approved": false,
+        "rows": 1200,
+        "json_sha256": "98be91d2907f616011dfbaff4cb68e5c5b499eacca0998cf8ddb2376187c658f",
+        "zip_sha256": "bc71fa4dfff1835a3e247184a6b3e6eee90542aac9bafa8764ff8a2c602d1efb",
+        "zip_bytes": 90134899,
+        "ceiling_bytes": 102600000,
+        "header": {
+          "method": "ZIP_LZMA",
+          "dictionary_mib": 256,
+          "dictionary_bytes": 268435456,
+          "lc": 3,
+          "lp": 0,
+          "pb": 2,
+          "zip_lzma_version": [
+            9,
+            4
+          ],
+          "properties_hex": "5d00000010"
+        },
+        "vi_docs_per_query": {
+          "before_mean": 150.05333333333334,
+          "target_mean": 180.09,
+          "after_mean": 179.69333333333333,
+          "added_mean": 29.64,
+          "added_p10": 17,
+          "added_p50": 32,
+          "added_p90": 38,
+          "min_after": 92,
+          "max_after": 269
+        },
+        "queries_below_target": 45,
+        "shortfall_ids_total": 476,
+        "shortfall_queries": [
+          {
+            "query_id": 62,
+            "target_add": 36,
+            "actual_add": 3,
+            "shortfall": 33
+          },
+          {
+            "query_id": 84,
+            "target_add": 37,
+            "actual_add": 34,
+            "shortfall": 3
+          },
+          {
+            "query_id": 99,
+            "target_add": 20,
+            "actual_add": 5,
+            "shortfall": 15
+          },
+          {
+            "query_id": 109,
+            "target_add": 23,
+            "actual_add": 8,
+            "shortfall": 15
+          },
+          {
+            "query_id": 155,
+            "target_add": 35,
+            "actual_add": 34,
+            "shortfall": 1
+          },
+          {
+            "query_id": 204,
+            "target_add": 34,
+            "actual_add": 9,
+            "shortfall": 25
+          },
+          {
+            "query_id": 211,
+            "target_add": 36,
+            "actual_add": 20,
+            "shortfall": 16
+          },
+          {
+            "query_id": 251,
+            "target_add": 36,
+            "actual_add": 28,
+            "shortfall": 8
+          },
+          {
+            "query_id": 343,
+            "target_add": 32,
+            "actual_add": 22,
+            "shortfall": 10
+          },
+          {
+            "query_id": 400,
+            "target_add": 28,
+            "actual_add": 13,
+            "shortfall": 15
+          },
+          {
+            "query_id": 435,
+            "target_add": 27,
+            "actual_add": 26,
+            "shortfall": 1
+          },
+          {
+            "query_id": 481,
+            "target_add": 26,
+            "actual_add": 8,
+            "shortfall": 18
+          },
+          {
+            "query_id": 494,
+            "target_add": 29,
+            "actual_add": 19,
+            "shortfall": 10
+          },
+          {
+            "query_id": 509,
+            "target_add": 31,
+            "actual_add": 9,
+            "shortfall": 22
+          },
+          {
+            "query_id": 543,
+            "target_add": 26,
+            "actual_add": 14,
+            "shortfall": 12
+          },
+          {
+            "query_id": 566,
+            "target_add": 37,
+            "actual_add": 29,
+            "shortfall": 8
+          },
+          {
+            "query_id": 590,
+            "target_add": 33,
+            "actual_add": 10,
+            "shortfall": 23
+          },
+          {
+            "query_id": 597,
+            "target_add": 30,
+            "actual_add": 29,
+            "shortfall": 1
+          },
+          {
+            "query_id": 624,
+            "target_add": 35,
+            "actual_add": 26,
+            "shortfall": 9
+          },
+          {
+            "query_id": 633,
+            "target_add": 25,
+            "actual_add": 11,
+            "shortfall": 14
+          },
+          {
+            "query_id": 640,
+            "target_add": 37,
+            "actual_add": 34,
+            "shortfall": 3
+          },
+          {
+            "query_id": 665,
+            "target_add": 37,
+            "actual_add": 29,
+            "shortfall": 8
+          },
+          {
+            "query_id": 694,
+            "target_add": 33,
+            "actual_add": 21,
+            "shortfall": 12
+          },
+          {
+            "query_id": 698,
+            "target_add": 38,
+            "actual_add": 31,
+            "shortfall": 7
+          },
+          {
+            "query_id": 700,
+            "target_add": 29,
+            "actual_add": 24,
+            "shortfall": 5
+          },
+          {
+            "query_id": 704,
+            "target_add": 24,
+            "actual_add": 6,
+            "shortfall": 18
+          },
+          {
+            "query_id": 804,
+            "target_add": 21,
+            "actual_add": 12,
+            "shortfall": 9
+          },
+          {
+            "query_id": 809,
+            "target_add": 32,
+            "actual_add": 16,
+            "shortfall": 16
+          },
+          {
+            "query_id": 810,
+            "target_add": 24,
+            "actual_add": 17,
+            "shortfall": 7
+          },
+          {
+            "query_id": 816,
+            "target_add": 24,
+            "actual_add": 13,
+            "shortfall": 11
+          },
+          {
+            "query_id": 817,
+            "target_add": 37,
+            "actual_add": 35,
+            "shortfall": 2
+          },
+          {
+            "query_id": 819,
+            "target_add": 24,
+            "actual_add": 20,
+            "shortfall": 4
+          },
+          {
+            "query_id": 832,
+            "target_add": 34,
+            "actual_add": 18,
+            "shortfall": 16
+          },
+          {
+            "query_id": 833,
+            "target_add": 29,
+            "actual_add": 21,
+            "shortfall": 8
+          },
+          {
+            "query_id": 895,
+            "target_add": 38,
+            "actual_add": 25,
+            "shortfall": 13
+          },
+          {
+            "query_id": 919,
+            "target_add": 23,
+            "actual_add": 17,
+            "shortfall": 6
+          },
+          {
+            "query_id": 964,
+            "target_add": 36,
+            "actual_add": 33,
+            "shortfall": 3
+          },
+          {
+            "query_id": 998,
+            "target_add": 38,
+            "actual_add": 33,
+            "shortfall": 5
+          },
+          {
+            "query_id": 1010,
+            "target_add": 31,
+            "actual_add": 27,
+            "shortfall": 4
+          },
+          {
+            "query_id": 1016,
+            "target_add": 35,
+            "actual_add": 34,
+            "shortfall": 1
+          },
+          {
+            "query_id": 1023,
+            "target_add": 30,
+            "actual_add": 23,
+            "shortfall": 7
+          },
+          {
+            "query_id": 1036,
+            "target_add": 30,
+            "actual_add": 28,
+            "shortfall": 2
+          },
+          {
+            "query_id": 1068,
+            "target_add": 39,
+            "actual_add": 12,
+            "shortfall": 27
+          },
+          {
+            "query_id": 1097,
+            "target_add": 33,
+            "actual_add": 14,
+            "shortfall": 19
+          },
+          {
+            "query_id": 1122,
+            "target_add": 28,
+            "actual_add": 24,
+            "shortfall": 4
+          }
+        ]
+      },
+      "release_check": {
+        "passed": false,
+        "reason": "Native/HF release gates pending"
+      },
+      "vi_docs_per_query": {
+        "before_mean": 150.05333333333334,
+        "target_mean": 180.09,
+        "after_mean": 179.69333333333333,
+        "added_mean": 29.64,
+        "added_p10": 17,
+        "added_p50": 32,
+        "added_p90": 38,
+        "min_after": 92,
+        "max_after": 269
+      },
+      "queries_below_target": 45,
+      "shortfall_ids_total": 476,
+      "gate_status": "local_checks_passed_native_release_pending"
+    },
+    "P2-vi+10": {
+      "zip_path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\release\\P2-vi+10.zip",
+      "zip_bytes": 90274408,
+      "zip_sha256": "4b5dfbfafe50cfe4439cfcc3d3ba968d6500e5d2cac3c53cee32bda42b37249b",
+      "json_sha256": "ece3e415046b36eefbabece71f11de9609495409b8a583863d660d9dae0c08de",
+      "header": {
+        "method": "ZIP_LZMA",
+        "dictionary_mib": 256,
+        "dictionary_bytes": 268435456,
+        "lc": 3,
+        "lp": 0,
+        "pb": 2,
+        "zip_lzma_version": [
+          9,
+          4
+        ],
+        "properties_hex": "5d00000010"
+      },
+      "local_validation": {
+        "stage": "P2-vi+10",
+        "local_checks_passed": true,
+        "validator_kind": "streaming local structure, quota, alias-rank, preservation, ZIP CRC; native validator not run",
+        "native_validator_passed": false,
+        "release_check_passed": false,
+        "submission_approved": false,
+        "rows": 1200,
+        "json_sha256": "ece3e415046b36eefbabece71f11de9609495409b8a583863d660d9dae0c08de",
+        "zip_sha256": "4b5dfbfafe50cfe4439cfcc3d3ba968d6500e5d2cac3c53cee32bda42b37249b",
+        "zip_bytes": 90274408,
+        "ceiling_bytes": 102600000,
+        "header": {
+          "method": "ZIP_LZMA",
+          "dictionary_mib": 256,
+          "dictionary_bytes": 268435456,
+          "lc": 3,
+          "lp": 0,
+          "pb": 2,
+          "zip_lzma_version": [
+            9,
+            4
+          ],
+          "properties_hex": "5d00000010"
+        },
+        "vi_docs_per_query": {
+          "before_mean": 150.05333333333334,
+          "target_mean": 165.13166666666666,
+          "after_mean": 165.075,
+          "added_mean": 15.021666666666667,
+          "added_p10": 9,
+          "added_p50": 16,
+          "added_p90": 19,
+          "min_after": 85,
+          "max_after": 246
+        },
+        "queries_below_target": 12,
+        "shortfall_ids_total": 68,
+        "shortfall_queries": [
+          {
+            "query_id": 62,
+            "target_add": 18,
+            "actual_add": 3,
+            "shortfall": 15
+          },
+          {
+            "query_id": 99,
+            "target_add": 10,
+            "actual_add": 5,
+            "shortfall": 5
+          },
+          {
+            "query_id": 109,
+            "target_add": 12,
+            "actual_add": 8,
+            "shortfall": 4
+          },
+          {
+            "query_id": 204,
+            "target_add": 17,
+            "actual_add": 9,
+            "shortfall": 8
+          },
+          {
+            "query_id": 400,
+            "target_add": 14,
+            "actual_add": 13,
+            "shortfall": 1
+          },
+          {
+            "query_id": 481,
+            "target_add": 13,
+            "actual_add": 8,
+            "shortfall": 5
+          },
+          {
+            "query_id": 509,
+            "target_add": 15,
+            "actual_add": 9,
+            "shortfall": 6
+          },
+          {
+            "query_id": 590,
+            "target_add": 16,
+            "actual_add": 10,
+            "shortfall": 6
+          },
+          {
+            "query_id": 633,
+            "target_add": 13,
+            "actual_add": 11,
+            "shortfall": 2
+          },
+          {
+            "query_id": 704,
+            "target_add": 12,
+            "actual_add": 6,
+            "shortfall": 6
+          },
+          {
+            "query_id": 1068,
+            "target_add": 20,
+            "actual_add": 12,
+            "shortfall": 8
+          },
+          {
+            "query_id": 1097,
+            "target_add": 16,
+            "actual_add": 14,
+            "shortfall": 2
+          }
+        ]
+      },
+      "release_check": {
+        "passed": false,
+        "reason": "Native/HF release gates not run in local-only preparation"
+      },
+      "vi_docs_per_query": {
+        "before_mean": 150.05333333333334,
+        "target_mean": 165.13166666666666,
+        "after_mean": 165.075,
+        "added_mean": 15.021666666666667,
+        "added_p10": 9,
+        "added_p50": 16,
+        "added_p90": 19,
+        "min_after": 85,
+        "max_after": 246
+      },
+      "queries_below_target": 12,
+      "shortfall_ids_total": 68,
+      "gate_status": "local_checks_passed_native_release_pending"
+    },
+    "P2-vi+20": {
+      "zip_path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\release\\P2-vi+20.zip",
+      "zip_bytes": 90336338,
+      "zip_sha256": "79edfb519cfd7b83b4e699ce9fd72b668ac1c6b71c75611ad10bc01f6a9749cf",
+      "json_sha256": "101f93b18017cfe1e2387496f3ada04fe489f57be21d889675403168952a4957",
+      "header": {
+        "method": "ZIP_LZMA",
+        "dictionary_mib": 256,
+        "dictionary_bytes": 268435456,
+        "lc": 3,
+        "lp": 0,
+        "pb": 2,
+        "zip_lzma_version": [
+          9,
+          4
+        ],
+        "properties_hex": "5d00000010"
+      },
+      "local_validation": {
+        "stage": "P2-vi+20",
+        "local_checks_passed": true,
+        "validator_kind": "streaming local structure, quota, alias-rank, preservation, ZIP CRC; native validator not run",
+        "native_validator_passed": false,
+        "release_check_passed": false,
+        "submission_approved": false,
+        "rows": 1200,
+        "json_sha256": "101f93b18017cfe1e2387496f3ada04fe489f57be21d889675403168952a4957",
+        "zip_sha256": "79edfb519cfd7b83b4e699ce9fd72b668ac1c6b71c75611ad10bc01f6a9749cf",
+        "zip_bytes": 90336338,
+        "ceiling_bytes": 102600000,
+        "header": {
+          "method": "ZIP_LZMA",
+          "dictionary_mib": 256,
+          "dictionary_bytes": 268435456,
+          "lc": 3,
+          "lp": 0,
+          "pb": 2,
+          "zip_lzma_version": [
+            9,
+            4
+          ],
+          "properties_hex": "5d00000010"
+        },
+        "vi_docs_per_query": {
+          "before_mean": 150.05333333333334,
+          "target_mean": 180.09,
+          "after_mean": 179.69333333333333,
+          "added_mean": 29.64,
+          "added_p10": 17,
+          "added_p50": 32,
+          "added_p90": 38,
+          "min_after": 92,
+          "max_after": 269
+        },
+        "queries_below_target": 45,
+        "shortfall_ids_total": 476,
+        "shortfall_queries": [
+          {
+            "query_id": 62,
+            "target_add": 36,
+            "actual_add": 3,
+            "shortfall": 33
+          },
+          {
+            "query_id": 84,
+            "target_add": 37,
+            "actual_add": 34,
+            "shortfall": 3
+          },
+          {
+            "query_id": 99,
+            "target_add": 20,
+            "actual_add": 5,
+            "shortfall": 15
+          },
+          {
+            "query_id": 109,
+            "target_add": 23,
+            "actual_add": 8,
+            "shortfall": 15
+          },
+          {
+            "query_id": 155,
+            "target_add": 35,
+            "actual_add": 34,
+            "shortfall": 1
+          },
+          {
+            "query_id": 204,
+            "target_add": 34,
+            "actual_add": 9,
+            "shortfall": 25
+          },
+          {
+            "query_id": 211,
+            "target_add": 36,
+            "actual_add": 20,
+            "shortfall": 16
+          },
+          {
+            "query_id": 251,
+            "target_add": 36,
+            "actual_add": 28,
+            "shortfall": 8
+          },
+          {
+            "query_id": 343,
+            "target_add": 32,
+            "actual_add": 22,
+            "shortfall": 10
+          },
+          {
+            "query_id": 400,
+            "target_add": 28,
+            "actual_add": 13,
+            "shortfall": 15
+          },
+          {
+            "query_id": 435,
+            "target_add": 27,
+            "actual_add": 26,
+            "shortfall": 1
+          },
+          {
+            "query_id": 481,
+            "target_add": 26,
+            "actual_add": 8,
+            "shortfall": 18
+          },
+          {
+            "query_id": 494,
+            "target_add": 29,
+            "actual_add": 19,
+            "shortfall": 10
+          },
+          {
+            "query_id": 509,
+            "target_add": 31,
+            "actual_add": 9,
+            "shortfall": 22
+          },
+          {
+            "query_id": 543,
+            "target_add": 26,
+            "actual_add": 14,
+            "shortfall": 12
+          },
+          {
+            "query_id": 566,
+            "target_add": 37,
+            "actual_add": 29,
+            "shortfall": 8
+          },
+          {
+            "query_id": 590,
+            "target_add": 33,
+            "actual_add": 10,
+            "shortfall": 23
+          },
+          {
+            "query_id": 597,
+            "target_add": 30,
+            "actual_add": 29,
+            "shortfall": 1
+          },
+          {
+            "query_id": 624,
+            "target_add": 35,
+            "actual_add": 26,
+            "shortfall": 9
+          },
+          {
+            "query_id": 633,
+            "target_add": 25,
+            "actual_add": 11,
+            "shortfall": 14
+          },
+          {
+            "query_id": 640,
+            "target_add": 37,
+            "actual_add": 34,
+            "shortfall": 3
+          },
+          {
+            "query_id": 665,
+            "target_add": 37,
+            "actual_add": 29,
+            "shortfall": 8
+          },
+          {
+            "query_id": 694,
+            "target_add": 33,
+            "actual_add": 21,
+            "shortfall": 12
+          },
+          {
+            "query_id": 698,
+            "target_add": 38,
+            "actual_add": 31,
+            "shortfall": 7
+          },
+          {
+            "query_id": 700,
+            "target_add": 29,
+            "actual_add": 24,
+            "shortfall": 5
+          },
+          {
+            "query_id": 704,
+            "target_add": 24,
+            "actual_add": 6,
+            "shortfall": 18
+          },
+          {
+            "query_id": 804,
+            "target_add": 21,
+            "actual_add": 12,
+            "shortfall": 9
+          },
+          {
+            "query_id": 809,
+            "target_add": 32,
+            "actual_add": 16,
+            "shortfall": 16
+          },
+          {
+            "query_id": 810,
+            "target_add": 24,
+            "actual_add": 17,
+            "shortfall": 7
+          },
+          {
+            "query_id": 816,
+            "target_add": 24,
+            "actual_add": 13,
+            "shortfall": 11
+          },
+          {
+            "query_id": 817,
+            "target_add": 37,
+            "actual_add": 35,
+            "shortfall": 2
+          },
+          {
+            "query_id": 819,
+            "target_add": 24,
+            "actual_add": 20,
+            "shortfall": 4
+          },
+          {
+            "query_id": 832,
+            "target_add": 34,
+            "actual_add": 18,
+            "shortfall": 16
+          },
+          {
+            "query_id": 833,
+            "target_add": 29,
+            "actual_add": 21,
+            "shortfall": 8
+          },
+          {
+            "query_id": 895,
+            "target_add": 38,
+            "actual_add": 25,
+            "shortfall": 13
+          },
+          {
+            "query_id": 919,
+            "target_add": 23,
+            "actual_add": 17,
+            "shortfall": 6
+          },
+          {
+            "query_id": 964,
+            "target_add": 36,
+            "actual_add": 33,
+            "shortfall": 3
+          },
+          {
+            "query_id": 998,
+            "target_add": 38,
+            "actual_add": 33,
+            "shortfall": 5
+          },
+          {
+            "query_id": 1010,
+            "target_add": 31,
+            "actual_add": 27,
+            "shortfall": 4
+          },
+          {
+            "query_id": 1016,
+            "target_add": 35,
+            "actual_add": 34,
+            "shortfall": 1
+          },
+          {
+            "query_id": 1023,
+            "target_add": 30,
+            "actual_add": 23,
+            "shortfall": 7
+          },
+          {
+            "query_id": 1036,
+            "target_add": 30,
+            "actual_add": 28,
+            "shortfall": 2
+          },
+          {
+            "query_id": 1068,
+            "target_add": 39,
+            "actual_add": 12,
+            "shortfall": 27
+          },
+          {
+            "query_id": 1097,
+            "target_add": 33,
+            "actual_add": 14,
+            "shortfall": 19
+          },
+          {
+            "query_id": 1122,
+            "target_add": 28,
+            "actual_add": 24,
+            "shortfall": 4
+          }
+        ]
+      },
+      "release_check": {
+        "passed": false,
+        "reason": "Native/HF release gates not run in local-only preparation"
+      },
+      "vi_docs_per_query": {
+        "before_mean": 150.05333333333334,
+        "target_mean": 180.09,
+        "after_mean": 179.69333333333333,
+        "added_mean": 29.64,
+        "added_p10": 17,
+        "added_p50": 32,
+        "added_p90": 38,
+        "min_after": 92,
+        "max_after": 269
+      },
+      "queries_below_target": 45,
+      "shortfall_ids_total": 476,
+      "gate_status": "local_checks_passed_native_release_pending"
+    },
+    "P1-vi+10-ch": {
+      "zip_path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\release\\P1-vi+10-ch.zip",
+      "zip_bytes": 102339292,
+      "zip_sha256": "4fd5b939d18188fd603a11a81290d41fa83d61a0e54c5684618f1f962b046f17",
+      "json_sha256": "ee2f171003d175066e5c2a49f3e169916860e28c97c707deee1dd9f607bf798b",
+      "compression": {
+        "method": "ZIP_LZMA",
+        "dictionary_mib": 256,
+        "dictionary_bytes": 268435456,
+        "lc": 3,
+        "lp": 0,
+        "pb": 2,
+        "zip_lzma_version": [
+          9,
+          4
+        ],
+        "properties_hex": "5d00000010"
+      },
+      "query_count": 1200,
+      "new_added_relevant_doc_ids_total": 18026,
+      "added_chunk_records": 17972,
+      "added_chunks_per_query": {
+        "mean": 14.976666666666667,
+        "p10": 9,
+        "p50": 16,
+        "p90": 19,
+        "min": 3,
+        "max": 21
+      },
+      "missing_chunk_text_records": 20,
+      "compact_json_whitespace_only": true,
+      "native_validator_passed": false,
+      "validation_note": "JSON/ZIP parity, CRC, schema/query coverage, cap and chunk-prefix checks pass; full-text native check did not complete."
+    },
+    "P2-vi+10-tamS18": {
+      "zip_path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\release\\P2-vi+10-tamS18.zip",
+      "zip_bytes": 90291745,
+      "zip_sha256": "3198e04fd30fa62e1bb639d5faa90cee14fc562b9d371b74bed8f30bccfbd76e",
+      "json_sha256": "605c96dc3b0949d550b45934c4cf2452bd1d1c485c8df851876124b4e63b1b2d",
+      "compression": {
+        "method": "ZIP_LZMA",
+        "dictionary_mib": 256,
+        "dictionary_bytes": 268435456,
+        "lc": 3,
+        "lp": 0,
+        "pb": 2,
+        "zip_lzma_version": [
+          9,
+          4
+        ],
+        "properties_hex": "5d00000010"
+      },
+      "query_count": 1200,
+      "chunks": 126758,
+      "tamanh_chunk_docs": 1662,
+      "tamanh_chunks_changed": 3435,
+      "s18_pin": {
+        "manifest_path": "D:\\GitHub\\r2ai-stage3\\data\\index\\vi_s18_segments\\manifest.json",
+        "manifest_sha256": "564eb3511ebc1c060d9214db843a87b369c6a92ce7c608046ca94cb67e5c585d",
+        "segment": "seg00400-s18-tamanhhospital.vn",
+        "segment_sha256": "eb461398b669f54dc8e93bdd3c8cb94b3ed021f58ee233d8289beb06b261f81a",
+        "docs_path": "D:\\GitHub\\r2ai-stage3\\data\\chunks_vi_s18\\seg00400-s18-tamanhhospital.vn\\docs.parquet",
+        "docs_sha256": "f4ce4dc470fc1d4abbd02971cfcedebbdfa6f5c0bd687f935caf323c6a0bd833",
+        "docs_v2": 4259
+      },
+      "streamed_validator": {
+        "rows": 1200,
+        "chunks": 126758,
+        "errors": 0,
+        "ok": true,
+        "validator": "r2ai.submit.validate_submission checks, ZIP row-streamed + SQLite full-text",
+        "cap_bytes": 102600000,
+        "zip_sha256": "3198e04fd30fa62e1bb639d5faa90cee14fc562b9d371b74bed8f30bccfbd76e",
+        "zip_bytes": 90291745,
+        "hf_release_check": "skipped by request (DNS blocked)",
+        "validated_at_utc": "2026-10-18T14:17:59.524563+00:00"
+      }
+    },
+    "P2-tamS18": {
+      "zip_path": "D:\\GitHub\\r2ai-stage3\\out\\runs\\reranker-trial\\release\\P2-tamS18.zip",
+      "zip_bytes": 90224639,
+      "zip_sha256": "b8ff9a46b25e03211d53ecd9f4291c88f74f902cda6734ef0e6611527952f339",
+      "json_sha256": "8bf8a80e8d1bc7b9bd2fd47da36be1bb9596ac23f3ad2d141d72b8da3dc2edbd",
+      "compression": {
+        "method": "ZIP_LZMA",
+        "dictionary_mib": 256,
+        "dictionary_bytes": 268435456,
+        "lc": 3,
+        "lp": 0,
+        "pb": 2,
+        "zip_lzma_version": [
+          9,
+          4
+        ],
+        "properties_hex": "5d00000010"
+      },
+      "query_count": 1200,
+      "chunks": 126758,
+      "tamanh_chunk_docs": 1662,
+      "tamanh_chunks_changed": 3435,
+      "s18_pin": {
+        "manifest_path": "D:\\GitHub\\r2ai-stage3\\data\\index\\vi_s18_segments\\manifest.json",
+        "manifest_sha256": "564eb3511ebc1c060d9214db843a87b369c6a92ce7c608046ca94cb67e5c585d",
+        "segment": "seg00400-s18-tamanhhospital.vn",
+        "segment_sha256": "eb461398b669f54dc8e93bdd3c8cb94b3ed021f58ee233d8289beb06b261f81a",
+        "docs_path": "D:\\GitHub\\r2ai-stage3\\data\\chunks_vi_s18\\seg00400-s18-tamanhhospital.vn\\docs.parquet",
+        "docs_sha256": "f4ce4dc470fc1d4abbd02971cfcedebbdfa6f5c0bd687f935caf323c6a0bd833",
+        "docs_v2": 4259
+      },
+      "native_rerun_complete": true,
+      "validation_note": "Build exists; streamed full-text validation attempt exited after cache population, no validator sidecar.",
+      "streamed_validator": {
+        "rows": 1200,
+        "chunks": 126758,
+        "errors": 0,
+        "ok": true,
+        "validator": "r2ai.submit.validate_submission checks, ZIP row-streamed + SQLite full-text",
+        "cap_bytes": 102600000,
+        "zip_sha256": "b8ff9a46b25e03211d53ecd9f4291c88f74f902cda6734ef0e6611527952f339",
+        "zip_bytes": 90224639,
+        "validated_at_utc": "2026-10-18T14:35:18.329822+00:00"
+      }
+    }
+  },
+  "submission_approved": false,
+  "comparison_metrics": {
+    "source": "LB results supplied by Vu on 2026-10-18; component metrics only where explicitly reported",
+    "P1": {
+      "final": 0.2822,
+      "doc_f2": 0.287,
+      "doc_precision": 0.1582,
+      "doc_recall": 0.4318,
+      "chunk_f2": 0.2773,
+      "chunk_precision": 0.1936,
+      "chunk_recall": 0.3644
+    },
+    "V1-v+10": {
+      "final": 0.2683,
+      "doc_f2": 0.273,
+      "doc_precision": 0.1516,
+      "doc_recall": 0.4071,
+      "chunk_f2": 0.2636,
+      "chunk_precision": null,
+      "chunk_recall": null,
+      "chunk_precision_recall_note": "not present in saved LB result"
+    },
+    "P1-vi+10": {
+      "final": 0.2834,
+      "source": "Vu"
+    },
+    "P1-vi+20": {
+      "final": 0.2834,
+      "source": "Vu"
+    },
+    "P2": {
+      "final": 0.2822,
+      "source": "Vu",
+      "note": "equal to P1; no new component breakdown supplied"
+    }
+  },
+  "P1_selected_vi_ids_by_source": {
+    "counts_are_unique_selected_IDs_across_submission": true,
+    "counts_by_query_placements": {
+      "longchau": 56184,
+      "youmed": 3347,
+      "suckhoedoisong": 23219,
+      "vi-news_segment": 231,
+      "tamanh": 4594
+    },
+    "unique_ids": {
+      "longchau": 29325,
+      "youmed": 1838,
+      "suckhoedoisong": 14797,
+      "vi-news_segment": 183,
+      "tamanh": 1999
+    },
+    "longchau_host_scope": [
+      "nhathuoclongchau.com.vn",
+      "tiemchunglongchau.com.vn"
+    ],
+    "vi_news_segment": "seg20004-cc-s23-vi-news-20261017-vi-news",
+    "vi_docs_per_query_mean": 150.05333333333334
+  },
+  "p2_zh_diagnosis": {
+    "source_report": "out/runs/reranker-trial/zh/delta-s22-webmedqa-20261018/p2-build-report.json",
+    "mean_zh_docs_per_query": {
+      "P1": 15.6466666667,
+      "P2": 16.7883333333,
+      "delta": 1.1416666667
+    },
+    "selected_unique_zh_doc_ids_in_P2": {
+      "S22_new": 362,
+      "S22_superseded": 1599,
+      "webMedQA": 199
+    },
+    "S22_superseded_ids_already_in_P1_relevant_docs": 1217,
+    "added_submission_ids_vs_P1_by_host": {
+      "120ask.com": 275,
+      "a-hospital.com": 3,
+      "ask.39.net": 953,
+      "cnkang.com": 124,
+      "familydoctor.com.cn": 6,
+      "jbk.39.net": 1,
+      "test.pmphai.com": 2,
+      "youlai.cn": 6
+    },
+    "queries_hitting_new_doc_cap_30": 0,
+    "max_new_zh_docs_in_one_query": 12,
+    "selected_new_zh_bge_scores": {
+      "min": -0.8701171875,
+      "p10": -0.673046875,
+      "p25": -0.4066772461,
+      "median": 0.1482543945,
+      "p75": 0.9692382812,
+      "p90": 1.976855469,
+      "max": 6.06640625,
+      "gate_tau": -0.87255859375,
+      "all_passed": true
+    },
+    "fresh_chunks_from_S22": 456,
+    "fresh_chunks_by_category": {
+      "new_ids": 110,
+      "superseded_ids": 346
+    },
+    "old_superseded_chunk_records_refreshed": 8,
+    "webMedQA_chunks": 74,
+    "total_added_or_refreshed_chunk_records": 538
+  },
+  "requested_validation_status": {
+    "P1-vi+20": {
+      "status": "incomplete",
+      "local_checks_passed": true,
+      "native_validator_passed": false,
+      "note": "C3 native validate call did not finish after 3 minutes; no sidecar was produced."
+    },
+    "P2-vi+10": {
+      "status": "pass",
+      "streamed_full_validator_checks_passed": true,
+      "validator_kind": "row-streamed r2ai.submit.validate_submission checks with SQLite full-text adapter",
+      "summary": {
+        "rows": 1200,
+        "chunks": 126758,
+        "errors": 0,
+        "ok": true,
+        "validator": "r2ai.submit.validate_submission checks, ZIP row-streamed + SQLite full-text",
+        "cap_bytes": 102600000,
+        "zip_sha256": "4b5dfbfafe50cfe4439cfcc3d3ba968d6500e5d2cac3c53cee32bda42b37249b",
+        "zip_bytes": 90274408,
+        "validated_at_utc": "2026-10-18T14:31:55.227803+00:00"
+      }
+    },
+    "P2-vi+20": {
+      "status": "pass",
+      "streamed_full_validator_checks_passed": true,
+      "validator_kind": "row-streamed r2ai.submit.validate_submission checks with SQLite full-text adapter",
+      "summary": {
+        "rows": 1200,
+        "chunks": 126758,
+        "errors": 0,
+        "ok": true,
+        "validator": "r2ai.submit.validate_submission checks, ZIP row-streamed + SQLite full-text",
+        "cap_bytes": 102600000,
+        "zip_sha256": "79edfb519cfd7b83b4e699ce9fd72b668ac1c6b71c75611ad10bc01f6a9749cf",
+        "zip_bytes": 90336338,
+        "validated_at_utc": "2026-10-18T14:33:38.519000+00:00"
+      }
+    },
+    "P2": {
+      "status": "pass",
+      "native_validator_passed": true,
+      "note": "Original P2 build report records full validator pass, 1,200 rows, 126,758 chunks, 0 errors; ZIP hash matches."
+    },
+    "P2-vi+10-tamS18": {
+      "status": "pass",
+      "streamed_full_validator_checks_passed": true,
+      "validator_kind": "row-streamed r2ai.submit.validate_submission checks with SQLite full-text adapter",
+      "summary": {
+        "rows": 1200,
+        "chunks": 126758,
+        "errors": 0,
+        "ok": true,
+        "validator": "r2ai.submit.validate_submission checks, ZIP row-streamed + SQLite full-text",
+        "cap_bytes": 102600000,
+        "zip_sha256": "3198e04fd30fa62e1bb639d5faa90cee14fc562b9d371b74bed8f30bccfbd76e",
+        "zip_bytes": 90291745,
+        "validated_at_utc": "2026-10-18T14:17:59.524563+00:00"
+      }
+    },
+    "hf_release_check": {
+      "status": "skipped",
+      "reason": "User requested skip because DNS prevents HF release check."
+    },
+    "P2-tamS18": {
+      "status": "pass",
+      "streamed_full_validator_checks_passed": true,
+      "validator_kind": "row-streamed r2ai.submit.validate_submission checks with SQLite full-text adapter",
+      "summary": {
+        "rows": 1200,
+        "chunks": 126758,
+        "errors": 0,
+        "ok": true,
+        "validator": "r2ai.submit.validate_submission checks, ZIP row-streamed + SQLite full-text",
+        "cap_bytes": 102600000,
+        "zip_sha256": "b8ff9a46b25e03211d53ecd9f4291c88f74f902cda6734ef0e6611527952f339",
+        "zip_bytes": 90224639,
+        "validated_at_utc": "2026-10-18T14:35:18.329822+00:00"
+      }
+    }
+  },
+  "updated_utc": "2026-10-18T14:39:16+00:00"
+}

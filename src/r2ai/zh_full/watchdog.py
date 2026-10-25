@@ -208,11 +208,13 @@ def gate_network_restart(decision, now, state, online):
 
 def _network_available(timeout=3):
     """Check route connectivity only; do not request any crawl target."""
-    try:
-        with socket.create_connection(('1.1.1.1', 443), timeout=timeout):
-            return True
-    except OSError:
-        return False
+    for target in (('1.1.1.1', 443), ('8.8.8.8', 53), ('9.9.9.9', 443)):
+        try:
+            with socket.create_connection(target, timeout=timeout):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def status_record(now, decision, runtime, domains, robots, deferred_fetched, free_disk_bytes,

@@ -1,0 +1,82 @@
+import pytest
+
+from r2ai.canonical import guard, versions
+from r2ai.index.chunk import doc_layout
+
+
+ROWS = [
+    {'title': ' T ', 'question': 'Q?', 'answer': 'A.', 'body': 'para one\npara two', 'paragraphs': ['para one', 'para two']},
+    {'title': '', 'question': 'Q?', 'answer': '', 'body': 'x Q? y', 'paragraphs': ['x Q? y']},
+    {'title': None, 'question': None, 'answer': None, 'body': 'only', 'paragraphs': ['only']},
+]
+
+
+@pytest.mark.parametrize('row', ROWS)
+def test_doc_text_matches_chunker_layout(row):
+    text, body = versions.doc_text_of(row)
+    assert text == doc_layout({**row, 'body': row['body'] or ''})[0]
+    assert body == row['body']
+
+
+def test_body_of_doc_text_strips_title_block():
+    assert versions.body_of_doc_text('T\n\nbody', 'T') == 'body'
+    assert versions.body_of_doc_text('body', 'T') == 'body'
+    assert versions.body_of_doc_text('T\n\nbody', None) == 'T\n\nbody'
+
+
+def test_quality_counts_code_points_after_ws_collapse_and_han():
+    assert versions.quality('  a \n\n b  ') == (3, 0)
+    assert versions.quality('中文 abc') == (6, 2)
+
+
+def test_guard_refuses_outside_and_existing(tmp_path, monkeypatch):
+    root = tmp_path / 'root'
+    monkeypatch.setattr(guard, 'ALLOWED_ROOTS', (root,))
+    with pytest.raises(ValueError):
+        guard.guarded(tmp_path / 'elsewhere' / 'x', roots=(root,))
+    p = guard.atomic_write_bytes(root / 'a.txt', b'1', roots=(root,))
+    assert p.read_bytes() == b'1'
+    with pytest.raises(FileExistsError):
+        guard.atomic_write_bytes(root / 'a.txt', b'2', roots=(root,))
+    assert p.read_bytes() == b'1'
+
+
+def test_test_paths_are_never_versions():
+    from r2ai.canonical.select import is_test_path
+    assert is_test_path(r'D:\GitHub\r2ai-stage3\out\pytest-reranker-s15\x\docs_vi\p0.parquet')
+    assert is_test_path(r'D:\w\out\runs\zh\test_bad_candidates_rejected_n0\chunks\docs.parquet')
+    assert is_test_path(r'D:\w\out\diag\synthetic-test-green\a.parquet')
+    assert not is_test_path(r'D:\GitHub\r2ai-stage3\data\docs_vi\thanhnien.vn__2026.parquet')
+    assert not is_test_path(r'D:\GitHub\r2ai-stage3\data\chunks_zh_v2\seg00109-v2n-003-ask.39.net\docs.parquet')
+
+
+def test_relocate_gate_and_destination():
+    from pathlib import Path
+    from r2ai.canonical.relocate import destination, queue_blockers
+    q = {'execution_plan': {'delta_vi_2': {'status': 'queued_after_delta_zh'}, 'p1': {'status': 'built'}},
+         'queue': [{'status': 'done'}]}
+    assert queue_blockers(q) == ['queue.execution_plan.delta_vi_2: queued_after_delta_zh']
+    assert queue_blockers({'queue': [{'status': 'done'}]}) == []
+    assert destination(Path('D:/GitHub/r2ai-stage3/data/chunks_zh_full')) == \
+        Path('D:/_to_delete_r2ai/D/GitHub/r2ai-stage3/data/chunks_zh_full')
+
+
+def test_copy_verify_delete_keeps_source_on_mismatch(tmp_path, monkeypatch):
+    import io
+    from r2ai.canonical import relocate as R
+    monkeypatch.setattr(R, 'TRASH', tmp_path / 'trash')
+    src = tmp_path / 'c' / 'pytest-x'
+    (src / 'sub').mkdir(parents=True)
+    (src / 'sub' / 'a.bin').write_bytes(b'abc')
+    (src / 'empty').mkdir()
+    real = R.sha_file
+    monkeypatch.setattr(R, 'sha_file', lambda f: 'x' if 'trash' in str(f) else real(f))
+    with pytest.raises(RuntimeError):
+        R.copy_verify_delete(src, tmp_path / 'trash' / 'C' / 'pytest-x', io.StringIO())
+    assert (src / 'sub' / 'a.bin').read_bytes() == b'abc'          # source kept
+    monkeypatch.setattr(R, 'sha_file', real)
+    ledger = io.StringIO()
+    dst = tmp_path / 'trash' / 'C' / 'pytest-y'
+    R.copy_verify_delete(src, dst, ledger)
+    assert not src.exists() and (dst / 'sub' / 'a.bin').read_bytes() == b'abc' and (dst / 'empty').is_dir()
+    assert '"done": "copy-verify-delete"' in ledger.getvalue()

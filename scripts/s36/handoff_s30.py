@@ -57,8 +57,8 @@ def git(wt: Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(wt), *args], capture_output=True, text=True, check=True).stdout.strip()
 
 
-def base_inputs() -> dict[str, str]:
-    """SHA256 of the S36 base data `apply` reads besides the config's files (union, Jina S35 / S36, C-max S32 / S36, calibration, pool, queries)."""
+def base_input_paths() -> dict[str, Path]:
+    """Path of the S36 base data `apply` reads besides the config's files (union, Jina S35 / S36, C-max S32 / S36, calibration, pool, queries)."""
     _, _, _, _, _, files = fuse.load_frames()
     inputs = cal._inputs()
     found = {f"s31:{k}": Path(v) for k, v in files.items()}
@@ -68,7 +68,12 @@ def base_inputs() -> dict[str, str]:
                   "pool.npz": RUNS / "s37" / "pool.npz", "query_vectors.npz": RUNS / "s29-qwen-judge" / "query_vectors.npz",
                   "baseline_submission": Path(inputs["baseline"]), "p1_submission": Path(inputs["p1"]),
                   "canonical_docs.parquet": Path(inputs["canonical"]) / "docs.parquet", "s37_handoff_manifest": RUNS / "s37" / "handoff" / "manifest.json"})
-    return {k: sha(v) for k, v in found.items() if Path(v).exists()}
+    return {k: Path(v) for k, v in found.items()}
+
+
+def base_inputs() -> dict[str, str]:
+    """SHA256 of the S36 base data (see ``base_input_paths``)."""
+    return {k: sha(v) for k, v in base_input_paths().items() if v.exists()}
 
 
 def main() -> None:

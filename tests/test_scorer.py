@@ -78,11 +78,55 @@ def test_chunk_just_below_40_percent_misses():
     assert S.chunk_prf([(1, WS.encode(pred))], [(1, WS.encode(g))]) == (0.0, 0.0, 0.0)
 
 
-def test_chunk_threshold_is_relative_to_gold_length_not_pred():
+def test_chunk_v1_threshold_is_relative_to_gold_length_not_pred():
     g = words(5)                        # needs LCS >= 2
-    pred = 'w0 w1 ' + words(200, 'x')   # huge pred, LCS 2 -> match
-    p, r, _ = S.chunk_prf([(1, WS.encode(pred))], [(1, WS.encode(g))])
+    pred = 'w0 w1 ' + words(200, 'x')   # huge pred, LCS 2 -> match under v1
+    p, r, _ = S.chunk_prf([(1, WS.encode(pred))], [(1, WS.encode(g))], 'v1')
     assert (p, r) == (1.0, 1.0)
+
+
+def test_chunk_v2_huge_pred_misses():
+    g = words(5)
+    pred = 'w0 w1 ' + words(200, 'x')   # LCS/|g| = 0.4 but LCS/|c| = 2/202
+    assert S.chunk_prf([(1, WS.encode(pred))], [(1, WS.encode(g))]) == (0.0, 0.0, 0.0)
+
+
+def test_chunk_v2_pred_side_exactly_40_percent_matches():
+    g = words(4)                        # LCS 4 = 100 % of g
+    pred = g + ' ' + words(6, 'x')      # |c| = 10 -> needs LCS >= 4: exactly 40 %
+    assert S.chunk_prf([(1, WS.encode(pred))], [(1, WS.encode(g))])[:2] == (1.0, 1.0)
+
+
+def test_chunk_v2_pred_side_just_below_40_percent_misses():
+    g = words(4)
+    pred = g + ' ' + words(7, 'x')      # |c| = 11 -> 5 * 4 = 20 < 22
+    assert S.chunk_prf([(1, WS.encode(pred))], [(1, WS.encode(g))]) == (0.0, 0.0, 0.0)
+    assert S.chunk_prf([(1, WS.encode(pred))], [(1, WS.encode(g))], 'v1')[:2] == (1.0, 1.0)
+
+
+def test_chunk_v2_short_pred_still_needs_gold_side():
+    g = words(20)
+    pred = 'w0 w1 w2'                   # LCS/|c| = 100 % but LCS/|g| = 15 %
+    assert S.chunk_prf([(1, WS.encode(pred))], [(1, WS.encode(g))]) == (0.0, 0.0, 0.0)
+
+
+def test_chunk_v2_both_sides_ints():
+    assert S._matches(4, 10, 10) and S._matches(4, 10, None)
+    assert not S._matches(4, 10, 11) and S._matches(4, 10, None) and not S._matches(3, 10, 4)
+    assert not S._matches(4, 10, 0) and not S._matches(4, 0, 4)
+
+
+def test_score_chunk_metric_v1_v2():
+    g = words(10)
+    pred = g + ' ' + words(40, 'x')     # v1 hit, v2 miss
+    gold_rows, pred_rows = [q(1, [7], [(7, g)])], [q(1, [7], [(7, pred)])]
+    assert S.score(pred_rows, gold_rows, WS).chunk_f2 == 0.0
+    assert S.score(pred_rows, gold_rows, WS, chunk_metric='v1').chunk_f2 == 1.0
+    assert S.score(pred_rows, gold_rows, WS).chunk_metric == 'v2'
+    with pytest.raises(ValueError):
+        S.score(pred_rows, gold_rows, WS, chunk_metric='v3')
+    with pytest.raises(ValueError):
+        S.chunk_prf([(1, WS.encode(g))], [(1, WS.encode(g))], 'v3')
 
 
 def test_chunk_other_doc_id_never_matches():

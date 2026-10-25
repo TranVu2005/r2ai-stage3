@@ -525,11 +525,28 @@ def build(
     extra_scores: Path | None = None,
     extra_dir: Path | None = None,
     orig_scores: Path | None = None,
+    rank_hook: Any = None,
+    rank_keys_override: dict[str, tuple[str, ...]] | None = None,
+    variant_alias: dict[str, str] | None = None,
     no_extra_chunks: bool = False,
+    pool_hook: Any = None,
+    chunk_t_c: float | None = None,
+    chunk_mode_override: dict[str, str] | None = None,
+    rank_weights: dict[str, tuple[float, ...]] | None = None,
+    chunk_target: int | None = None,
 ) -> list[dict[str, Any]]:
+    """``rank_hook(ranked)`` may add rank keys to the pool13 rows and returns a sidecar dict;
+    ``rank_keys_override`` replaces the RRF keys of a variant; ``variant_alias`` maps an output
+    name to the S31 variant whose keep/chunk rule it follows (all three used by ``r2ai.s35``).
+    S36: ``pool_hook(name, pool)`` adds rank keys to the rows of a K4-free / top-K pool (returns a sidecar dict);
+    ``chunk_t_c`` replaces ``T_C_FIXED`` in the fixed chunk selectors; ``chunk_mode_override`` maps an output name
+    to its chunk mode (e.g. ``fixed-whole``); ``rank_weights`` gives weighted RRF (one weight per rank key);
+    ``chunk_target`` replaces ``THR_C_CHUNKS`` for the ``threshold`` chunk mode (calibration of a new t_c)."""
     started = time.monotonic()
     judge_tag = JUDGE_TAGS.get(judge) if judge else None
-    keys_by_base = {name: variant_rank_keys(name, judge_tag) for name in variants}
+    variant_alias = variant_alias or {}
+    keys_by_base = {name: (rank_keys_override or {}).get(name) or variant_rank_keys(variant_alias.get(name, name), judge_tag)
+                    for name in variants}
     keys_by_variant = {f"{name}{name_suffix}": keys for name, keys in keys_by_base.items()}
     variants = list(keys_by_variant)
     q06_path = q06_scores or pool_dir / "s29_qwen06_scores.parquet"
@@ -549,6 +566,7 @@ def build(
 
     frame = load_candidates(pool_dir, judge_scores, pool13_index, q06_scores)
     ranked = rank_candidates(frame)
+    hook_info = rank_hook(ranked) if rank_hook else None
 
     # Same context preparation as r2ai.s29.build.build.
     p1_rows = _load_submission(inputs["p1"], with_chunks=True)
@@ -588,8 +606,9 @@ def build(
     score_digest = _scores_digest(frame, score_columns)
     correlations = judge_correlations(frame.assign(cosine=frame.cosine_score), ["cosine", *score_columns])
     base_k = {qid: len(baseline[qid]["relevant_docs"]) for qid in ranked}
-    modes = {f"{name}{name_suffix}": variant_k_mode(name, judge_tag) for name in keys_by_base}
-    chunk_modes = {f"{name}{name_suffix}": variant_chunk_mode(name, judge_tag) for name in keys_by_base}
+    modes = {f"{name}{name_suffix}": variant_k_mode(variant_alias.get(name, name), judge_tag) for name in keys_by_base}
+    chunk_modes = {f"{name}{name_suffix}": variant_chunk_mode(variant_alias.get(name, name), judge_tag) for name in keys_by_base}
+    chunk_modes.update(chunk_mode_override or {})
     keep_by_variant: dict[str, dict[int, int]] = {}
     keep_reports: dict[str, dict[str, Any]] = {}
     thr_cache = None
@@ -616,6 +635,7 @@ def build(
             keep_by_variant[name], keep_reports[name] = free_keep(pools[name])
         elif mode:
             keep_by_variant[name], keep_reports[name], thr_cache = variable_keep(ranked, base_k, mode, thr_cache)
+    pool_infos = {name: pool_hook(name, pool) for name, pool in pools.items()} if pool_hook else {}
     j4_ids = None
     if keep_by_variant:
         j4_ids = {qid: [int(r["doc_id"]) for r in select_rrf(rows, base_k[qid], ("cosine_rank", "judge_rank"), RRF_K)]
@@ -629,25 +649,26 @@ def build(
         keys = keys_by_variant[name]
         keep = keep_by_variant.get(name, base_k)
         source = pools.get(name, ranked)
-        chosen = {qid: select_rrf(rows, keep[qid], keys, RRF_K) for qid, rows in source.items()}
+        weights = (rank_weights or {}).get(name)
+        chosen = {qid: select_rrf(rows, keep[qid], keys, RRF_K, weights) for qid, rows in source.items()}
         chosen_ids = {qid: [int(r["doc_id"]) for r in rows] for qid, rows in chosen.items()}
         diff = doc_set_diff(chosen_ids, reference_ids)
         chunk_info: dict[str, Any] = {}
         selector = None
-        chunk_target = {"threshold": THR_C_CHUNKS, "threshold-free": K4_FREE_CHUNKS}.get(chunk_modes[name])
-        if chunk_target is not None and calibrate_tc:
-            score_of = {qid: {int(r["doc_id"]): float(r["judge_score"]) for r in rows} for qid, rows in ranked.items()}
-            calibrating = threshold_chunk_selector(score_of, chunk_target, chunk_info)
+        tc_target = {"threshold": chunk_target or THR_C_CHUNKS, "threshold-free": K4_FREE_CHUNKS}.get(chunk_modes[name])
+        if tc_target is not None and calibrate_tc:
+            score_of = {qid: {int(r["doc_id"]): float(r["judge_score"]) for r in rows} for qid, rows in source.items()}
+            calibrating = threshold_chunk_selector(score_of, tc_target, chunk_info)
 
             def selector(offered, _select=calibrating):
                 _select(offered)
                 raise _Calibrated()
-        elif chunk_target is not None:
-            score_of = {qid: {int(r["doc_id"]): float(r["judge_score"]) for r in rows} for qid, rows in ranked.items()}
-            selector = threshold_chunk_selector(score_of, chunk_target, chunk_info)
+        elif tc_target is not None:
+            score_of = {qid: {int(r["doc_id"]): float(r["judge_score"]) for r in rows} for qid, rows in source.items()}
+            selector = threshold_chunk_selector(score_of, tc_target, chunk_info)
         elif chunk_modes[name] in ("fixed", "fixed-whole", "all"):
             score_of = {qid: {int(r["doc_id"]): float(r["judge_score"]) for r in rows} for qid, rows in source.items()}
-            selector = fixed_chunk_selector(score_of, None if chunk_modes[name] == "all" else T_C_FIXED, chunk_info)
+            selector = fixed_chunk_selector(score_of, None if chunk_modes[name] == "all" else (T_C_FIXED if chunk_t_c is None else chunk_t_c), chunk_info)
         if no_extra_chunks:
             if selector is None:
                 raise ValueError(f"--no-extra-chunks needs a chunk-selector variant, not {name}")
@@ -666,7 +687,7 @@ def build(
             )
             chunk_doc_ids = chunk_info.pop("chunk_doc_ids", None)
         except _Calibrated:
-            result = {"name": name, "status": "calibrated_not_built", "target_chunks": chunk_target,
+            result = {"name": name, "status": "calibrated_not_built", "target_chunks": tc_target,
                       "keep": keep_reports.get(name), **chunk_info}
             print(json.dumps(result, ensure_ascii=False), flush=True)
             summaries.append(result)
@@ -708,7 +729,7 @@ def build(
             "whole_body": WHOLE_BODY if selector is None or chunk_modes[name] in ("all", "fixed-whole")
             else "whole body unless over the ZIP ceiling (S29 cut rule)",
             "chunk_threshold": None if selector is None else {
-                **chunk_info, "target_chunks": chunk_target,
+                **chunk_info, "target_chunks": tc_target,
                 "rule": "one whole-body chunk for every selected doc with text, never cut"
                 if chunk_modes[name] == "all" else "one whole-body chunk per selected doc with P4B >= t_c, never cut"
                 if chunk_modes[name] == "fixed-whole" else "selected docs in RRF order, one whole-body chunk per doc with P4B >= t_c",
@@ -726,6 +747,14 @@ def build(
             "zip_bytes": summary.get("zip_bytes"),
             "note": "the S29 builder's build.json names the 0.6B model; this sidecar records the S31 rank sources",
         }
+        if hook_info is not None:
+            sidecar["rank_hook"] = hook_info
+        if name in pool_infos:
+            sidecar["pool_hook"] = pool_infos[name]
+        if weights is not None:
+            sidecar["rank_weights"] = dict(zip(keys, weights))
+        if chunk_t_c is not None:
+            sidecar["chunk_t_c_override"] = chunk_t_c
         if name == "Jcheck-q06-rrf" and pool13_index is None:
             sidecar["regression_target_json_sha256"] = QRRF_NC140_JSON_SHA256
             sidecar["regression_pass"] = summary.get("json_sha256") == QRRF_NC140_JSON_SHA256

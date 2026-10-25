@@ -34,4 +34,4 @@ Hai quy tắc khác nhau có chủ ý: khung p4b giữ thứ tự union đã đ�
 
 ## Điều không nằm trong bàn giao
 
-Làn en: không có doc en nào được chọn (xem docs/s36-fuse4.md, mục Làn en), nên cả hai bản không chứa doc en. Ba ablation trên p4b-v3 (Vu giao ngày 26/10): xem docs/s36-fuse4.md khi có.
+Làn en: không có doc en nào được chọn (xem docs/s36-fuse4.md, mục Làn en), nên cả hai bản không chứa doc en. Ba ablation trên p4b-v3: chưa dựng, nội dung ba ablation chưa có trong ghi chú nào của S36 nên chờ Vu xác định.

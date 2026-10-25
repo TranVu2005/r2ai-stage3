@@ -21,6 +21,7 @@ function StartRun() {
     $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Script -Run $Run"; CurrentDirectory = 'D:\GitHub\r2ai-stage3' }
     Note "started run_jina.ps1 pid=$($r.ProcessId) rv=$($r.ReturnValue) parts=$(Parts)"
 }
+trap { Note "watchdog error (continuing): $($_.Exception.Message) at line $($_.InvocationInfo.ScriptLineNumber)"; continue }
 $restarts = 0
 $last = Parts
 Note "start run=$Run parts=$last max_restarts=$MaxRestarts check_s=$CheckSeconds"
@@ -38,7 +39,10 @@ while ($true) {
     if ($restarts -ge $MaxRestarts) { Note "STOP after $restarts restarts ($why); parts=$now. Not changing the block size (layout b10s0). Tell Vu."; exit 4 }
     $restarts++
     Note "restart $restarts/$MaxRestarts reason=$why parts=$now"
-    Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'run_jina\.ps1' -or ($_.CommandLine -match 'r2ai\.s35\.jina') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    try {
+        Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and ($_.CommandLine -match 'run_jina\.ps1' -or $_.CommandLine -match 'r2ai\.s35\.jina') } |
+            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    } catch { Note "kill step failed: $($_.Exception.Message)" }
     Start-Sleep -Seconds (30 * $restarts)               # longer pause after each repeated failure
     StartRun
     $stale = 0; $last = Parts

@@ -25,6 +25,9 @@ FOURB_DIR = RUN / 'gpu' / 'qwen3-reranker-4b'
 MERGED_4B = FOURB_DIR / 'scores-120ask-4b.parquet'
 JINA_FINAL = RUN / 'jina-final'
 JINA_FINAL2 = RUN / 'jina-final2'
+PAIRS_V1 = RUN / 'pairs_new_final.parquet'
+PAIRS_V2 = RUN / 'pairs_new_final_v2.parquet'
+PAIRS_FINAL = PAIRS_V2 if PAIRS_V2.exists() else PAIRS_V1     # v2 = after the last crawl batches (b0008, b0009)
 JINA_FIRST = RUN / 'jina'
 S35_JINA = RUNS_DIR / 's35-part-jina' / 'jina'
 SEGMENT_FILES = ('docs.parquet', 'chunks_t256.parquet', 'chunks_struct.parquet', 'provenance.parquet', 'vectors.npz', 'chunk_vectors.npz',
@@ -111,7 +114,7 @@ def jina_state(pairs: pd.DataFrame) -> tuple[dict, pd.DataFrame, set]:
 
 
 def manifest() -> dict:
-    pairs = pd.read_parquet(RUN / 'pairs_new_final.parquet')
+    pairs = pd.read_parquet(PAIRS_FINAL)
     jina, jrows, jdone_q = jina_state(pairs)
     jk = set(zip(jrows.query_id, jrows.doc_id))
     ids4 = set()
@@ -135,14 +138,15 @@ def manifest() -> dict:
         'scope': {'crawl': '120ask closed: batches 1-6 (55,994 URLs ok) + batch-0007 (shard r1-00028, 388 ok); no more data after this',
                   'canonical_base': 'canonical-20261018 (unchanged); 120ask lives in the segments below'},
         'segments': segments(),
-        'pairs': {'file': file_entry(RUN / 'pairs_new_final.parquet'), 'pairs': len(pairs), 'queries': int(pairs.query_id.nunique()),
+        'pairs': {'file': file_entry(PAIRS_FINAL), 'pairs': len(pairs), 'queries': int(pairs.query_id.nunique()),
                   'docs': int(pairs.doc_id.nunique()), 'pair_id_range': [int(pairs.pair_id.min()), int(pairs.pair_id.max())],
                   'in_top211': int(pairs.in_top211.sum()), 'in_pool13': int(pairs.in_pool13.sum())},
         'scores': {'4b': fourb(pairs), 'cmax': cmax(pairs), 'jina': jina},
         'coverage_pct_of_pairs': {'4b': round(100 * flags.has_4b.mean(), 2), 'cmax': round(100 * flags.has_cmax.mean(), 2), 'jina': round(100 * flags.has_jina.mean(), 2)},
         'flags': {'pairs_score_flags': file_entry(OUT / 'pairs_score_flags.parquet'), 'jina_queries_scored': file_entry(OUT / 'jina_queries_scored.parquet')},
-        'final': bool(jina['status'] == 'complete' and flags.has_4b.all() and flags.has_cmax.all()),
-        'note': 'final=false: build 120A-p4b from cosine + 4B + C-max now (Jina not needed); Jina + the pending 4B pairs arrive in the final manifest',
+        'final': bool(jina['status'] == 'complete' and flags.has_cmax.all()),
+        'pairs_without_4b': int((~flags.has_4b).sum()),   # S35 merges these with the d300 pack into one Kaggle subset; 4B is not exported here
+        'note': 'final=false: Jina (or C-max) still pending. build 120A-p4b from cosine + 4B + C-max when the pairs without 4B are covered; Jina is not needed for it',
     }
     atomic_json(OUT / 'manifest.json', man)
     return {'manifest': rel(OUT / 'manifest.json'), 'sha256': sha256_file(OUT / 'manifest.json'), 'final': man['final'],
@@ -172,11 +176,30 @@ def merge4b() -> dict:
     return res
 
 
+def pairs_v2() -> dict:
+    """pairs_new_final_v2.parquet = the registry after the last crawl batches. Checks that the ids of v1 did not move and the new ids continue after them."""
+    v1 = pd.read_parquet(PAIRS_V1)
+    cur = pd.read_parquet(RUN / 'pairs_new.parquet')
+    if not cur.pair_id.is_unique:
+        raise SystemExit('duplicate pair_id in pairs_new.parquet')
+    head = cur[cur.pair_id.isin(v1.pair_id)].sort_values('pair_id').reset_index(drop=True)
+    old = v1.sort_values('pair_id').reset_index(drop=True)
+    if len(head) != len(old) or not (head[['pair_id', 'query_id', 'doc_id']].values == old[['pair_id', 'query_id', 'doc_id']].values).all():
+        raise SystemExit('pair ids of v1 changed in pairs_new.parquet')
+    new = cur[~cur.pair_id.isin(v1.pair_id)]
+    if len(new) and (new.pair_id.min() <= v1.pair_id.max() or new.pair_id.max() - new.pair_id.min() + 1 != len(new)):
+        raise SystemExit('new pair ids do not continue after v1 without gaps')
+    cur.sort_values('pair_id').reset_index(drop=True).to_parquet(PAIRS_V2, index=False)
+    return {'pairs_v1': len(v1), 'pairs_v2': len(cur), 'pairs_added': len(new), 'queries_v2': int(cur.query_id.nunique()), 'docs_v2': int(cur.doc_id.nunique()),
+            'queries_touched_by_new': int(new.query_id.nunique()), 'docs_new': int(new.doc_id.nunique()),
+            'by_batch': {b: int(n) for b, n in new.batch.value_counts().sort_index().items()}, 'sha256': sha256_file(PAIRS_V2)}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('command', choices=('manifest', 'merge4b'))
+    ap.add_argument('command', choices=('manifest', 'merge4b', 'pairsv2'))
     a = ap.parse_args(argv)
-    print(json.dumps(manifest() if a.command == 'manifest' else merge4b(), indent=1, ensure_ascii=False, default=str))
+    print(json.dumps({'manifest': manifest, 'merge4b': merge4b, 'pairsv2': pairs_v2}[a.command](), indent=1, ensure_ascii=False, default=str))
     return 0
 
 

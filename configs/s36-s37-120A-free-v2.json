@@ -1,6 +1,6 @@
 {
   "name": "120A-free-v2",
-  "jina": "D:/GitHub/r2ai-stage3/out/runs/s36-fuse4/s37/jina-final-scores.parquet",
+  "jina": "D:/GitHub/r2ai-stage3/out/runs/s36-fuse4/s37/jina-final2-scores.parquet",
   "pairs_new": [
     "D:/GitHub/r2ai-stage3/out/runs/s37/pairs_new_final_v2.parquet",
     "D:/GitHub/r2ai-stage3/out/runs/s36-fuse4/d300/pairs_final.parquet"
@@ -13,5 +13,15 @@
   "carriers": {
     "rule": "fair",
     "target": 175548
-  }
+  },
+  "cmax": [
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-b0004.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-b0005.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-b0006.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-b0007.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-b0008.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-b0009.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-d300.parquet"
+  ]
 }

@@ -12,5 +12,14 @@
   "carriers": {
     "rule": "fair",
     "target": 175548
-  }
+  },
+  "cmax": [
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-b0004.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-b0005.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-b0006.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-b0007.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-b0008.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-b0009.parquet"
+  ]
 }

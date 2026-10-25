@@ -34,6 +34,7 @@ from typing import Any, Sequence
 
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 
 from r2ai import paths
 from r2ai.s29.qwen_judge import _atomic_json, _sha256
@@ -275,9 +276,16 @@ def apply(cfg: dict[str, Any]) -> dict[str, Any]:
         jina = assemble_jina(jina_base, dict(zip(zip(s37_jina.query_id.astype(int), s37_jina.doc_id.astype(int)), s37_jina.score.astype(float))))
     cmax, cmax_files = fuse.load_cmax(fuse.run_root() / "extra" / "cmax-scores.parquet")
     by_pair = dict(zip(pairs.pair_id.astype(int), zip(pairs.query_id.astype(int), pairs.doc_id.astype(int))))
-    for pid, value in load_scores(spec["cmax"], "pair_id", "cmax").items():
+    keyed_files = [f for f in spec["cmax"] if "pair_id" not in pq.read_schema(f).names]       # e.g. cmax_scores-d300.parquet: (query_id, doc_id, cmax)
+    for pid, value in load_scores([f for f in spec["cmax"] if f not in keyed_files], "pair_id", "cmax").items():
         if pid in by_pair:
             cmax[by_pair[pid]] = value
+    for f in keyed_files:
+        frame = pd.read_parquet(f, columns=["query_id", "doc_id", "cmax"])
+        for q, d, v in zip(frame.query_id.astype(int), frame.doc_id.astype(int), frame.cmax.astype(float)):
+            if (q, d) in cmax:
+                raise ValueError(f"{f}: ({q}, {d}) already has a C-max score")
+            cmax[(q, d)] = v
     missing = {}
     for source, lookup in (("jina", jina), ("cmax", cmax)):
         gap = missing_pairs(pools, lookup)

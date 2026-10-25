@@ -38,6 +38,50 @@ GATE_PAIRS, GATE_SEED = 1_000, 36
 RCHK = s33_pool.RCHK_COLUMNS
 
 
+STORE = paths.DATA_DIR / 's37_120ask'
+QUERY_VECTORS = paths.RUNS_DIR / 's29-qwen-judge' / 'query_vectors.npz'
+CMAX_TOP = 3
+
+
+def s37_chunk_rows(pairs: pd.DataFrame, queries: dict, tok) -> tuple[pd.DataFrame, pd.DataFrame, set]:
+    """Pairs whose doc lives in an S37 120ask segment: top-3 t256 body/answer chunks by cosine of the S29 query vector and the segment's
+    chunk vector (the rule of r2ai.s37.ingest.cmax_top3), texts cut to 512 Qwen3 tokens. Docs without such a chunk are scored on doc_text.
+    Returns (chunk rows, doc_text rows, pair keys handled)."""
+    z = np.load(QUERY_VECTORS)
+    qpos = {int(x): i for i, x in enumerate(z['q_ids'])}
+    qd = z['q_dense'].astype(np.float32)
+    chunk_rows, fb_rows, handled = [], [], set()
+    for seg in sorted(STORE.glob('seg*')):
+        docs = pd.read_parquet(seg / 'docs.parquet', columns=['doc_id', 'doc_text'])
+        dtext = dict(zip(docs.doc_id.astype(int), docs.doc_text))
+        mine = pairs[pairs.doc_id.isin(dtext)]
+        if mine.empty:
+            continue
+        ch = pd.read_parquet(seg / 'chunks_t256.parquet', columns=['chunk_id', 'doc_ids', 'field', 'text'])
+        dense = np.load(seg / 'chunk_vectors.npz')['t256_dense'].astype(np.float32)
+        by_doc: dict[int, list[int]] = {}
+        for i, (ids, f) in enumerate(zip(ch.doc_ids, ch.field)):
+            if f in ('body', 'answer'):
+                for x in ids:
+                    by_doc.setdefault(int(x), []).append(i)
+        for r in mine.itertuples():
+            idx = by_doc.get(int(r.doc_id), [])
+            base = dict(src_pair_id=r.src_pair_id, query_id=r.query_id, doc_id=r.doc_id, cosine_rank=r.cosine_rank, cosine_score=r.cosine_score,
+                        in_pool13=True, lang='zh', query_text=queries[int(r.query_id)])
+            if idx:
+                cos = dense[idx] @ qd[qpos[int(r.query_id)]]
+                for rank, j in enumerate(np.argsort(-cos, kind='stable')[:CMAX_TOP], 1):
+                    t, n = truncate_document(tok, ch.text.iat[idx[j]])
+                    chunk_rows.append({**base, 'doc_text': t, 'doc_tokens': n, 'chunk_id': int(ch.chunk_id.iat[idx[j]]), 'chunk_rank': rank,
+                                       'chunk_cosine': float(cos[j]), 'field': ch.field.iat[idx[j]], 'origin': 's', 'chunk_source': 's37-chunk'})
+            else:
+                t, n = truncate_document(tok, dtext[int(r.doc_id)])
+                fb_rows.append({**base, 'doc_text': t, 'doc_tokens': n, 'chunk_id': -1, 'chunk_rank': 0, 'chunk_cosine': np.nan, 'field': 'doc_text',
+                                'origin': 's', 'chunk_source': 'fallback'})
+            handled.add((int(r.query_id), int(r.doc_id)))
+    return pd.DataFrame(chunk_rows), pd.DataFrame(fb_rows), handled
+
+
 def cpu_encoder() -> None:
     """select_like_s32 builds a CUDA BGE-M3 for the few chunks without a stored vector: run it on the CPU instead."""
     import r2ai.index.bge_m3 as m3
@@ -79,12 +123,25 @@ def prepare(limit: int | None = None) -> dict:
     pairs = pd.DataFrame({'src_pair_id': SRC_ID_BASE + np.arange(len(tab), dtype=np.int64), 'query_id': tab.query_id.astype(np.int64).to_numpy(),
                           'doc_id': tab.doc_id.astype(np.int64).to_numpy(), 'cosine_rank': tab.cosine_rank.astype(np.int64).to_numpy(),
                           'cosine_score': tab.cosine_score.astype(float).to_numpy(), 'lang': [lang[int(d)] for d in tab.doc_id], 'source': 'd300'})
+    from transformers import AutoTokenizer
+    tok = AutoTokenizer.from_pretrained(_model_path(), local_files_only=True)
+    s37_chunks, s37_fb, s37_keys = s37_chunk_rows(pairs, queries, tok)
+    log(f'S37 120ask docs: {len(s37_keys)} pairs, {len(s37_chunks)} chunk rows, {len(s37_fb)} doc_text rows')
+    pairs = pairs[[(int(q), int(d)) not in s37_keys for q, d in zip(pairs.query_id, pairs.doc_id)]].reset_index(drop=True)
+    all_pairs = pd.DataFrame({'query_id': tab.query_id.astype(np.int64).to_numpy(), 'doc_id': tab.doc_id.astype(np.int64).to_numpy()})
     s32_dir = s33_pool.s32_pool()
+    sup_file = s32_dir / 'supplement_vectors.npz'
+    if (OUT / 'supplement_vectors.npz').exists():      # chunk vectors embedded on the CPU by an earlier attempt: reuse them
+        a, b = np.load(sup_file), np.load(OUT / 'supplement_vectors.npz')
+        comb = OUT / 'supplement_combined.npz'
+        np.savez(comb, origin=np.concatenate([a['origin'], b['origin']]), chunk_id=np.concatenate([a['chunk_id'], b['chunk_id']]),
+                 dense=np.concatenate([a['dense'], b['dense']]))
+        sup_file = comb
     s32_index = pd.read_parquet(s32_dir / 'chunk_pairs.parquet')
     covered = s32_index.drop_duplicates('src_pair_id')[['src_pair_id', 'query_id', 'doc_id', 'cosine_rank', 'cosine_score', 'lang']]
     gate_pairs = covered.sample(n=GATE_PAIRS, random_state=GATE_SEED).copy()
     gate_pairs['source'] = 'gate'
-    sel, fallback, info = s33_pool.select_like_s32(pd.concat([pairs, gate_pairs], ignore_index=True), log, s32_dir / 'supplement_vectors.npz', OUT)
+    sel, fallback, info = s33_pool.select_like_s32(pd.concat([pairs, gate_pairs], ignore_index=True), log, sup_file, OUT)
     gsel = sel[sel.source == 'gate']
     ref = s32_index[s32_index.src_pair_id.isin(gate_pairs.src_pair_id)]
     got = gsel.sort_values(['src_pair_id', 'chunk_rank']).groupby('src_pair_id').chunk_id.apply(list)
@@ -109,6 +166,9 @@ def prepare(limit: int | None = None) -> dict:
         tok = AutoTokenizer.from_pretrained(_model_path(), local_files_only=True)
         dt = pq.read_table(CANONICAL / 'docs.parquet', columns=['doc_id', 'doc_text'], filters=[('doc_id', 'in', sorted(fb.doc_id.unique().tolist()))]).to_pandas()
         text = dict(zip(dt.doc_id.astype(int), dt.doc_text))
+        lost = sorted(set(fb.doc_id.astype(int)) - set(text))
+        if lost:
+            raise SystemExit(f'{len(lost)} doc_text fallback docs are neither canonical nor S37 (e.g. {lost[:5]})')
         cut = {}
         for d in fb.doc_id.unique():
             cut[int(d)] = truncate_document(tok, text[int(d)])
@@ -119,12 +179,13 @@ def prepare(limit: int | None = None) -> dict:
     fb['field'], fb['origin'], fb['chunk_source'], fb['in_pool13'], fb['pair_id'] = 'doc_text', 'd', 'fallback', True, -1
 
     cols = list(RCHK)
-    rows = pd.concat([sel.assign(src_pair_id=sel.src_pair_id.astype(np.int64))[cols], fb[cols]], ignore_index=True)
+    rows = pd.concat([sel.assign(src_pair_id=sel.src_pair_id.astype(np.int64))[cols], fb[cols], s37_chunks[cols] if len(s37_chunks) else None,
+                      s37_fb[cols] if len(s37_fb) else None], ignore_index=True)
     rows = rows.sort_values(['query_id', 'cosine_rank', 'doc_id', 'chunk_rank'], kind='stable').reset_index(drop=True)
     rows['pair_id'] = ROW_ID_BASE + np.arange(len(rows), dtype=np.int64)
     if rows.duplicated(['query_id', 'doc_id', 'chunk_rank', 'chunk_id']).any():
         raise SystemExit('duplicate rows')
-    keys = set(zip(pairs.query_id, pairs.doc_id))
+    keys = set(zip(all_pairs.query_id, all_pairs.doc_id))
     got_keys = set(zip(rows.query_id.astype(int), rows.doc_id.astype(int)))
     if got_keys != keys:
         raise SystemExit(f'{len(keys - got_keys)} pairs without any row, {len(got_keys - keys)} extra')
@@ -133,9 +194,9 @@ def prepare(limit: int | None = None) -> dict:
     s33_pool._atomic_frame(OUT / 'chunk_pairs.parquet', rows[[c for c in cols if c not in ('query_text', 'doc_text')]])
     shutil.copyfile(JUDGE, POOL / 'judge_score.py')
     per_pair = rows.groupby(['query_id', 'doc_id']).size()
-    man = {'status': 'prepared', 'model': 'qwen3-reranker-0.6b', 'revision': 'e61197ed45024b0ed8a2d74b80b4d909f1255473', 'pairs': len(pairs),
-           'rows': len(rows), 'rows_chunks': int((rows.chunk_source == 'd300').sum()), 'rows_doc_text_fallback': int((rows.chunk_source == 'fallback').sum()),
-           'pairs_with_chunks': int(len(pairs) - len(fb)), 'pairs_doc_text': int(len(fb)), 'rows_per_pair': {str(k): int(v) for k, v in per_pair.value_counts().sort_index().items()},
+    man = {'status': 'prepared', 'model': 'qwen3-reranker-0.6b', 'revision': 'e61197ed45024b0ed8a2d74b80b4d909f1255473', 'pairs': len(all_pairs),
+           'pairs_s37_docs': len(s37_keys), 'rows': len(rows), 'rows_chunks': int((rows.chunk_source == 'd300').sum()), 'rows_doc_text_fallback': int((rows.chunk_source == 'fallback').sum()),
+           'pairs_with_chunks': int(len(all_pairs) - len(fb) - len(s37_fb)), 'pairs_doc_text': int(len(fb) + len(s37_fb)), 'rows_per_pair': {str(k): int(v) for k, v in per_pair.value_counts().sort_index().items()},
            'doc_tokens_mean': float(rows.doc_tokens.mean()), 'gate': gate, **info, 'shards': shards,
            'eta_hours_local': round(len(rows) / 24.0 / 3600, 2), 'eta_rule': '24 rows/s (S32 local RTX 3050 6 GB bf16)',
            'src_pair_file_sha256': _sha256(SRC), 'judge_score_py_sha256': JUDGE_SHA, 'seconds': round(time.monotonic() - t0, 1)}

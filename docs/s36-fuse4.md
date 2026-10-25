@@ -353,3 +353,16 @@ Manifest S37 (SHA `995a77ed…8dff`, `final=true`, 22:07): Jina 1.002/1.002 quer
 
 `apply` nhận tệp C-max khoá (query_id, doc_id) (như `cmax_scores-d300.parquet`) bên cạnh tệp khoá pair_id; hai config p4b (v2, v3) ghim danh sách C-max tường minh (7 tệp như lúc dựng) để tệp d300 mới không đổi kết quả. **120A-free-v2** (`configs/s36-s37-120A-free-v2.json`: Jina bù đủ 1.002 query, C-max đủ gồm d300, pool D=300 theo thứ tự corpus, 0 query lệch): không còn cặp nào thiếu C-max; 31.645 cặp thiếu Jina (599 query, phần thêm của D=300, 30.875 cặp doc mới) xếp cuối nguồn Jina; 220.599 doc chọn (P10/P50/P90 = 82/188/281), 20.122 doc 120ask (16.142 doc khác nhau, TB 16,77 mỗi query, 903 query có ≥1), Doc F2 dự đoán 0,4250 (khung free, không so trực tiếp với p4b: mô hình lệch khoảng −0,022 ở pool ngắn), carrier CR-fair 175.547 (ρ 0,7931; P10/P50/P90 = 66/150/223, top-100 13,27%). Compose: `scripts/s36/run_120a_free_v2.sh`.
 
+## Làn en: điểm 4B, hiệu chỉnh p_cal và EF2 chung (25/10, 23:50)
+
+**Điểm gói B** (nhập bằng `d300 import4b --tag final-4b-B`): 24.000 cặp, SHA `fd3f5038…7502`, revision `22e68366…`, 4.478,6 giây T4. **Hồi quy scorer trên T4** (`regression.json`): 200 cặp vi/zh chấm bằng scorer ghim và scorer en trên cùng máy, |Δ| lớn nhất = **0,0** (trung bình 0,0): đường vi/zh không đổi; so với điểm Kaggle S31 cũ lệch tối đa 0,0047 (số học phần cứng, như S31 đã đo). **Phân bố P4B của en**: trung bình 0,240, trung vị 0,061, 22,6% cặp có P4B ≥ 0,5, 4,8% ≥ 0,9, tối đa 0,997: 4B coi nhiều abstract en là trả lời được câu hỏi tiếng Việt, trong khi LB cho thấy precision en gần 0 (EN-only-Q Doc P = 0; E1 với 1.837 doc en Doc P giảm, Final 0,2655 sang 0,2648): điểm 4B trên en không chuyển thành độ liên quan theo nhãn của BTC.
+
+**Hiệu chỉnh** p_cal(en) = sigmoid(a_en · logit(P4B) + b_en), giữ độ dốc a_en = a = 0,5298 của vi/zh (bằng chứng LB chỉ có một số cho mỗi tập, nên chỉ khớp độ dịch b_en), khớp trung bình p_cal của top-20 en (24.000 cặp) bằng ε; Doc P hiển thị 4 chữ số nên Doc P = 0 nghĩa là < 5e-5:
+| ε (cận trên của trung bình p_cal) | b_en | p_cal tối đa | số en kỳ vọng liên quan trong 24.000 cặp | doc en được chọn |
+|---|---:|---:|---:|---:|
+| **5e-5** (EN-only-Q Doc P = 0, ràng buộc chính) | **−9,6045** | **0,0015** | 1,2 | **0** |
+| 5e-4 | −7,3002 | 0,0148 | 12 | 0 |
+| 4e-3 (cận E1 < 0,4%, nới lỏng, áp cho tập E1 chứ không phải top-20 cosine) | −5,2077 | 0,1088 | 96 | 9 (gain Doc F2 dự đoán 3e-6) |
+
+**EF2 chung** (quy tắc hoà vốn): thêm một doc xác suất p vào lựa chọn có F2 = 5 TP / (4 G + k) làm F2 tăng khi và chỉ khi p > F2/5; ngưỡng này theo query trên p4b-v3 là trung bình 0,0841, P10 0,0627, nhỏ nhất 0,0249. Với ràng buộc chính ε = 5e-5 thì p_cal tối đa của mọi doc en là 0,0015, thấp hơn ngưỡng nhỏ nhất, nên **0 doc en được chọn**; mọi cách hiệu chỉnh thoả Σp ≤ 1,2 cũng chỉ cho được tối đa khoảng 14 doc vượt ngưỡng trung bình, không phân biệt được. Chỉ khi nới tới ε = 4e-3 mới có 9 doc được chọn và lợi ích dự đoán là 3e-6. **Kết luận: không dựng probe 120A-p4b-v2+en, không cần nộp.** Kết quả ở `out/runs/s36-fuse4/en/joint.json`; mã `r2ai.s36.enlane joint`; `apply` ghi thêm `perq-<name>.parquet` (k, TP, G, F2 dự đoán từng query).
+

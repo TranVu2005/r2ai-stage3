@@ -309,6 +309,9 @@ def apply(cfg: dict[str, Any]) -> dict[str, Any]:
         calibrated = cal.Calibrated(frame, "p4b", a, b, s_free, use_tail=True, g_depth=cal.FREE_G_DEPTH)
     keep = cal.ef2_keep(calibrated)
     chosen = cal.chosen_rows(frame, keep)
+    perq = pd.DataFrame([{"query_id": q, "k": int(keep[q]), "tp": float(calibrated.p[q][: keep[q]].sum()), "g": float(calibrated.g[q])} for q in frame.qids])
+    perq["f2"] = 5 * perq.tp / (4 * perq.g + perq.k)              # predicted F2 of the query; a doc adds to it only if its p_cal > f2 / 5
+    perq.to_parquet(out / f"perq-{name}.parquet", index=False)
     sel = pd.DataFrame([(q, int(r["doc_id"]), k, float(r["judge_score"])) for q, rows in chosen.items() for k, r in enumerate(rows, 1)],
                        columns=["query_id", "doc_id", "rank", "p4b"])
     sel["chunk"] = sel.p4b >= t_c                                               # fixed-whole: the global threshold carriers

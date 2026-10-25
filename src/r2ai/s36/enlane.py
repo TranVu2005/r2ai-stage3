@@ -145,16 +145,83 @@ def gate(n: int = 200, seed: int = 20261025, device: str = "cuda") -> dict[str, 
     return result
 
 
+# ------------------------------------------------------------------------------------------------- calibration and joint EF2
+EPS_GRID = (5e-5, 5e-4, 4e-3)      # upper bound of the mean p_cal of the en top-20: LB resolution of Doc P = 0 (EN-only-Q), 4e-3 = the E1 bound (< 0.4%)
+
+
+def calibrate(p4b: np.ndarray, a: float, target: float) -> float:
+    """``b_en`` such that mean sigmoid(a * logit(P4B) + b_en) over ``p4b`` equals ``target`` (bisection; the mean is increasing in b)."""
+    from r2ai.s36.cal import logit, sigmoid
+
+    x = a * logit(p4b)
+    lo, hi = -60.0, 30.0
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        lo, hi = (mid, hi) if float(sigmoid(x + mid).mean()) < target else (lo, mid)
+    return 0.5 * (lo + hi)
+
+
+def joint(perq: pd.DataFrame, en_scores: pd.DataFrame, a: float, eps_grid: Sequence[float] = EPS_GRID) -> dict[str, Any]:
+    """Joint EF2 of the vi/zh selection and the en lane.
+
+    ``perq``: ``query_id, k, tp, g, f2`` of the vi/zh EF2 selection (predicted TP, G_q and F2 per query); ``en_scores``: ``query_id, doc_id, score``
+    (4B of the top-20 en pairs). Adding a doc with calibrated probability p to a selection with F2 = 5 TP / (4 G + k) raises F2 iff
+    p > TP / (4 G + k) = F2 / 5 (the break-even); the en docs are tried by decreasing p_cal and each accepted doc raises the break-even.
+    ``a_en`` = the vi/zh slope ``a`` (the LB evidence is one number per set, so only the offset ``b_en`` is fitted)."""
+    from r2ai.s36.cal import logit, sigmoid
+
+    scores = en_scores.score.to_numpy(np.float64)
+    base = perq.set_index("query_id")
+    out: dict[str, Any] = {"a_en": a, "queries": int(len(base)), "en_pairs": int(len(en_scores)),
+                           "break_even_f2_over_5": {"min": float((base.f2 / 5).min()), "p10": float((base.f2 / 5).quantile(.1)), "mean": float((base.f2 / 5).mean())},
+                           "p4b_en": {"mean": float(scores.mean()), "max": float(scores.max()), "share_ge_0.5": float((scores >= 0.5).mean())}, "grid": {}}
+    for eps in eps_grid:
+        b_en = calibrate(scores, a, eps)
+        p = sigmoid(a * logit(scores) + b_en)
+        frame = en_scores.assign(p=p)
+        chosen = 0
+        for q, g in frame.groupby("query_id"):
+            tp, k, tg = float(base.tp[q]), int(base.k[q]), float(base.g[q])
+            for pv in sorted(g.p, reverse=True):
+                if pv > tp / (4 * tg + k):
+                    tp, k = tp + pv, k + 1
+                    chosen += 1
+                else:
+                    break
+        out["grid"][f"{eps:g}"] = {"b_en": float(b_en), "p_cal_mean": float(p.mean()), "p_cal_max": float(p.max()), "p_cal_p99": float(np.quantile(p, .99)),
+                                   "expected_relevant_en_in_top20": float(p.sum()), "docs_above_min_break_even": int((p > out["break_even_f2_over_5"]["min"]).sum()),
+                                   "en_docs_chosen": int(chosen)}
+    return out
+
+
+def run_joint(perq_path: Path, scores_path: Path, a: float) -> dict[str, Any]:
+    pairs_en = pd.read_parquet(out_dir() / "pairs_en.parquet", columns=["pair_id", "query_id", "doc_id"])
+    scores = pd.read_parquet(scores_path, columns=["pair_id", "score"]).merge(pairs_en, on="pair_id")
+    if len(scores) != len(pairs_en):
+        raise ValueError(f"{len(pairs_en) - len(scores)} en pairs have no 4B score")
+    result = joint(pd.read_parquet(perq_path), scores[["query_id", "doc_id", "score"]], a)
+    result["inputs"] = {"perq": str(perq_path), "scores": str(scores_path), "scores_sha256": _sha256(scores_path)}
+    paths.assert_writable(out_dir())
+    _atomic_json(out_dir() / "joint.json", result)
+    return result
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=("scorer", "gate", "pairs"))
+    parser.add_argument("command", choices=("scorer", "gate", "pairs", "joint"))
     parser.add_argument("--device", default="cuda")
+    parser.add_argument("--perq", type=Path, default=None, help="joint: perq-<name>.parquet of the vi/zh EF2 selection (s37 apply)")
+    parser.add_argument("--scores", type=Path, default=None, help="joint: 4B scores of the en pairs (default d300/final-4b-B/gpu/.../scores-extra.parquet)")
+    parser.add_argument("--a", type=float, default=0.5298075151496865, help="joint: slope a of the vi/zh calibration (S36 cal.json, variant p4b)")
     args = parser.parse_args(argv)
     if args.command == "scorer":
         result = make_scorer()
         _atomic_json(out_dir() / "scorer" / "scorer.json", result)
     elif args.command == "gate":
         result = gate(device=args.device)
+    elif args.command == "joint":
+        scores = args.scores or (fuse.run_root() / "d300" / "final-4b-B" / "gpu" / "qwen3-reranker-4b" / "scores-extra.parquet")
+        result = run_joint(args.perq, scores, args.a)
     else:
         frame = pairs()
         paths.assert_writable(out_dir())

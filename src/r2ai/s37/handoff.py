@@ -8,7 +8,7 @@ without Jina and then rerun with the final manifest. Nothing here recomputes a s
 """
 from __future__ import annotations
 
-from r2ai.paths import RUNS_DIR, assert_writable
+from r2ai.paths import DATA_DIR, RUNS_DIR, assert_writable
 
 import argparse
 import json
@@ -49,8 +49,15 @@ def segments() -> list[dict]:
     out = []
     for seg in sorted(STORE.glob('seg37*')):
         man = json.loads((seg / 'segment.json').read_text('utf-8')) if (seg / 'segment.json').exists() else {}
-        out.append({'segment': seg.name, 'state': man.get('state'), 'docs': int(len(pd.read_parquet(seg / 'docs.parquet', columns=['doc_id']))),
+        out.append({'segment': seg.name, 'lang': 'zh', 'state': man.get('state'), 'docs': int(len(pd.read_parquet(seg / 'docs.parquet', columns=['doc_id']))),
                     'files': {f: file_entry(seg / f) for f in SEGMENT_FILES if (seg / f).exists()}})
+    en = DATA_DIR / 's37_en' / 'seg37900-en-pubmed'          # PubMed en segment (canonical-20261025): doc-level vectors only, no chunk vectors, no scores
+    if (en / 'manifest.json').exists():
+        man = json.loads((en / 'manifest.json').read_text('utf-8'))
+        out.append({'segment': en.name, 'lang': 'en', 'state': man.get('state'), 'docs': man['docs'], 'docs_thin': man['docs_thin'],
+                    'doc_text_rule': man['doc_text_rule'], 'source': man['source'],
+                    'files': {f: file_entry(en / f) for f in ('docs.parquet', 'vectors.npz', 'manifest.json') if (en / f).exists()},
+                    'note': 'no 4B / Jina / C-max scores for en (Vu, 25/10)'})
     return out
 
 

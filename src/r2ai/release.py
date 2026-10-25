@@ -183,6 +183,57 @@ def build(config: Path, work: Path | None, search_t: bool, rounds: int, drop: in
     return report
 
 
+# Measured rates (S35-S37, 24-26/10) behind the private-set plan; ``None`` = never timed, the step is listed without an estimate.
+RATES = {
+    "kaggle_4b_pairs_per_hour": 20_900,        # 33,233 pairs in 1.59 h and 24,000 pairs in 1.15 h on 2x T4 (final-4b, final-4b-B)
+    "cmax_rows_per_second": 28.6,              # d300 C-max: 84,124 rows in 49 min on the local GPU (S32: 24-27 rows/s)
+    "cmax_rows_per_pair": 2.67,                # 84,124 rows / 31,495 pairs
+    "jina_queries_per_minute": (1.49, 1.96),   # S37 jina (975 queries, with CUDA crashes) and jina-final2 (858 queries in 7.3 h), 300 pairs per query
+    "compose_write_seconds": 776,              # 120A-p4b-v3 full+w768 write + validator
+    "query_embed_seconds": None,
+    "pool_cosine_seconds": None,
+}
+PRIVATE_PREREQUISITES = {
+    "query vectors (S29 recipe)": "out/runs/s29-qwen-judge/query_vectors.npz",
+    "corpus cosine pool (S37, top-400)": "out/runs/s37/pool.npz",
+    "4B Kaggle notebook": "notebooks/s36-kaggle-4b-final.ipynb",
+    "4B scorer (pinned S31 scorer)": "out/runs/s36-fuse4/d300/kaggle-dataset-final4b/judge_score.py",
+    "C-max run script": "scripts/s37/d300_cmax.py",
+    "Jina run script": "scripts/s37/run_jina.ps1",
+    "d300 exporter": "src/r2ai/s36/d300.py",
+}
+
+
+def private_plan(queries: int, new_queries: int, depth: int = 300) -> dict[str, Any]:
+    """Dry run for the private set: what each step needs and how long it takes at the measured rates. Reads files, runs nothing."""
+    present = {k: (ROOT / v).exists() or (paths.OUT_DIR.parent / v).exists() for k, v in PRIVATE_PREREQUISITES.items()}
+    if not new_queries:
+        return {"case": "same 1,200 queries as the public set", "gpu": False,
+                "steps": [{"step": "python -m r2ai.release build --config configs/s36-handoff-120A-<p4b-v3|free-v2>.json",
+                           "estimate_hours": round((RATES["compose_write_seconds"] + 600) / 3600, 2), "note": "CPU only; see README_RELEASE.md for the measured times"}]}
+    pairs = new_queries * depth
+    cmax_hours = pairs * RATES["cmax_rows_per_pair"] / RATES["cmax_rows_per_second"] / 3600
+    jina_lo, jina_hi = (new_queries / r / 60 for r in RATES["jina_queries_per_minute"][::-1])
+    kaggle = pairs / RATES["kaggle_4b_pairs_per_hour"]
+    steps = [
+        {"step": "1. embed the new queries (BGE-M3 dense, S29 recipe, revision 5617a9f61b028005a4858fdac845db406aefb181)", "where": "local GPU", "estimate_hours": None,
+         "note": "not timed; writes a query_vectors.npz in the S29 layout"},
+        {"step": "2. corpus cosine pool: top-400 over S26 doc vectors + the 120ask / Pharmacity segments (r2ai.s37.ingest.build_pool, r2ai.s36.d300.merged_top)",
+         "where": "local CPU/GPU", "estimate_hours": None, "note": "not timed; load_queries() reads the S29 file, point it at the new vectors"},
+        {"step": f"3. export the 4B package ({pairs:,} pairs at depth {depth}) with r2ai.s36.d300 export-final; Vu runs notebooks/s36-kaggle-4b-final.ipynb on Kaggle (2x T4)",
+         "where": "Kaggle", "estimate_hours": round(kaggle, 1), "note": "more than one 12 h Kaggle session: split the package, one dataset per session"},
+        {"step": f"4. C-max (Qwen3-Reranker-0.6B, S32 recipe) on {pairs:,} pairs (scripts/s37/d300_cmax.py + run_d300_cmax.ps1)", "where": "local GPU",
+         "estimate_hours": round(cmax_hours, 1), "note": f"{RATES['cmax_rows_per_pair']} chunk rows per pair"},
+        {"step": f"5. Jina Reranker v3.5 listwise on {new_queries:,} queries (r2ai.s37.jinapool, scripts/s37/run_jina.ps1, layout b10s0)", "where": "local GPU",
+         "estimate_hours": f"{jina_lo:.1f} to {jina_hi:.1f}", "note": "6 GiB GPU shared with the desktop: OOM restarts happened; not parallel with step 4"},
+        {"step": "6. apply (free frame, pool fixed depth 300) -> compose -> validator: copy configs/s36-handoff-120A-free-v2.json, point pairs_new / scores_4b / cmax / jina "
+                 "at the new files", "where": "CPU", "estimate_hours": round((RATES["compose_write_seconds"] + 600) / 3600, 2),
+         "note": "the p4b frame cannot be used: its pool is the old pool13 of the public queries (K_q of the baseline)"},
+    ]
+    return {"case": f"{new_queries:,} new queries", "gpu": True, "prerequisites_present": present,
+            "gpu_hours_local_sequential": round(cmax_hours + (jina_lo + jina_hi) / 2, 1), "kaggle_hours": round(kaggle, 1), "steps": steps}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -193,7 +244,13 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--rounds", type=int, default=10, help="--search-t: parallel build rounds")
     b.add_argument("--drop", type=int, default=0, help="carriers dropped by the fit (0 for both hand-off builds)")
     sub.add_parser("check", help="environment and pinned inputs of both builds, no build")
+    pl = sub.add_parser("plan", help="private set, dry run: steps, prerequisites and estimated hours (no GPU, nothing is run)")
+    pl.add_argument("--new-queries", type=int, default=0, help="0 = the same 1,200 queries; N = a new query set of N queries")
+    pl.add_argument("--depth", type=int, default=300)
     args = parser.parse_args(argv)
+    if args.command == "plan":
+        print(json.dumps(private_plan(1200, args.new_queries, args.depth), indent=2, ensure_ascii=False))
+        return 0
     if args.command == "check":
         manifest = load_manifest()
         out = {"env": check_env(), "builds": {n: verify_inputs(json.loads(c.read_text(encoding="utf-8")), manifest["builds"][n], manifest["base_inputs_sha256"])

@@ -1,8 +1,9 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-17 (UTC+7)
-- Model thực hiện: Claude Sonnet 5.5
-- Commit HEAD đã kiểm trước cập nhật này: `b3f6b47`, nhánh `main` (local; push sau test)
+- Cập nhật: 2026-10-26 (UTC+7)
+- Model thực hiện: Claude Sonnet 5.5 (S35)
+- Commit HEAD đã kiểm trước cập nhật này: `50cc8dc764c0b96b2c4f67c77ffe21956793b50b`, nhánh `release/final` (tách từ `main` `8dc8c80`)
+- **S35 release (26/10):** `release/final` hợp nhất s25, s26, s27, s29, s31, s32, s33-btc, s35, s36, s37, s38 (s22 không hợp nhất vì 31 khối xung đột mã zh_v2, chờ Vu). Lệnh `python -m r2ai.release build --config configs/s36-handoff-120A-{p4b-v3|free-v2}.json` dựng lại hai ZIP trùng từng byte với bàn giao (p4b-v3 `34d235f6…37e2`, free-v2 `fba176c6…da3f`, mỗi bản khoảng 20 phút, CPU). Ba ablation trên p4b-v3 (nowin, noJina, noCmax) đã dựng, chưa nộp (`docs/s36-fuse4.md`). Xem `README_RELEASE.md`, `docs/release-merge-report.md`, `docs/release-artifacts.md`, `docs/release-private.md`.
 - **S25 canonical (18/10):** `data/canonical-20261018/` có 887.151 doc_id v2 (vi 727.681, zh 159.470), mỗi ID đúng một text; 5.647.948 chunk t256 verbatim 100%; 5.599.214 vector khớp text; 48.734 chunk chờ re-embed (VOV 47.298). Đối chiếu P1/P2 còn lệch đã liệt kê (3.435 chunk Tâm Anh trong P2 là text base cũ bị S18 supersede; 1.261 ID không có text). Pha 3 chưa chạy: chờ Vu duyệt và GPU queue S15 rỗng. Chi tiết `reports/s25-canonical.md`.
 - **S38 (23–24/10): BTC đổi metric chunk (thêm vế LCS/|c| ≥ 0,4).** Scorer dùng v2 mặc định. Theo metric mới (Vu): nguyên body (K4-thr-C) Chunk F2 0,3594 · CH-win768 0,3433 · CH-win384 0,1805 · CH-sec-1 0,0904 → gold chunk dài, nguyên body tốt nhất. Trên J3-thrC, chưa nộp, validator ok: CH-pre1024, CH-cap2048, CH-full+w768-t1849, CH-clean. **Ghép cuối trên EF2-cut-p4b** (`scripts/s38/compose.sh EF2-cut-p4b <rule>`), cache sẵn cho clean / cap2048 / full+w768 / clean+cap2048, có thin theo nội dung (mọi host); **đã ghi ZIP EF2-cut-p4b + full+w768 T=1907 (102.593.008 B, validator 0 lỗi, chưa nộp)**; các quy tắc khác chờ Vu. Chi tiết `docs/s38-chunk-metric-v2.md`.
 - Public: 31/10/2026 · private: 04/11/2026 (tối đa 5 lượt) · kết quả: 11/11/2026; mốc do người dùng cung cấp

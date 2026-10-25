@@ -73,7 +73,7 @@ Chạy lại `apply` từ cả hai config cố định và so SHA256 với manif
 
 ## 5. Kiểm thử
 
-`python -m pytest` chạy `tests/` (`pytest.ini: testpaths = tests`). Trên máy này các test sau đỏ **trước khi hợp nhất** (nhánh main cũ) hoặc do môi trường, không do hai bản dựng: 16 test đỏ sẵn trên main (thiếu tokenizer `BAAI/bge-m3` trong cache HF offline, mẫu HTML vicrawl, `zh_full_ingest`), `tests/test_canonical.py::test_guard_refuses_outside_and_existing` (lỗi có sẵn trên nhánh s25: `atomic_write_bytes` bỏ qua tham số `roots`), `tests/test_segments.py::test_real_synthetic_benchmark_writes_and_scans_all_rows` (cần ≥ 2 GiB RAM trống). Báo cáo hợp nhất: `docs/release-merge-report.md`.
+`python -m pytest` chạy `tests/` (`pytest.ini: testpaths = tests`; trước đó `pytest` không đối số nhặt nhầm `scripts/s26/*_test.py`). Với `.env` đúng (mục 1: `HF_HOME` và `HF_HUB_OFFLINE=1` trỏ tới cache HF có tokenizer BGE-M3) kết quả trên `release/final` là **1.047 test, 0 đỏ**. Không có `.env`, 16 test đỏ chỉ vì thiếu tokenizer `BAAI/bge-m3` và dữ liệu mẫu (đo trên `main` cũ khi chưa có `.env`: `test_scorer`, `test_vicrawl_*`, `test_zh_full_ingest`). `tests/test_segments.py::test_real_synthetic_benchmark_writes_and_scans_all_rows` cần ≥ 2 GiB RAM trống, nên đỏ khi compose đang chạy. Chi tiết hợp nhất và từng lần chạy pytest: `docs/release-merge-report.md`.
 
 ## 6. Bộ private
 

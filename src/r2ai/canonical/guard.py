@@ -24,7 +24,7 @@ def guarded(path: str | Path, *, roots=ALLOWED_ROOTS, allow_existing: bool = Fal
 
 def atomic_write_bytes(path: str | Path, data: bytes, **kw) -> Path:
     p = guarded(path, **kw)
-    tmp = guarded(p.with_name(p.name + '.partial'))
+    tmp = guarded(p.with_name(p.name + '.partial'), roots=kw.get('roots', ALLOWED_ROOTS))   # same roots as the destination
     p.parent.mkdir(parents=True, exist_ok=True)
     with tmp.open('wb') as f:
         f.write(data)
@@ -38,7 +38,7 @@ def write_parquet(table, path: str | Path, **kw) -> Path:
     import pyarrow.parquet as pq
 
     p = guarded(path, **kw)
-    tmp = guarded(p.with_name(p.name + '.partial'))
+    tmp = guarded(p.with_name(p.name + '.partial'), roots=kw.get('roots', ALLOWED_ROOTS))   # same roots as the destination
     p.parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(table, tmp, compression='zstd')
     os.replace(tmp, p)

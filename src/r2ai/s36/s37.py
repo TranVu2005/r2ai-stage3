@@ -105,15 +105,34 @@ def read_pairs(files: Sequence[str | Path], scores_4b: dict[int, float] | None =
     return frame.drop_duplicates(["query_id", "doc_id"], keep="first").sort_values("pair_id").reset_index(drop=True)
 
 
-def fixed_pools(union: dict[int, list[dict[str, Any]]], depth: int) -> tuple[dict[int, list[dict[str, Any]]], dict[str, Any]]:
-    """Every pool = the cosine top-``depth`` rows of the merged union (no adaptive deepening, no K_q)."""
-    pools = {}
+def fixed_pools(union: dict[int, list[dict[str, Any]]], depth: int, order: pd.DataFrame | None = None
+                ) -> tuple[dict[int, list[dict[str, Any]]], dict[str, Any]]:
+    """Every pool = the cosine top-``depth`` rows of the merged union (no adaptive deepening, no K_q).
+
+    Many docs share exactly the same cosine (duplicate content under several doc_ids), and a tie block can straddle the ``depth`` cut: the union
+    order (cosine, origin) and the corpus order (``r2ai.s36.d300.merged_top``: canonical first, then the position in pool.npz) then keep different
+    members. With ``order`` (``merged_top(depth)``: ``query_id, doc_id, cosine_rank``) the pool is exactly the corpus top-``depth`` in the corpus
+    order; every doc of it must be in the union (scored by 4B)."""
+    pools, ties = {}, 0
     for q, rows in union.items():
         if len(rows) < depth:
             raise ValueError(f"Query {q}: only {len(rows)} scored pairs < depth {depth}")
-        pools[q] = s31_build._with_judge_rank([dict(r) for r in rows[:depth]])
+        if order is None:
+            pools[q] = s31_build._with_judge_rank([dict(r) for r in rows[:depth]])
+            continue
+        by_doc = {int(r["doc_id"]): r for r in rows}
+        want = order.doc_id[order.query_id == q].astype(int).tolist() if isinstance(order, pd.DataFrame) else order[q]
+        missing = [d for d in want if d not in by_doc]
+        if missing:
+            raise ValueError(f"Query {q}: {len(missing)} docs of the corpus top-{depth} have no 4B score, e.g. {missing[:3]}")
+        chosen = [dict(by_doc[d]) for d in want]
+        ties += sum(1 for d, r in zip(want, rows[:depth]) if d != int(r["doc_id"]))
+        for rank, r in enumerate(chosen, 1):
+            r["cosine_rank"] = rank
+        pools[q] = s31_build._with_judge_rank(chosen)
     stuck = sum(1 for rows in pools.values() if rows[-1]["judge_score"] >= s31_build.T_FREE)
-    return pools, {"mode": "fixed", "depth": depth, "queries_bottom_doc_p4b_at_or_above_t_free": int(stuck)}
+    return pools, {"mode": "fixed", "depth": depth, "order": "corpus" if order is not None else "union",
+                   "queries_bottom_doc_p4b_at_or_above_t_free": int(stuck)}
 
 
 def pool13_plus(ranked: dict[int, list[dict[str, Any]]], union: dict[int, list[dict[str, Any]]]) -> tuple[dict[int, list[dict[str, Any]]], dict[str, Any]]:
@@ -146,11 +165,11 @@ def cosine13_pools(ranked: dict[int, list[dict[str, Any]]], union: dict[int, lis
                    "old_pool13_docs_pushed_out": int(replaced), "queries_with_docs_pushed_out": int(queries)}
 
 
-def check_fixed_pools(pools: dict[int, list[dict[str, Any]]], depth: int) -> dict[str, Any]:
+def check_fixed_pools(pools: dict[int, list[dict[str, Any]]], depth: int, top: pd.DataFrame | None = None) -> dict[str, Any]:
     """Compare the pools with the cosine top-``depth`` of the corpus (canonical + Pharmacity + 120ask vectors): queries and docs that differ."""
     from r2ai.s36 import d300
 
-    top = d300.merged_top(depth)
+    top = d300.merged_top(depth) if top is None else top
     want = {int(q): set(g.doc_id.astype(int)) for q, g in top.groupby("query_id")}
     diff = {q: len(want[q] ^ {int(r["doc_id"]) for r in rows}) for q, rows in pools.items()}
     return {"queries_differing": int(sum(1 for v in diff.values() if v)), "docs_differing": int(sum(diff.values()))}
@@ -235,9 +254,11 @@ def apply(cfg: dict[str, Any]) -> dict[str, Any]:
     pairs = pairs[pairs.pair_id.astype(int).isin(scores_4b)]
     pool_kind = spec.get("pool", "free")                       # "d211": every pool cut at the cosine top-211 (no adaptive deepening)
     if pool_kind == "fixed":                                   # every pool = the cosine top-depth of the merged union
-        pools, pool_report = fixed_pools(union, int(spec["depth"]))
-        if spec.get("check_pool", True):
-            pool_report["check_vs_corpus"] = check_fixed_pools(pools, int(spec["depth"]))
+        from r2ai.s36 import d300
+
+        corpus_top = d300.merged_top(int(spec["depth"]))                  # the corpus order also settles the cosine ties at the cut
+        pools, pool_report = fixed_pools(union, int(spec["depth"]), corpus_top)
+        pool_report["check_vs_corpus"] = check_fixed_pools(pools, int(spec["depth"]), corpus_top)
     elif pool_kind == "cosine13":                              # EF2-cut-p4b on the new corpus: pool = cosine top-round(1.3 K_q), J4 sources
         pools, pool_report = cosine13_pools(ranked, union)
     elif pool_kind == "pool13":                                # EF2-cut-p4b frame: pool13 + the new docs, J3 keys, G_q of the pool13 frame

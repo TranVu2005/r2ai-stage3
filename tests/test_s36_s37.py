@@ -179,3 +179,14 @@ def test_cosine13_pools_keep_the_old_pool_size_and_push_out_the_lowest_cosine_do
     union = {1: [row(10, 1, "s31"), row(11, 2, "s37"), row(12, 3, "s31"), row(13, 4, "s31")]}
     pools, report = s37.cosine13_pools({1: [{"doc_id": 10}, {"doc_id": 12}, {"doc_id": 13}]}, union)
     assert [r["doc_id"] for r in pools[1]] == [10, 11, 12] and report["old_pool13_docs_pushed_out"] == 1 and "judge_rank" in pools[1][0]
+
+
+def test_fixed_pools_follow_the_corpus_order_when_a_tie_block_straddles_the_cut():
+    row = lambda d, k: {"doc_id": d, "cosine_rank": k + 1, "cosine_score": 0.5, "judge_score": 0.9 - 0.01 * k, "origin": "x", "order": (0, k)}  # noqa: E731
+    union = {1: [row(100 + k, k) for k in range(6)]}                        # six docs with the same cosine
+    order = pd.DataFrame({"query_id": [1] * 4, "doc_id": [105, 100, 104, 101], "cosine_rank": [1, 2, 3, 4]})
+    pools, report = s37.fixed_pools(union, 4, order)
+    assert [r["doc_id"] for r in pools[1]] == [105, 100, 104, 101] and [r["cosine_rank"] for r in pools[1]] == [1, 2, 3, 4]
+    assert report["order"] == "corpus" and pools[1][0]["judge_rank"] in (1, 2, 3, 4, 5, 6)
+    with pytest.raises(ValueError, match="no 4B score"):
+        s37.fixed_pools(union, 4, pd.DataFrame({"query_id": [1] * 4, "doc_id": [105, 100, 104, 999], "cosine_rank": [1, 2, 3, 4]}))

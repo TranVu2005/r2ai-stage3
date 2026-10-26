@@ -48,3 +48,19 @@ def test_pool_frame_rrf_and_missing_rule():
         newq.PoolFrame(("cosine_rank", "judge_rank", "cmax_rank"), {1: [dict(r) for r in rows]}, jina, {}, allow_missing=False)
     g = newq.PoolFrame(("cosine_rank", "judge_rank"), {1: [dict(r) for r in rows]}, {}, {}, allow_missing=False)   # sources left out: no check
     assert g.missing["jina"] == 3 and g.qids == [1]
+
+
+def test_pools_from_imputes_missing_4b_last_in_4b_source():
+    top = pd.DataFrame({"pair_id": [1, 2, 3, 4], "query_id": [7, 7, 7, 7], "doc_id": [10, 11, 12, 13],
+                        "cosine_rank": [1, 2, 3, 4], "cosine_score": [0.9, 0.8, 0.7, 0.6]})
+    scores = {1: 0.3, 3: 0.8, 4: 0.1}
+    with pytest.raises(SystemExit):
+        newq.pools_from(top, scores)
+    a, b = 0.5, -1.4
+    imp = {"c": 10.0, "d": -8.0, "a": a, "b": b}
+    rows = {r["doc_id"]: r for r in newq.pools_from(top, scores, imp)[7]}
+    assert rows[11]["p4b_imputed"] and not rows[10]["p4b_imputed"]
+    assert rows[11]["judge_rank"] == 4 and [rows[d]["judge_rank"] for d in (12, 10, 13)] == [1, 2, 3]
+    from r2ai.s36 import cal
+    p_cal = cal.sigmoid(a * cal.logit(np.array([rows[11]["judge_score"]])) + b)[0]
+    assert abs(p_cal - cal.sigmoid(10.0 * 0.8 - 8.0)) < 1e-9

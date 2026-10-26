@@ -163,7 +163,7 @@ Giả định N = 1.200 query, D = 300; giờ tỷ lệ thuận với N, trừ c
 **Điểm dừng an toàn:**
 
 * Phiên Kaggle chết giữa chừng: chạy lại notebook của phần đó; `judge_score.py` bỏ qua các phần (part) đã xong, nên chỉ mất phần đang chấm.
-* Hết quota Kaggle trước khi xong phần 2: các cặp phần 2 chưa có điểm 4B, và `build` từ chối (`--missing-last` chỉ áp cho Jina / C-max; p_cal cần P4B nên cặp thiếu 4B không có đường xử lý trong `newq`). Vì vậy cần kiểm (D) trước 01/11; nếu quota không đủ, Vu quyết phương án (ví dụ chấm phần thiếu trên GPU máy sau khi C-max xong; tốc độ 4B trên RTX 3050 chưa đo).
+* Hết quota Kaggle hoặc phiên chết trước khi xong phần 2: `newq build --impute-4b` (mục 9). Cặp thiếu 4B lấy p_cal từ ánh xạ cosine toàn cục và xếp cuối nguồn 4B trong RRF. Diễn tập 30% cặp thiếu vẫn ra ZIP hợp lệ, Doc F2 (mô hình đủ điểm) 0,3886 so với 0,4188 khi đủ 4B. Vẫn cần kiểm (D) trước 01/11, vì thiếu 4B mất khoảng 0,03 Doc F2 ở mức 30%.
 * C-max hỏng hoặc quá chậm: bản **cosine + 4B** (`build --no-cmax`), nộp nếu đến T0 + 24 giờ C-max chưa xong (gần nhất trên LB public: FREE-noCmax 0,4077, có Jina; cấu hình cosine + 4B không Jina chưa đo trên LB).
 * 4B thiếu: `build` từ chối; chạy lại phần thiếu. Chưa có luật khi đến 04/11 12:00 vẫn thiếu: Vu quyết.
 
@@ -205,3 +205,34 @@ ZIP `out/runs/s40/recal/compose/FREE-noJina-recal-full+w768-t1536.zip`, 65.243.4
 * 4B cần chấm: **70.116 cặp**, tất cả ở hạng 301..400 (hạng ≤ 300 đủ), 932 query, 8.792 cặp 120ask; vi 46.487 / zh 23.629; **khoảng 2,9 giờ Kaggle 2×T4** (6,7 cặp/s). Gói `out/runs/s40/d400/kaggle-dataset-d400-4b/` (`judge_score.py` SHA `688948a7…`, `d400-4b/{manifest.json, extra_pairs.parquet, shards/pool-93005.parquet}`), notebook `out/runs/s40/d400/d400-4b.ipynb` (TAGS `d400-4b`, EXPECT 70.116), pair_id 6.000.000 đến 6.070.115. SHA: extra_pairs `128a3a81…7abe4`, shard `16cd7a43…bdc3a`, pairs_final `440d586b…10edf`, cmax_pairs `6fc68acd…3dce5f`.
 * C-max cần chấm: **71.270 cặp** (gồm 1.154 cặp đã có 4B nhưng chưa có C-max), 188.734 dòng (10.818 cặp 1 dòng, 3.440 cặp 2, 57.012 cặp 3; 4.314 cặp chấm doc_text), chọn chunk bằng đúng mã của C-max d300 (worktree `s35-part-jina`, gate 1.000 cặp S32: 0 lệch), chấm bằng `scripts/s37/run_cmax.ps1` (bf16, 8.192 token / 16 dòng). Driver `scripts/s40/run_d400_cmax.ps1`. **Xong 27/10 00:45** (máy khởi động lại khoảng 22:28 ngày 26/10, chạy tiếp từ phần 12/103): `out/runs/s37/cmax_scores-d400.parquet`, 71.270 cặp (4.314 doc_text), SHA256 `45900157731fe9ae3351db680f46ddb294f22057abba7b28a02b7167602ffe33`, C-max P10/P50/P90 = 0,0043 / 0,2227 / 0,9627. Chỉ còn chờ 4B Kaggle.
 * Sau khi Vu chạy Kaggle: `python scripts/s40/d400_export.py import --scores <scores-extra.parquet> --report <collect-extra-report.json>`, rồi `python -m r2ai.s36.s37 apply --config configs/s40-d400-noJina.json` (FREE-noJina với depth 400 và thêm ba tệp D400; a, b, s_free, t_c, carrier 175.548 giữ nguyên), rồi compose như mục 1.
+
+### 7b. Fit lại với Doc P / R LB đủ sáu bản (Vu, 27/10)
+
+Số LB (Vu): EF2-free 0,4184 (P 0,2260 / R 0,6076); FUSE4-free 0,4104 (0,2191 / 0,6091); 120A-free-v0 0,4344 (0,2330 / 0,6387); 120A-free-v2 0,4402 (0,2335 / 0,6556); FREE-noJina 0,4413 (0,2332 / 0,6575); FREE-noCmax 0,4370 (0,2326 / 0,6505). 18 số, `out/runs/s40/recal2/{lb.json, refit.json}`.
+
+| | a | b | s | RMSE | max \|sai\| |
+|---|---:|---:|---:|---:|---:|
+| cũ | 0,5298 | −1,4097 | 1,7405 | 0,0550 | 0,1084 (R FREE-noJina) |
+| mới (18 số) | **1,5850** (SE 0,14) | **−2,6471** (SE 0,17) | **1,6543** (SE 0,006) | 0,0042 | 0,0087 (R EF2-free) |
+
+Sai số Doc F2 (dự đoán − LB): EF2-free +0,0063, FUSE4-free +0,0042, 120A-free-v0 −0,0011, 120A-free-v2 −0,0054, FREE-noJina −0,0054, FREE-noCmax −0,0025; sai P ≤ 0,0037, sai R ≤ 0,0087. Mô hình cũ thấp R khoảng 0,07 đến 0,11 ở mọi bản.
+
+**FREE-noJina-recal2** (a, b, s mới, `configs/s40-recal2-noJina.json`, chỉ apply): **110,4 doc / query** (132.508 doc; P10/P50/P90 = 26 / 98 / 220), ngoài khoảng [160, 200] Vu đặt, nên **không dựng ZIP**. Fit đủ 18 số còn dốc hơn (a 1,59 so với 1,27), nên EF2 cắt còn sớm hơn bản recal 26/10. FREE-noJina-recal (26/10, 118 doc / query) không nộp (Vu).
+
+## 9. Đường xử lý thiếu 4B trong `newq` (Vu, 27/10)
+
+`python -m r2ai.newq build --run ... --impute-4b`. Mặc định vẫn từ chối khi thiếu 4B.
+
+* Ánh xạ toàn cục cosine → p_cal: `p_cal ≈ sigmoid(c · cosine + d)`, bình phương tối thiểu trên p_cal (a, b của config) của mọi cặp pool **của chính run** có cả cosine và 4B (`cosine_pcal_map`, cần ≥ 1.000 cặp).
+* Cặp thiếu 4B: P4B thay thế = `sigmoid((logit(p̂) − b) / a)`, nên p_cal = p̂ đúng ở mọi chỗ dùng (G_q, cắt EF2, thứ tự carrier, ngưỡng t_c). Đánh dấu `p4b_imputed`; **xếp hạng cuối nguồn 4B** trong RRF (luật `rank_missing_last`), không tham gia xếp hạng 4B của các cặp có điểm.
+* `build.json` ghi `missing_4b` (số cặp suy, số được chọn, số carrier, tham số ánh xạ); danh sách `apply/imputed-4b-<name>.parquet`. Cờ chỉ để thử: `--test-drop-4b <tỷ lệ> --test-drop-seed`. Test đơn vị `test_pools_from_imputes_missing_4b_last_in_4b_source`.
+
+**Diễn tập** (rh100, 100 query, xoá ngẫu nhiên 30% = 9.000 / 30.000 cặp pool, seed 40): ánh xạ c 10,577, d −8,306 trên 21.000 cặp (RMSE 0,149; p_cal TB 0,1625, dự đoán TB 0,1642).
+
+| | doc | k/query P10/P50/P90 | Doc F2 dự đoán (mô hình của bản) | Doc F2 dưới mô hình đủ 4B (P / R) |
+|---|---:|---|---:|---:|
+| rh100-free (đủ 4B) | 17.921 | 64 / 194 / 268 | 0,4188 | 0,4188 (0,2312 / 0,5448) |
+| rh100-free-drop4b30-impute4b | 24.358 | 101 / 300 / 300 | 0,3900 | **0,3886** (0,1912 / 0,5899) |
+| cùng bản, bỏ hẳn doc được suy | 17.444 | | | 0,3207 |
+
+Thiếu 30% 4B mất khoảng 0,030 Doc F2 (mô hình). 6.914 doc được suy điểm lọt vào docsel, p_cal thật TB 0,188 (doc có điểm: 0,191), nên ánh xạ không lệch; nhiều query chạm trần 300 vì doc được suy nằm cuối RRF nhưng p̂ vẫn trên ngưỡng F2/5. Bỏ doc được suy thay vì giữ thì tệ hơn nhiều (0,3207). ZIP `out/runs/s40/rh100/build/rh100-free-drop4b30-impute4b/compose/rh100-free-drop4b30-impute4b-full+w768-t1536.zip`, 10.438.660 B, SHA256 `9cd66e3c1951e7391f1cf66a1b1c81b5f33c7b378ba2c5a23c0530a887d761a1`, T 1536, 14.629 carrier (= mục tiêu 146,29 × 100), 16.979 chunk, validator ok (0 lỗi). Chưa đo ở 1.200 query.

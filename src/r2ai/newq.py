@@ -689,17 +689,53 @@ def load_4b(run: Path) -> dict[int, float]:
     return out
 
 
-def pools_from(top: pd.DataFrame, scores_4b: dict[int, float]) -> dict[int, list[dict[str, Any]]]:
-    from r2ai.s31 import build as s31_build
+def cosine_pcal_map(top: pd.DataFrame, scores_4b: dict[int, float], a: float, b: float) -> dict[str, Any]:
+    """Missing-4B path (Vu 27/10): ONE global map cosine -> p_cal, ``p_cal ~ sigmoid(c cosine + d)``, least squares on the p_cal of the pool
+    pairs of this run that have both a cosine and a 4B score (p_cal = sigmoid(a logit(P4B) + b), the config's a / b)."""
+    from scipy.optimize import least_squares
+
+    from r2ai.s36 import cal
+
+    have = top[top.pair_id.astype(int).isin(scores_4b)]
+    if len(have) < 1000:
+        raise SystemExit(f"only {len(have)} pool pairs have a 4B score: too few to fit the cosine -> p_cal map")
+    x = have.cosine_score.to_numpy(float)
+    p = cal.sigmoid(a * cal.logit(np.array([scores_4b[int(i)] for i in have.pair_id])) + b)
+    fit = least_squares(lambda t: cal.sigmoid(t[0] * x + t[1]) - p, np.array([10.0, -8.0]))
+    c, d = map(float, fit.x)
+    return {"c": c, "d": d, "pairs": int(len(have)), "rmse": float(np.sqrt(np.mean(fit.fun ** 2))),
+            "pcal_mean": float(p.mean()), "pred_mean": float(cal.sigmoid(c * x + d).mean())}
+
+
+def pools_from(top: pd.DataFrame, scores_4b: dict[int, float], impute: dict[str, float] | None = None) -> dict[int, list[dict[str, Any]]]:
+    """Pools in cosine order with the 4B score and rank. ``impute`` (``cosine_pcal_map`` plus the config's ``a`` / ``b``): a pair without
+    4B gets the P4B whose p_cal is the mapped one (``sigmoid((logit(p_hat) - b) / a)``, so p_cal, G_q, the EF2 cut and the carrier order use
+    p_hat), is flagged ``p4b_imputed`` and takes the last rank of the 4B source in the RRF (``fuse.rank_missing_last`` rule)."""
+    from r2ai.s31.select import add_judge_rank
+    from r2ai.s36 import cal
 
     missing = top[~top.pair_id.astype(int).isin(scores_4b)]
-    if len(missing):
-        raise SystemExit(f"{len(missing)} pool pairs of {missing.query_id.nunique()} queries have no 4B score (import every 4B part first)")
+    if len(missing) and impute is None:
+        raise SystemExit(f"{len(missing)} pool pairs of {missing.query_id.nunique()} queries have no 4B score (import every 4B part first, "
+                         "or build --impute-4b)")
     pools = {}
     for q, g in top.sort_values(["query_id", "cosine_rank"]).groupby("query_id", sort=True):
-        rows = [{"pair_id": int(p), "doc_id": int(d), "cosine_score": float(c), "cosine_rank": int(r), "judge_score": float(scores_4b[int(p)]),
-                 "origin": "newq"} for p, d, c, r in zip(g.pair_id, g.doc_id, g.cosine_score, g.cosine_rank)]
-        pools[int(q)] = s31_build._with_judge_rank(rows)
+        rows, scored = [], []
+        for p, d, c, r in zip(g.pair_id, g.doc_id, g.cosine_score, g.cosine_rank):
+            row = {"pair_id": int(p), "doc_id": int(d), "cosine_score": float(c), "cosine_rank": int(r), "origin": "newq", "p4b_imputed": False}
+            if int(p) in scores_4b:
+                row["judge_score"] = float(scores_4b[int(p)])
+                scored.append(row)
+            else:
+                p_hat = cal.sigmoid(impute["c"] * float(c) + impute["d"])
+                row["judge_score"] = float(cal.sigmoid((cal.logit(np.array([p_hat]))[0] - impute["b"]) / impute["a"]))
+                row["p4b_imputed"] = True
+            rows.append(row)
+        add_judge_rank(scored, "judge_score", "judge_rank")
+        for row in rows:
+            if row["p4b_imputed"]:
+                row["judge_rank"] = len(rows)
+        pools[int(q)] = rows
     return pools
 
 
@@ -715,7 +751,8 @@ def select(pools: dict[int, list[dict[str, Any]]], jina: dict, cmax: dict, cfg: 
     return {"frame": frame, "calibrated": calibrated, "keep": keep, "chosen": cal.chosen_rows(frame, keep)}
 
 
-def build(run: Path, name: str | None, no_jina: bool, no_cmax: bool, missing_last: bool, rounds: int, compose: bool = True) -> dict[str, Any]:
+def build(run: Path, name: str | None, no_jina: bool, no_cmax: bool, missing_last: bool, rounds: int, compose: bool = True,
+          impute_4b: bool = False, drop_4b: float = 0.0, drop_seed: int = 40) -> dict[str, Any]:
     import subprocess
     import sys
 
@@ -727,14 +764,26 @@ def build(run: Path, name: str | None, no_jina: bool, no_cmax: bool, missing_las
     check_pins(log)
     cfg = run_config(run)
     require(run, ["queries.parquet", "query_vectors.npz", "top.parquet"] + ([] if no_jina else ["jina.parquet"]) + ([] if no_cmax else ["cmax.parquet", "cmax_chunks.parquet"]))
-    name = name or f"{run.name}-free" + ("" if no_jina else "-jina") + ("-noCmax" if no_cmax else "")
+    name = name or (f"{run.name}-free" + ("" if no_jina else "-jina") + ("-noCmax" if no_cmax else "")
+                    + (f"-drop4b{round(drop_4b * 100)}" if drop_4b else "") + ("-impute4b" if impute_4b else ""))
     work = run / "build" / name
     apply_dir, compose_dir = work / "apply", work / "compose"
     paths.assert_writable(work)
     apply_dir.mkdir(parents=True, exist_ok=True)
     t0 = time.monotonic()
     top = pd.read_parquet(run / "top.parquet")
-    pools = pools_from(top, load_4b(run))
+    scores_4b = load_4b(run)
+    dropped = 0
+    if drop_4b:                                    # test only: forget the 4B score of a random share of the pool pairs
+        ids = top.pair_id.astype(int).to_numpy()
+        gone = set(np.random.default_rng(drop_seed).choice(ids, size=int(round(drop_4b * len(ids))), replace=False).tolist())
+        scores_4b = {k: v for k, v in scores_4b.items() if k not in gone}
+        dropped = len(gone)
+    impute = None
+    if impute_4b:
+        impute = {**cosine_pcal_map(top, scores_4b, float(cfg["a"]), float(cfg["b"])), "a": float(cfg["a"]), "b": float(cfg["b"])}
+        log(f"impute 4B: cosine -> p_cal map {json.dumps(impute)}")
+    pools = pools_from(top, scores_4b, impute)
     jina, cmax = {}, {}
     if not no_jina:
         j = pd.read_parquet(run / "jina.parquet")
@@ -762,8 +811,18 @@ def build(run: Path, name: str | None, no_jina: bool, no_cmax: bool, missing_las
     atomic_parquet(pcal, apply_dir / f"pcal-{name}.parquet")
     docsel_writer(apply_dir, "", t_c, {name: pcal})(name, chosen, chunk_ids, {"t_c": t_c})
     atomic_json(apply_dir / f"keep-{name}.json", {str(q): int(k) for q, k in keep.items()})
+    imputed = pd.DataFrame([{"query_id": q, "doc_id": int(r["doc_id"]), "pair_id": int(r["pair_id"]), "cosine_score": float(r["cosine_score"]),
+                             "p4b_imputed": float(r["judge_score"])} for q, rows in pools.items() for r in rows if r["p4b_imputed"]],
+                           columns=["query_id", "doc_id", "pair_id", "cosine_score", "p4b_imputed"])
+    if impute is not None:
+        atomic_parquet(imputed, apply_dir / f"imputed-4b-{name}.parquet")
+    chosen_keys = {(q, int(r["doc_id"])) for q, rows in chosen.items() for r in rows}
     report: dict[str, Any] = {
         "name": name, "run": str(run), "queries": len(frame.qids), "rrf_keys": rrf_keys, "missing": frame.missing,
+        "missing_4b": {"test_dropped_pairs": dropped, "drop_seed": drop_seed if drop_4b else None, "imputed_pairs": int(len(imputed)),
+                       "imputed_chosen": int(sum((q, d) in chosen_keys for q, d in zip(imputed.query_id, imputed.doc_id))),
+                       "imputed_carriers": int(len(carriers.merge(imputed[["query_id", "doc_id"]], on=["query_id", "doc_id"]))),
+                       "map": impute},
         "global": {k: cfg[k] for k in ("a", "b", "s_free", "g_depth", "t_c", "depth")}, "docs_per_query": cal.keep_stats(keep),
         "predicted": calibrated.expected(keep), "carriers": {**carrier_info, "target": target, **carrier_rules.describe(carriers, len(frame.qids))},
         "apply_seconds": round(time.monotonic() - t0, 1),
@@ -832,6 +891,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     b.add_argument("--no-jina", action="store_true", help="kept for old commands: Jina is off by default")
     b.add_argument("--no-cmax", action="store_true")
     b.add_argument("--missing-last", action="store_true", help="a pair without a Jina / C-max score takes the last rank (default: refuse)")
+    b.add_argument("--impute-4b", action="store_true", help="a pair without 4B: p_cal from a global cosine map, last in the 4B source (default: refuse)")
+    b.add_argument("--test-drop-4b", type=float, default=0.0, help="TEST ONLY: forget the 4B score of this share of the pool pairs")
+    b.add_argument("--test-drop-seed", type=int, default=40)
     b.add_argument("--rounds", type=int, default=10)
     b.add_argument("--no-compose", action="store_true", help="docsel / carriers only")
     s = sub.add_parser("status")
@@ -867,7 +929,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.cmd == "export-4b-sample":
         result = export_4b_sample(run, args.suffix, args.pairs, args.seed)
     elif args.cmd == "build":
-        result = build(run, args.name, not args.jina, args.no_cmax, args.missing_last, args.rounds, not args.no_compose)
+        result = build(run, args.name, not args.jina, args.no_cmax, args.missing_last, args.rounds, not args.no_compose,
+                       args.impute_4b, args.test_drop_4b, args.test_drop_seed)
     else:
         result = status(run)
     print(json.dumps(result, indent=1, ensure_ascii=False, default=str))

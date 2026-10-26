@@ -184,28 +184,27 @@ def build(config: Path, work: Path | None, search_t: bool, rounds: int, drop: in
 
 
 # Measured rates behind the private-set plan. S40 rehearsal (26/10, 100 new queries, r2ai.newq): Kaggle 2x T4 4B 6.7 pairs/s, C-max 26.0 rows/s
-# with 2.61 rows per pair, prepare 41 s, export about 3.5 min, compose 3.5 min (35 to 45 min for 1,200 queries, S40 ablations); RunPod not timed.
+# with 2.61 rows per pair, prepare 41 s, export about 3.5 min, compose 3.5 min (35 to 45 min for 1,200 queries, S40 ablations).
+# 4B on one Kaggle account only (Vu 26/10: no RunPod), the parts run as consecutive sessions.
 RATES = {
     "kaggle_4b_pairs_per_second": 6.7,
     "cmax_rows_per_second": 26.0,
     "cmax_rows_per_pair": 2.61,
     "compose_minutes_1200": (35, 45),
-    "runpod_4b_pairs_per_second": None,
+    "kaggle_session_switch_minutes": 20,
 }
 PRIVATE_PREREQUISITES = {
     "new-query pipeline": "src/r2ai/newq.py",
     "pinned private config (RRF cosine / 4B / C-max)": "configs/s40-newq-free-v2.json",
     "input pins": "configs/s40-newq-pins.json",
     "4B Kaggle notebook template": "notebooks/s36-kaggle-4b-final.ipynb",
-    "4B RunPod script": "scripts/s40/run_runpod_4b.sh",
-    "Kaggle / RunPod gate": "scripts/s40/gate_4b.py",
     "local GPU driver (C-max)": "scripts/s40/run_newq_gpu.ps1",
 }
 
 
 def private_plan(queries: int, new_queries: int, depth: int = 300) -> dict[str, Any]:
     """Dry run for the private set: what each step needs and how long it takes at the measured rates. Reads files, runs nothing.
-    Pipeline (Vu 26/10): free frame D = 300, RRF over cosine / 4B / C-max (no Jina), full body + 768 window; docs/s40-private.md section 5."""
+    Pipeline (Vu 26/10): free frame D = 300, RRF over cosine / 4B / C-max (no Jina), full body + 768 window, 4B on Kaggle only; docs/s40-private.md section 5."""
     present = {k: (ROOT / v).exists() for k, v in PRIVATE_PREREQUISITES.items()}
     if not new_queries:
         return {"case": "same 1,200 queries as the public set", "gpu": False,
@@ -216,19 +215,19 @@ def private_plan(queries: int, new_queries: int, depth: int = 300) -> dict[str, 
     cmax = pairs * RATES["cmax_rows_per_pair"] / RATES["cmax_rows_per_second"] / 3600
     steps = [
         {"step": "python -m r2ai.newq pins && python -m r2ai.newq prepare --queries <q.parquet> --run out/runs/s40/private", "where": "local", "estimate_hours": 0.05},
-        {"step": "python -m r2ai.newq export-scoring --run out/runs/s40/private --parts-4b 2 --reg-pairs 1000", "where": "local CPU", "estimate_hours": 0.3,
+        {"step": "python -m r2ai.newq export-scoring --run out/runs/s40/private --parts-4b 2", "where": "local CPU", "estimate_hours": 0.3,
          "note": "not timed at 1,200 queries (3.5 min for 100)"},
-        {"step": f"4B part 1 ({pairs // 2:,} pairs + 1,000 gate pairs) on Kaggle 2x T4 (notebook <run>-4b-1.ipynb)", "where": "Kaggle", "estimate_hours": round(half, 1)},
-        {"step": f"4B part 2 ({pairs // 2:,} pairs + the gate pairs) on RunPod RTX 4090 (scripts/s40/run_runpod_4b.sh), gate scripts/s40/gate_4b.py",
-         "where": "RunPod", "estimate_hours": None, "note": "not timed yet; gate fail -> part 2 on Kaggle after part 1 (+%.1f h)" % half},
+        {"step": f"4B part 1 ({pairs // 2:,} pairs) on Kaggle 2x T4 (notebook <run>-4b-1.ipynb)", "where": "Kaggle session 1", "estimate_hours": round(half, 1)},
+        {"step": f"4B part 2 ({pairs // 2:,} pairs) on Kaggle 2x T4 (notebook <run>-4b-2.ipynb), started when session 1 ends", "where": "Kaggle session 2",
+         "estimate_hours": round(half, 1)},
         {"step": f"C-max ({pairs * RATES['cmax_rows_per_pair']:,.0f} rows): scripts/s40/run_newq_gpu.ps1, then import-scores --source cmax", "where": "local GPU",
          "estimate_hours": round(cmax, 1)},
         {"step": "python -m r2ai.newq import-scores --source 4b --tag ... (each part); python -m r2ai.newq build --run out/runs/s40/private",
          "where": "local CPU", "estimate_hours": round(RATES["compose_minutes_1200"][1] / 60, 2)},
     ]
     return {"case": f"{new_queries:,} new queries", "gpu": True, "prerequisites_present": present,
-            "critical_path_hours": round(max(half, cmax) + RATES["compose_minutes_1200"][1] / 60, 1),
-            "kaggle_only_4b_hours": round(2 * half, 1), "steps": steps}
+            "critical_path_hours": round(max(2 * half + RATES["kaggle_session_switch_minutes"] / 60, cmax) + RATES["compose_minutes_1200"][1] / 60, 1),
+            "kaggle_4b_hours": round(2 * half, 1), "steps": steps}
 
 
 def main(argv: list[str] | None = None) -> int:

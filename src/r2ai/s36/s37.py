@@ -14,7 +14,7 @@
 
 Config (JSON, every key optional): ``{"name": "EF2-free-s37", "pairs_new": ".../pairs_new.parquet" | [".../pairs_new_final_v2.parquet",
 ".../d300/pairs_final.parquet"], "scores_4b": [...], "cmax": [...], "jina": ".../scores-all.parquet", "t_c": 0.2030746281894702,
-"carriers": {"rule": "threshold" | "fair" | "swap", "target": N, "drop": N}, "pool": "free" | "d211" | "fixed" | "pool13" | "cosine13", "depth": 300, "out": "..."}``.
+"carriers": {"rule": "threshold" | "fair" | "swap", "target": N, "drop": N}, "pool": "free" | "d211" | "fixed" | "pool13" | "cosine13", "depth": 300, "out": "...", "a": .., "b": .., "s_free": ..}`` (a / b / s_free: S40 recal override of cal.json / ef2-free.json).
 Defaults are the S37 run layout (``out/runs/s37``) plus the 4B scores of the subsets exported by ``r2ai.s36.d300`` (``out/runs/s36-fuse4/d300``).
 ``pairs_new`` may list several registries (``pairs_new_final_v2`` and the D=300 pairs): a pair in two of them counts once, the copy with a 4B score
 first. ``pool`` ``fixed``: every query's pool is its cosine top-``depth`` of the merged union (all pairs of it need a 4B score; checked against the
@@ -299,6 +299,8 @@ def apply(cfg: dict[str, Any]) -> dict[str, Any]:
         raise MissingScores(f"pool pairs without a score: {json.dumps(missing)}")
     fitted = json.loads((cal.cal_root() / "cal.json").read_text(encoding="utf-8"))["variants"]["p4b"]
     a, b = fitted["fit"]["a"], fitted["fit"]["b"]
+    if "a" in spec or "b" in spec:                                       # S40 recal: (a, b) refitted on the free-frame LB numbers
+        a, b = float(spec["a"]), float(spec["b"])
     rrf_keys = tuple(spec.get("rrf_keys") or fuse.FOUR_KEYS)             # ablations: drop one RRF source (cosine and 4B stay)
     if not set(rrf_keys) <= set(fuse.FOUR_KEYS) or not {"cosine_rank", "judge_rank"} <= set(rrf_keys):
         raise ValueError(f"rrf_keys {rrf_keys}: must be a subset of {fuse.FOUR_KEYS} that keeps cosine_rank and judge_rank")
@@ -307,7 +309,7 @@ def apply(cfg: dict[str, Any]) -> dict[str, Any]:
         frame = cal.Frame(cal.J3_KEYS if pool_kind == "pool13" else rrf_keys, "thrC", data={"ranked": ranked, "pools": pools, "union": union, "jina": jina, "cmax": cmax}, allow_missing=last)
         calibrated = cal.Calibrated(frame, "p4b", a, b, s_free, use_tail=True)
     else:
-        s_free = float(json.loads((cal.cal_root() / "ef2-free.json").read_text(encoding="utf-8"))["s_free"])
+        s_free = float(spec["s_free"]) if "s_free" in spec else float(json.loads((cal.cal_root() / "ef2-free.json").read_text(encoding="utf-8"))["s_free"])
         frame = cal.Frame(rrf_keys, "free", data={"pools": pools, "union": union, "jina": jina, "cmax": cmax}, allow_missing=last)
         calibrated = cal.Calibrated(frame, "p4b", a, b, s_free, use_tail=True, g_depth=cal.FREE_G_DEPTH)
     keep = cal.ef2_keep(calibrated)

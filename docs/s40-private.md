@@ -125,11 +125,13 @@ Doc dài hơn 4T = 6.144 token: **208 doc** (0,12% carrier), lấy khối 4 đo�
 
 Lần dựng đầu (12:07) bị validator loại (866 chunk không nguyên văn, do chia trực tiếp body P1 cũ), giữ ở `out/runs/s40/split/v1-p1body-not-verbatim/`, không nộp.
 
-## 5. Kế hoạch private 01–04/11 (pipeline chốt: cosine + 4B + C-max, không Jina)
+## 5. Kế hoạch private 01–04/11 (pipeline chốt: cosine + 4B + C-max, không Jina; **chỉ Kaggle**)
 
-**Chỗ Vu cần điền:** (A) giờ mở đề 01/11: `____`; (B) private có hiện điểm sau mỗi lượt không: `____`; (C) cách tính lượt (lượt lỗi định dạng có bị tính không): `____`; (D) giá RunPod RTX 4090 thực trả (USD/giờ): `____`.
+Vu 26/10: bỏ diễn tập RunPod; 4B private chỉ chạy trên một tài khoản Kaggle (không dùng 2 tài khoản, điều khoản Kaggle). `scripts/s40/run_runpod_4b.sh` và `gate_4b.py` giữ trong repo nhưng không nằm trong kế hoạch.
 
-Giả định N = 1.200 query; giờ tỷ lệ thuận với N, trừ compose. **T0 = lúc Vu có tệp query.** Hạn nộp 04/11 23:59 (UTC+7), tối đa 5 lượt. Tệp query: parquet, cột `id` (int, duy nhất) và `query` (text); Vu gửi kèm SHA256. Không dùng 2 tài khoản Kaggle (điều khoản Kaggle): **một phiên Kaggle + một pod RunPod RTX 4090**, mỗi bên một nửa số cặp 4B.
+**Chỗ Vu cần điền:** (A) giờ mở đề 01/11: `____`; (B) private có hiện điểm sau mỗi lượt không: `____`; (C) cách tính lượt (lượt lỗi định dạng có bị tính không): `____`; (D) quota GPU Kaggle còn lại trong tuần chứa 01–02/11 (cần khoảng 15 giờ, cộng phần đã dùng cho D400 public nếu cùng tuần): `____` giờ.
+
+Giả định N = 1.200 query, D = 300; giờ tỷ lệ thuận với N, trừ compose. **T0 = lúc Vu có tệp query.** Hạn nộp 04/11 23:59 (UTC+7), tối đa 5 lượt. Tệp query: parquet, cột `id` (int, duy nhất) và `query` (text); Vu gửi kèm SHA256.
 
 **Tốc độ (đo trong diễn tập 26/10, 100 query) và ngoại suy:**
 
@@ -137,38 +139,40 @@ Giả định N = 1.200 query; giờ tỷ lệ thuận với N, trừ compose. *
 |---|---|---|---:|
 | kiểm ghim 79 tệp | máy | 20 s mỗi lệnh | 20 s |
 | prepare | máy (GPU cho embed) | 41 s | khoảng 2 phút (chưa đo ở 1.200) |
-| export 4B (2 phần + reg 1.000) + C-max | máy CPU | khoảng 3,5 phút | 10 đến 20 phút (chưa đo ở 1.200) |
-| 4B nửa Kaggle, 180.000 cặp | Kaggle 2×T4 | 6,7 cặp/s | **7,5 giờ** (dưới mức dừng 10,5 giờ của notebook) |
-| 4B nửa RunPod, 180.000 cặp | RTX 4090 | **chưa đo** (diễn tập RunPod 5.000 cặp, trước 31/10) | điền sau diễn tập: `____` giờ |
-| cổng hồi quy 1.000 cặp | Kaggle (đầu phiên) + RunPod (đầu pod) | Kaggle: khoảng 2,5 phút + nạp mô hình | |
-| C-max, 939.600 dòng | GPU máy, bf16 | 26,0 dòng/s | **10,0 giờ** |
+| export 4B (2 phần) + C-max | máy CPU | khoảng 3,5 phút | 10 đến 20 phút (chưa đo ở 1.200) |
+| 4B phần 1, 180.000 cặp | Kaggle 2×T4, phiên 1 | 6,7 cặp/s | **7,5 giờ** (dưới mức dừng 10,5 giờ của notebook) |
+| 4B phần 2, 180.000 cặp | Kaggle 2×T4, phiên 2 (sau phiên 1) | 6,7 cặp/s | **7,5 giờ** |
+| C-max, 939.600 dòng | GPU máy, bf16 | 26,0 dòng/s | **10,0 giờ** (song song với 4B) |
 | build + compose + dò T + validator | máy CPU | 3,5 phút (100 query) | 35 đến 45 phút |
 
-**Đường găng:** C-max trên GPU máy (10 giờ) khi 4B chia đôi (Kaggle 7,5 giờ, RunPod dự kiến ngắn hơn). Bản chính có sau khoảng T0 + 11 giờ. Phương án dự phòng chỉ Kaggle: 4B 14,9 giờ (2 phiên nối tiếp, 7,5 giờ mỗi phiên), bản chính sau khoảng T0 + 16 giờ.
+**Đường găng:** 4B trên Kaggle, hai phiên nối tiếp, 14,9 giờ cộng thời gian Vu tải kết quả phiên 1 và khởi động phiên 2 (ước 15 đến 20 phút). C-max xong trước (T0 + 10:30). Bản chính có sau khoảng **T0 + 16:30**. Nếu chốt D = 400 cho private (mục 6, chờ LB), 4B thành 480.000 cặp, khoảng 19,9 giờ (3 phiên), C-max khoảng 13,4 giờ, bản chính sau khoảng T0 + 21:30.
 
-**Chuẩn bị trước 31/10:**
-
-1. Diễn tập RunPod: upload `out/runs/s40/rh100/4b/sample-rp5k/` (5.000 cặp của bộ 100 query, đã có điểm Kaggle trong `rh100-4b-1`), chạy `DATASET=/workspace/sample-rp5k bash scripts/s40/run_runpod_4b.sh`; tải `s40-rh100-4b-rp5k-runpod.tar.gz`; `python scripts/s40/gate_4b.py out/runs/s40/rh100/4b/rh100-4b-1/scores-extra.parquet <runpod>/rh100-4b-rp5k/qwen3-reranker-4b/scores-extra.parquet`. Ghi: tốc độ (`runpod-timing.json`, cặp/s), chi phí (giờ pod × giá), Spearman, |Δ| TB / p99 / max. Đặt `TRANSFORMERS_VERSION` bằng bản Kaggle in ra ở ô 2 của notebook, để hai bên dùng cùng phiên bản.
-2. Cổng: Spearman ≥ 0,99 và |Δ| TB nhỏ (S31 đo T4 so với máy khác: lệch tới 0,0047). Không đạt thì dùng phương án chỉ Kaggle.
-
-**Lịch theo giờ (phương án Kaggle + RunPod):**
+**Lịch theo giờ:**
 
 | mốc | việc | ai | kiểm |
 |---|---|---|---|
 | T0 + 0:00 | `newq pins`; `newq prepare --queries <tệp> --run out/runs/s40/private` | tôi | SHA tệp query = SHA Vu gửi |
-| T0 + 0:05 | `newq export-scoring --run ... --parts-4b 2 --reg-pairs 1000` | tôi | `private-4b-1` (+ `private-4b-reg` trong cùng dataset), `private-4b-2` |
-| T0 + 0:25 | Vu: dataset `kaggle-dataset-private-4b-1` lên Kaggle, chạy notebook `private-4b-1.ipynb` (chấm `-reg` trước rồi phần 1); pod RunPod nhận `kaggle-dataset-private-4b-2` và thư mục `private-4b-reg` (`TAGS="private-4b-reg private-4b-2"`); máy chạy C-max (`scripts/s40/run_newq_gpu.ps1 -Run ...`) | Vu, tôi | 3 nơi chạy song song |
-| T0 + 0:45 | điểm `-reg` của hai bên về → `gate_4b.py` | tôi | đạt: tiếp; không đạt: dừng pod, phần 2 chuyển sang phiên Kaggle thứ hai sau phần 1 |
-| T0 + 4 đến 6 giờ (chờ số đo) | RunPod xong phần 2 → `import-scores --source 4b --tag private-4b-2`; dừng pod | Vu, tôi | 180.000 cặp, revision, SHA |
-| T0 + 8:00 | Kaggle xong phần 1 → `import-scores --source 4b --tag private-4b-1` | Vu, tôi | |
-| T0 + 10:30 | C-max xong → `import-scores --source cmax` | tôi | 939.600 dòng |
-| T0 + 11:15 | **bản chính** `newq build --run ...` → ZIP, validator | tôi | ZIP < 102.600.000 B, 0 lỗi |
+| T0 + 0:05 | `newq export-scoring --run ... --parts-4b 2` | tôi | `private-4b-1`, `private-4b-2`, mỗi phần một dataset và một notebook |
+| T0 + 0:25 | Vu: dataset `kaggle-dataset-private-4b-1` lên Kaggle, chạy `private-4b-1.ipynb`; cùng lúc upload sẵn `kaggle-dataset-private-4b-2`; máy chạy C-max (`scripts/s40/run_newq_gpu.ps1 -Run ...`) | Vu, tôi | Kaggle và GPU máy chạy song song |
+| T0 + 8:00 | phiên 1 xong: Vu tải `scores-extra.parquet` + `collect-extra-report.json`, chạy ngay `private-4b-2.ipynb`; tôi `import-scores --source 4b --tag private-4b-1` | Vu, tôi | 180.000 cặp, revision, SHA |
+| T0 + 10:30 | C-max xong, `import-scores --source cmax` | tôi | 939.600 dòng |
+| T0 + 15:45 | phiên 2 xong, `import-scores --source 4b --tag private-4b-2` | Vu, tôi | |
+| T0 + 16:30 | **bản chính** `newq build --run ...`, ZIP, validator | tôi | ZIP < 102.600.000 B, 0 lỗi |
 | sau đó | Vu nộp lượt 1 (trước 03/11) | Vu | |
 
 **Điểm dừng an toàn:**
 
-* Cổng RunPod không đạt, hoặc pod lỗi: phần 2 chạy trên Kaggle sau phần 1 (phương án chỉ Kaggle; 4B xong T0 + 16 giờ).
-* C-max hỏng hoặc quá chậm: bản **cosine + 4B** (`build --no-cmax`), nộp nếu đến T0 + 24 giờ C-max chưa xong (gần nhất trên LB public: FREE-noCmax 0,4077, có Jina; cấu hình cosine + 4B không Jina chưa đo trên LB). Có thể chia C-max cho RunPod sau khi pod xong 4B (giảm còn khoảng 5 giờ), nhưng điểm bf16 khác GPU lệch cỡ nhiễu ghép batch (mục 3); mặc định giữ máy.
-* 4B thiếu: `build` từ chối; chạy lại phần thiếu (resume theo phần). Chưa có luật khi đến 04/11 12:00 vẫn thiếu: Vu quyết.
+* Phiên Kaggle chết giữa chừng: chạy lại notebook của phần đó; `judge_score.py` bỏ qua các phần (part) đã xong, nên chỉ mất phần đang chấm.
+* Hết quota Kaggle trước khi xong phần 2: các cặp phần 2 chưa có điểm 4B, và `build` từ chối (`--missing-last` chỉ áp cho Jina / C-max; p_cal cần P4B nên cặp thiếu 4B không có đường xử lý trong `newq`). Vì vậy cần kiểm (D) trước 01/11; nếu quota không đủ, Vu quyết phương án (ví dụ chấm phần thiếu trên GPU máy sau khi C-max xong; tốc độ 4B trên RTX 3050 chưa đo).
+* C-max hỏng hoặc quá chậm: bản **cosine + 4B** (`build --no-cmax`), nộp nếu đến T0 + 24 giờ C-max chưa xong (gần nhất trên LB public: FREE-noCmax 0,4077, có Jina; cấu hình cosine + 4B không Jina chưa đo trên LB).
+* 4B thiếu: `build` từ chối; chạy lại phần thiếu. Chưa có luật khi đến 04/11 12:00 vẫn thiếu: Vu quyết.
 
 **5 lượt private (đề xuất, chờ (B) và (C)):** (1) bản chính, ngay khi có; (2) giữ cho bản sửa lỗi; (3) đến (5) để dành. Nếu private hiện điểm, có thể dùng lượt 2 hoặc 3 cho biến thể.
+
+## 6. FREE-noJina-canon: bỏ P1 (Vu nộp, LB 0,4111 trùng FREE-noJina)
+
+`out/runs/s40/canon/FREE-noJina-canon-full+w768-t1536.zip`, 100.007.155 B, SHA256 `53178695ac9620cbe8cb08fcb668c452bd3c345526c0c0211dd4baf338c62ca4` (FREE-noJina `153aba8b61c14e74b0ab2d26bc344111a8bdf1ef56d0e6d8850b03c97e3c918d`). Validator ok, mọi chunk là `canonical_substring` (208.876). LB (Vu): trùng FREE-noJina ở mọi chỉ số.
+
+So hai ZIP theo khoá (query, doc, thứ tự chunk trong doc) (`scratchpad cmp_canon*.py`, chuẩn hoá metric `r2ai.eval.scorer.normalize_metric`): danh sách doc giống hệt, tập khoá chunk giống hệt; **88.086 chunk đổi nguồn P1 → canonical nhưng chỉ 1.738 chunk có text khác** (text thô khác cũng là khác sau chuẩn hoá), ở 476 query. 86.348 chunk P1 còn lại vốn đã là đúng chuỗi canonical. Trong 1.738 chunk khác: 1.733 bản canon ngắn hơn; tỷ lệ LCS từ / độ dài (hai phía, xấp xỉ luật v2): ≥ 0,99 có 1.267, 0,9 đến 0,99 có 414, 0,4 đến 0,9 có 57 (chủ yếu doc 120ask: P1 có cả câu hỏi + trả lời, canon chỉ phần trả lời), < 0,4 không có.
+
+P/R trùng đến 4 chữ số là hợp lý: 1.681 / 1.738 chunk khác dưới 1% số từ, không đổi kết quả khớp ngưỡng 0,4 trừ ca biên; chỉ 57 chunk (0,03% số chunk) có thể lật. Một lần lật đổi Chunk P của một query khoảng 1/180, tức khoảng 5·10⁻⁶ trên trung bình 1.200 query; cần cỡ 10 lần lật cùng chiều mới thấy ở chữ số thứ 4.

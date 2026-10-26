@@ -232,13 +232,14 @@ def thin_swap(rows: list[dict[str, Any]], docsel: pd.DataFrame) -> dict[str, Any
         added.append({"query_id": q, "doc_id": d, "rank": rank, "p4b": float(p4b), "source": src, "body": body})
         if len(added) == len(thin):
             break
-    if len(added) < len(thin):
-        raise ValueError(f"only {len(added)} replacement carriers for {len(thin)} thin ones")
+    # S40 FREE-cut130: when every doc already carries, there is no replacement; the thin carriers are still dropped (a thin body cannot
+    # carry a chunk) and the shortfall is reported. Bundles that found every replacement are unchanged.
     thin_p4b = docsel.set_index(["query_id", "doc_id"]).p4b
+    kept_min = docsel[docsel.chunk & ~docsel.doc_id.isin(thin_docs)].p4b.min()
     return {"removed": [[q, d] for q, d in thin], "thin_docs": sorted(thin_docs),
-            "removed_p4b": [float(thin_p4b.loc[(q, d)]) for q, d in thin], "added": added,
+            "removed_p4b": [float(thin_p4b.loc[(q, d)]) for q, d in thin], "added": added, "unreplaced": len(thin) - len(added),
             "t_c_before": float(docsel[docsel.chunk].p4b.min()),
-            "t_c_after": float(min(docsel[docsel.chunk & ~docsel.doc_id.isin(thin_docs)].p4b.min(), min(a["p4b"] for a in added)))}
+            "t_c_after": float(min([kept_min] + [a["p4b"] for a in added]))}
 
 
 def compose_swaps(first: dict[str, Any], second: dict[str, Any]) -> dict[str, Any]:

@@ -1,0 +1,44 @@
+{
+  "name": "FREE-cut150",
+  "jina": "D:/GitHub/r2ai-stage3/out/runs/s36-fuse4/s37/jina-final2-scores.parquet",
+  "pairs_new": [
+    "D:/GitHub/r2ai-stage3/out/runs/s37/pairs_new_final_v2.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s36-fuse4/d300/pairs_final.parquet"
+  ],
+  "missing": "last",
+  "min_4b_coverage": 0.98,
+  "t_c": 0.2030746281894702,
+  "pool": "fixed",
+  "depth": 300,
+  "carriers": {
+    "rule": "fair",
+    "target": 175548,
+    "cap_to_docs": true
+  },
+  "cmax": [
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-b0004.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-b0005.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-b0006.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-b0007.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-b0008.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-b0009.parquet",
+    "D:/GitHub/r2ai-stage3/out/runs/s37/cmax_scores-d300.parquet"
+  ],
+  "scores_4b": [
+    "D:\\GitHub\\r2ai-stage3\\out\\runs\\s36-fuse4\\d300\\final-4b\\gpu\\qwen3-reranker-4b\\scores-extra.parquet",
+    "D:\\GitHub\\r2ai-stage3\\out\\runs\\s37\\kaggle-4b\\s37-b001-003\\gpu\\qwen3-reranker-4b\\scores-extra.parquet",
+    "D:\\GitHub\\r2ai-stage3\\out\\runs\\s37\\kaggle-4b\\s37-b004-006\\gpu\\qwen3-reranker-4b\\scores-extra.parquet",
+    "D:\\GitHub\\r2ai-stage3\\out\\runs\\s37\\kaggle-4b\\s37-b007\\gpu\\qwen3-reranker-4b\\scores-extra.parquet"
+  ],
+  "rrf_keys": [
+    "cosine_rank",
+    "judge_rank",
+    "cmax_rank"
+  ],
+  "out": "D:/GitHub/r2ai-stage3/out/runs/s40/cut/apply",
+  "a": 1.5850090109231563,
+  "b": -2.647126377998237,
+  "s_free": 1.6542657240842573,
+  "ef2_target_mean": 150
+}

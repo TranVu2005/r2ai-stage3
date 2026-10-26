@@ -312,7 +312,13 @@ def apply(cfg: dict[str, Any]) -> dict[str, Any]:
         s_free = float(spec["s_free"]) if "s_free" in spec else float(json.loads((cal.cal_root() / "ef2-free.json").read_text(encoding="utf-8"))["s_free"])
         frame = cal.Frame(rrf_keys, "free", data={"pools": pools, "union": union, "jina": jina, "cmax": cmax}, allow_missing=last)
         calibrated = cal.Calibrated(frame, "p4b", a, b, s_free, use_tail=True, g_depth=cal.FREE_G_DEPTH)
-    keep = cal.ef2_keep(calibrated)
+    keep, ef2_lambda = cal.ef2_keep(calibrated), None
+    if "ef2_lambda" in spec or "ef2_target_mean" in spec:          # S40 cut probes: EF2 marginal threshold x global lambda
+        if "ef2_lambda" in spec:
+            ef2_lambda = float(spec["ef2_lambda"])
+            keep = cal.ef2_keep_scaled(calibrated, ef2_lambda)
+        else:
+            ef2_lambda, keep = cal.solve_lambda(calibrated, float(spec["ef2_target_mean"]))
     chosen = cal.chosen_rows(frame, keep)
     perq = pd.DataFrame([{"query_id": q, "k": int(keep[q]), "tp": float(calibrated.p[q][: keep[q]].sum()), "g": float(calibrated.g[q])} for q in frame.qids])
     perq["f2"] = 5 * perq.tp / (4 * perq.g + perq.k)              # predicted F2 of the query; a doc adds to it only if its p_cal > f2 / 5
@@ -320,7 +326,10 @@ def apply(cfg: dict[str, Any]) -> dict[str, Any]:
     sel = pd.DataFrame([(q, int(r["doc_id"]), k, float(r["judge_score"])) for q, rows in chosen.items() for k, r in enumerate(rows, 1)],
                        columns=["query_id", "doc_id", "rank", "p4b"])
     sel["chunk"] = sel.p4b >= t_c                                               # fixed-whole: the global threshold carriers
-    carriers, carrier_info = carrier_rules.select_carriers(sel, rule["rule"], rule.get("target"), rule.get("drop"), rule.get("rho"))
+    target = rule.get("target")
+    if target is not None and rule.get("cap_to_docs") and target > len(sel):     # fewer docs than the target: every doc carries
+        target = int(len(sel))
+    carriers, carrier_info = carrier_rules.select_carriers(sel, rule["rule"], target, rule.get("drop"), rule.get("rho"))
     carriers.to_parquet(out / f"carriers-{name}.parquet", index=False)
     chunk_ids = {int(q): g.doc_id.astype(int).tolist() for q, g in carriers.groupby("query_id")}
     pcal_rows = [{"query_id": q, "doc_id": int(r["doc_id"]), "p_fused": float(f), "p_cal": float(p)}
@@ -337,7 +346,7 @@ def apply(cfg: dict[str, Any]) -> dict[str, Any]:
         old = pd.read_parquet(previous, columns=["query_id", "doc_id"]).groupby("query_id").doc_id.apply(list).to_dict()
         diff = doc_set_diff({q: [int(r["doc_id"]) for r in rows] for q, rows in chosen.items()}, old)
     pins = {key: {str(f): _sha256(Path(f)) for f in files} for key, files in inputs.items()}
-    report = {"name": name, "inputs": pins, "s36_sources": {"jina": jina_files, "cmax": cmax_files}, "global": {"a": a, "b": b, "s_free": s_free, "t_c": t_c, "p_free": s31_build.P_FREE, "t_free": s31_build.T_FREE},
+    report = {"name": name, "inputs": pins, "s36_sources": {"jina": jina_files, "cmax": cmax_files}, "global": {"a": a, "b": b, "s_free": s_free, "ef2_lambda": ef2_lambda, "t_c": t_c, "p_free": s31_build.P_FREE, "t_free": s31_build.T_FREE},
               "pool": pool_report, "new_pairs": int(len(pairs)), "queries_with_new_pairs": int(pairs.query_id.nunique()),
               "queries_jina_rescored": int(s37_jina.query_id.nunique()), "coverage_4b": coverage_4b,
               "missing_policy": "last" if last else "strict", "missing_scores": missing, "pool_pairs": int(sum(len(v) for v in pools.values())),

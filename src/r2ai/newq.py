@@ -5,8 +5,16 @@
     python -m r2ai.newq import-scores --run <dir> --source 4b --tag <tag> --scores scores-extra.parquet --report collect-extra-report.json
     python -m r2ai.newq import-scores --run <dir> --source cmax      (after scripts/s37/run_cmax.ps1 -Run <dir>/cmax)
     python -m r2ai.newq import-scores --run <dir> --source jina      (after scripts/s37/run_jina.ps1 -Run <dir>/jina)
-    python -m r2ai.newq build --run <dir> [--name N] [--no-jina] [--no-cmax] [--rounds R]
+    python -m r2ai.newq build --run <dir> [--name N] [--jina] [--no-cmax] [--rounds R]
     python -m r2ai.newq status --run <dir>
+    python -m r2ai.newq pins [--write]        # SHA256 of every corpus / scorer input against configs/s40-newq-pins.json
+
+Pipeline chốt cho private (Vu, 26/10, LB public: FREE-noJina 0,4111 > free-v2 0,4101): RRF over cosine / 4B / C-max, NO Jina. ``build`` and
+``export-scoring`` leave Jina out unless ``--jina`` / ``--sources ...,jina`` asks for it.
+
+Input pinning (Vu, 26/10): every command first checks the SHA256 of every corpus / scorer file it may read against
+``configs/s40-newq-pins.json`` and of every run file it reads against ``<run>/ledger.json`` (written by the step that produced the file).
+A missing file or a different SHA256 stops the command; nothing is searched elsewhere.
 
 Nothing here reads a file keyed by the 1,200 public query ids (S29 query vectors, pool.npz, pool13 / K_q, S31-S37 pair registries and scores,
 S32 chunk scores, the P1 / baseline ZIPs, docsel of earlier builds). What is read: the corpus (S26 doc vectors + Pharmacity lots, the
@@ -97,7 +105,68 @@ def load_config(path: Path | None) -> dict[str, Any]:
 
 
 def run_config(run: Path) -> dict[str, Any]:
+    require(run, ["config.json"])
     return json.loads((run / "config.json").read_text(encoding="utf-8"))
+
+
+# ---------------------------------------------------------------------------------------------------------- input pinning
+
+PINS = ROOT / "configs" / "s40-newq-pins.json"
+
+
+def pin_targets() -> list[Path]:
+    """Every corpus / scorer file a step may read (models are pinned by revision)."""
+    from r2ai.s37 import ingest
+
+    canon = paths.DATA_DIR / "canonical-20261018"
+    files = [canon / "docs.parquet", canon / "chunks_t256.parquet", canon / "vectors" / "dense.npy", canon / "vectors" / "vectors.json",
+             canon / "manifest.json", ingest.S26_VECTORS, ROOT / "src" / "r2ai" / "s31" / "judge_score.py", NOTEBOOK,
+             paths.RUNS_DIR / "s32-chunk-judge" / "pool" / "supplement_vectors.npz", paths.RUNS_DIR / "s37" / "cmax-d300" / "supplement_vectors.npz",
+             paths.RUNS_DIR / "s31-strong-judge" / "pool-extra" / "kaggle" / "judge_score.py"]
+    files += sorted(p for p in ingest.PHARMACITY_VECTORS.rglob("*") if p.is_file())
+    files += sorted(p for p in (paths.RUNS_DIR / "s27-pharmacity" / "handoff" / "cc-s27-pharmacity").rglob("*") if p.is_file())
+    for seg in sorted(p for p in ingest.STORE.iterdir() if p.is_dir()):
+        files += [seg / n for n in ("docs.parquet", "vectors.npz", "chunks_t256.parquet", "chunk_vectors.npz") if (seg / n).exists()]
+    return files
+
+
+def write_pins() -> dict[str, Any]:
+    pins = {str(f.resolve()).replace("\\", "/"): sha256(f) for f in pin_targets()}
+    PINS.write_text(json.dumps({"note": "S40 r2ai.newq input pins (python -m r2ai.newq pins --write)", "files": pins}, indent=1) + "\n", encoding="utf-8")
+    return {"files": len(pins), "path": str(PINS)}
+
+
+def check_pins(log=print) -> dict[str, Any]:
+    """Every pinned file exists with its SHA256 and no corpus file appeared that the pins do not list; otherwise SystemExit."""
+    if not PINS.exists():
+        raise SystemExit(f"{PINS} missing: run `python -m r2ai.newq pins --write` once, review and commit it")
+    pins = json.loads(PINS.read_text(encoding="utf-8"))["files"]
+    t0 = time.monotonic()
+    bad = [f"missing {f}" for f in pins if not Path(f).exists()]
+    bad += [f"SHA256 differs {f}" for f, h in pins.items() if Path(f).exists() and sha256(f) != h]
+    now = {str(f.resolve()).replace("\\", "/") for f in pin_targets()}
+    bad += [f"not pinned {f}" for f in sorted(now - set(pins))]
+    if bad:
+        raise SystemExit("input pins: " + "; ".join(bad[:10]) + (f" (+{len(bad) - 10})" if len(bad) > 10 else ""))
+    log(f"input pins ok: {len(pins)} files, {time.monotonic() - t0:.0f}s")
+    return {"files": len(pins), "seconds": round(time.monotonic() - t0, 1)}
+
+
+def record(run: Path, names: Sequence[str]) -> None:
+    """Add the SHA256 of run files (relative names) to ``<run>/ledger.json``."""
+    path = run / "ledger.json"
+    ledger = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    ledger.update({n: sha256(run / n) for n in names})
+    atomic_json(path, ledger)
+
+
+def require(run: Path, names: Sequence[str]) -> None:
+    """Every run file exists with the SHA256 of ``<run>/ledger.json``; otherwise SystemExit."""
+    path = run / "ledger.json"
+    ledger = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    bad = [n for n in names if n not in ledger or not (run / n).exists() or sha256(run / n) != ledger[n]]
+    if bad:
+        raise SystemExit(f"{run}: run files missing, unrecorded or changed: {bad}")
 
 
 def read_queries(path: Path) -> pd.DataFrame:
@@ -152,6 +221,7 @@ def prepare(queries: Path, run: Path, cfg_path: Path | None, device: str) -> dic
     paths.assert_writable(run)
     run.mkdir(parents=True, exist_ok=True)
     log = log_to(run)
+    check_pins(log)
     cfg = load_config(cfg_path)
     q = read_queries(queries)
     report: dict[str, Any] = {"queries_source": str(queries), "queries_source_sha256": sha256(queries), "queries": len(q),
@@ -163,12 +233,15 @@ def prepare(queries: Path, run: Path, cfg_path: Path | None, device: str) -> dic
     else:
         atomic_parquet(q, run / "queries.parquet")
         atomic_json(run / "config.json", cfg)
+        record(run, ["queries.parquet", "config.json"])
+    require(run, ["queries.parquet", "config.json"])
     t0 = time.monotonic()
     if not (run / "query_vectors.npz").exists():
         log(f"embed {len(q)} queries on {device}")
         dense = embed_queries(q["query"].tolist(), device)
         paths.assert_writable(run / "query_vectors.npz")
         np.savez(run / "query_vectors.npz", q_ids=q.id.to_numpy(np.int64), q_dense=dense)
+        record(run, ["query_vectors.npz"])
     report["steps"]["embed_seconds"] = round(time.monotonic() - t0, 1)
     t0 = time.monotonic()
     q_ids, q_dense = query_vectors(run)
@@ -179,6 +252,7 @@ def prepare(queries: Path, run: Path, cfg_path: Path | None, device: str) -> dic
         del dense
         paths.assert_writable(run / "pool.npz")
         np.savez(run / "pool.npz", q_ids=q_ids, scores=scores, doc_ids=ids[rows])
+        record(run, ["pool.npz"])
     report["steps"]["pool_seconds"] = round(time.monotonic() - t0, 1)
     t0 = time.monotonic()
     if not (run / "top.parquet").exists():
@@ -187,6 +261,8 @@ def prepare(queries: Path, run: Path, cfg_path: Path | None, device: str) -> dic
         top = d300.merged_top(int(cfg["depth"]), pool, q_dense)
         top["pair_id"] = PAIR_ID_BASE + np.arange(len(top), dtype=np.int64)
         atomic_parquet(top, run / "top.parquet")
+        record(run, ["top.parquet"])
+    require(run, ["query_vectors.npz", "pool.npz", "top.parquet"])
     report["steps"]["merge_seconds"] = round(time.monotonic() - t0, 1)
     top = pd.read_parquet(run / "top.parquet")
     per = top.groupby("query_id").size()
@@ -205,6 +281,7 @@ def texts_512(run: Path, top: pd.DataFrame, log) -> pd.DataFrame:
     """``doc_id, lang, segment, doc_text, doc_tokens``: every pool doc cut to 512 Qwen3 tokens (the 4B / Jina text rule of S31 / S36)."""
     target = run / "texts.parquet"
     if target.exists():
+        require(run, ["texts.parquet"])
         return pd.read_parquet(target)
     from r2ai.s36 import d300
 
@@ -214,6 +291,7 @@ def texts_512(run: Path, top: pd.DataFrame, log) -> pd.DataFrame:
                           "segment": [seg_of.get(int(d), "") for d in docs.doc_id],
                           "doc_text": [passages[int(d)][0] for d in docs.doc_id], "doc_tokens": [int(passages[int(d)][1]) for d in docs.doc_id]})
     atomic_parquet(frame, target)
+    record(run, ["texts.parquet"])
     log(f"texts: {len(frame)} docs")
     return frame
 
@@ -440,6 +518,8 @@ def export_jina(run: Path, top: pd.DataFrame, texts: pd.DataFrame, queries: dict
 
 def export_scoring(run: Path, parts_4b: int, sources: Sequence[str]) -> dict[str, Any]:
     log = log_to(run)
+    check_pins(log)
+    require(run, ["queries.parquet", "query_vectors.npz", "top.parquet"])
     top = pd.read_parquet(run / "top.parquet")
     queries = query_texts(run)
     t0 = time.monotonic()
@@ -487,6 +567,7 @@ def import_4b(run: Path, tag: str, scores: Path, report: Path) -> dict[str, Any]
     dest.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(scores, dest / "scores-extra.parquet")
     shutil.copyfile(report, dest / "collect-extra-report.json")
+    record(run, [f"4b/{tag}/scores-extra.parquet"])
     return {"tag": tag, "pairs": int(len(sc)), "scores_sha256": digest, "gpu_seconds": rep.get("scoring_gpu_seconds_total_all_parts")}
 
 
@@ -505,6 +586,7 @@ def import_cmax(run: Path, scores: Path | None) -> dict[str, Any]:
     fb = set(zip(m.query_id[m.chunk_source == "fallback"], m.doc_id[m.chunk_source == "fallback"]))
     res["fallback"] = [(q, d) in fb for q, d in zip(res.query_id, res.doc_id)]
     atomic_parquet(res, run / "cmax.parquet")
+    record(run, ["cmax.parquet", "cmax_chunks.parquet"])
     return {"pairs": int(len(res)), "rows": int(len(m)), "fallback": int(res.fallback.sum()), "sha256": sha256(run / "cmax.parquet"),
             "scores_sha256": sha256(scores)}
 
@@ -518,6 +600,7 @@ def import_jina(run: Path, scores: Path | None) -> dict[str, Any]:
     if set(zip(sc.query_id, sc.doc_id)) != set(zip(top.query_id, top.doc_id)):
         raise SystemExit("Jina scores do not cover exactly the pool pairs")
     atomic_parquet(sc, run / "jina.parquet")
+    record(run, ["jina.parquet"])
     return {"pairs": int(len(sc)), "sha256": sha256(run / "jina.parquet"), "scores_sha256": sha256(scores)}
 
 
@@ -556,6 +639,7 @@ def load_4b(run: Path) -> dict[int, float]:
     for f in sorted((run / "4b").glob("*/scores-extra.parquet")):
         if not (run / "4b" / f"kaggle-dataset-{f.parent.name}").exists():      # only imported parts (import_4b), not a download folder
             continue
+        require(run, [f"4b/{f.parent.name}/scores-extra.parquet"])
         frame = pd.read_parquet(f, columns=["pair_id", "score"])
         if set(frame.pair_id.astype(int)) & set(out):
             raise ValueError(f"{f}: pair ids scored twice")
@@ -598,8 +682,10 @@ def build(run: Path, name: str | None, no_jina: bool, no_cmax: bool, missing_las
     from r2ai.s36.build import docsel_writer
 
     log = log_to(run)
+    check_pins(log)
     cfg = run_config(run)
-    name = name or f"{run.name}-free" + ("-noJina" if no_jina else "") + ("-noCmax" if no_cmax else "")
+    require(run, ["queries.parquet", "query_vectors.npz", "top.parquet"] + ([] if no_jina else ["jina.parquet"]) + ([] if no_cmax else ["cmax.parquet", "cmax_chunks.parquet"]))
+    name = name or f"{run.name}-free" + ("" if no_jina else "-jina") + ("-noCmax" if no_cmax else "")
     work = run / "build" / name
     apply_dir, compose_dir = work / "apply", work / "compose"
     paths.assert_writable(work)
@@ -689,7 +775,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     e = sub.add_parser("export-scoring")
     e.add_argument("--run", type=Path, required=True)
     e.add_argument("--parts-4b", type=int, default=1, help="4B datasets (one Kaggle session / machine each)")
-    e.add_argument("--sources", default="4b,cmax,jina")
+    e.add_argument("--sources", default="4b,cmax", help="add ,jina only if Jina is wanted (not in the private pipeline)")
     i = sub.add_parser("import-scores")
     i.add_argument("--run", type=Path, required=True)
     i.add_argument("--source", choices=SOURCES, required=True)
@@ -699,14 +785,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     b = sub.add_parser("build")
     b.add_argument("--run", type=Path, required=True)
     b.add_argument("--name", default=None)
-    b.add_argument("--no-jina", action="store_true")
+    b.add_argument("--jina", action="store_true", help="add Jina to the RRF (not in the private pipeline)")
+    b.add_argument("--no-jina", action="store_true", help="kept for old commands: Jina is off by default")
     b.add_argument("--no-cmax", action="store_true")
     b.add_argument("--missing-last", action="store_true", help="a pair without a Jina / C-max score takes the last rank (default: refuse)")
     b.add_argument("--rounds", type=int, default=10)
     b.add_argument("--no-compose", action="store_true", help="docsel / carriers only")
     s = sub.add_parser("status")
     s.add_argument("--run", type=Path, required=True)
+    pp = sub.add_parser("pins")
+    pp.add_argument("--write", action="store_true")
     args = parser.parse_args(argv)
+    if args.cmd == "pins":
+        print(json.dumps(write_pins() if args.write else check_pins(), indent=1))
+        return 0
     run = paths.resolve_path(args.run)
     if not run.is_relative_to(paths.RUNS_DIR):
         raise SystemExit(f"--run must stay below RUNS_DIR ({paths.RUNS_DIR}): {run}")
@@ -725,7 +817,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = import_jina(run, args.scores)
         log_to(run)(f"import {args.source}: {json.dumps(result, default=str)}")
     elif args.cmd == "build":
-        result = build(run, args.name, args.no_jina, args.no_cmax, args.missing_last, args.rounds, not args.no_compose)
+        result = build(run, args.name, not args.jina, args.no_cmax, args.missing_last, args.rounds, not args.no_compose)
     else:
         result = status(run)
     print(json.dumps(result, indent=1, ensure_ascii=False, default=str))

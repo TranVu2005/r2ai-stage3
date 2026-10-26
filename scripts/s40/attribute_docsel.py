@@ -8,7 +8,7 @@ differ from 120A-free-v2. r2ai.newq.select is run on the 100 rehearsal queries w
     3 +cmax    new C-max
     4 +jina    new Jina (= the rehearsal build)
 
-Usage: attribute_docsel.py <run> [out.json]"""
+Usage: attribute_docsel.py <run> [out.json] [--no-jina]   (--no-jina: the private pipeline, RRF cosine / 4B / C-max; compare with FREE-noJina)"""
 import copy
 import json
 import sys
@@ -19,12 +19,16 @@ import pyarrow.parquet as pq
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from r2ai import newq, paths  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import rh_inputs  # noqa: E402
 from r2ai.s31 import build as s31_build  # noqa: E402
 from r2ai.s36 import d300, fuse, s37  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
+KEYS = ("cosine_rank", "judge_rank", "cmax_rank") if "--no-jina" in sys.argv else None
+sys.argv = [a for a in sys.argv if a != "--no-jina"]
 run = Path(sys.argv[1])
-m = pd.read_parquet(next(p for p in (paths.RUNS_DIR / "s40" / "rehearsal-input" / "id-map-rh100.parquet", paths.RUNS_DIR / "s40" / "abl" / "rehearsal-input" / "id-map-rh100.parquet") if p.exists()))
+m = rh_inputs.id_map()
 to_old = dict(zip(m.id.astype(int), m.orig_id.astype(int)))
 to_new = {v: k for k, v in to_old.items()}
 spec = json.loads((ROOT / "configs" / "s36-handoff-120A-free-v2.json").read_text(encoding="utf-8"))
@@ -63,7 +67,7 @@ j = pd.read_parquet(run / "jina.parquet")
 jina_new = dict(zip(zip(j.query_id.astype(int), j.doc_id.astype(int)), j.score.astype(float)))
 c = pd.read_parquet(run / "cmax.parquet")
 cmax_new = dict(zip(zip(c.query_id.astype(int), c.doc_id.astype(int)), c.cmax.astype(float)))
-want = pd.read_parquet(paths.RUNS_DIR / "release" / "120A-free-v2" / "apply" / "docsel-120A-free-v2.parquet", columns=["query_id", "doc_id"])
+want = pd.read_parquet(paths.RUNS_DIR / "s40" / "abl" / "apply" / "docsel-ABL-noJina-free-v2.parquet" if KEYS else paths.RUNS_DIR / "release" / "120A-free-v2" / "apply" / "docsel-120A-free-v2.parquet", columns=["query_id", "doc_id"])
 want = {to_new[q]: g.doc_id.astype(int).tolist() for q, g in want[want.query_id.isin(to_new)].groupby("query_id")}
 
 
@@ -90,7 +94,7 @@ steps = {
 }
 res = {}
 for name, (pools, jina, cmax) in steps.items():
-    got = newq.select(pools, jina, cmax, cfg, fuse.FOUR_KEYS, True)
+    got = newq.select(pools, jina, cmax, cfg, KEYS or fuse.FOUR_KEYS, True)
     sel = {q: [int(r["doc_id"]) for r in rows] for q, rows in got["chosen"].items()}
     same_set = sum(set(sel[q]) == set(want[q]) for q in want)
     same_order = sum(sel[q] == want[q] for q in want)

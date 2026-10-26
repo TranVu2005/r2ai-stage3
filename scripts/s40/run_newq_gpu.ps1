@@ -5,7 +5,7 @@
 # Writes <Run>\gpu.log (stage start / end with seconds, exit codes) and <Run>\gpu.pid.
 param(
     [Parameter(Mandatory = $true)][string]$Run,
-    [string]$Stages = 'cmax,jina',
+    [string]$Stages = 'cmax',              # private pipeline (Vu 26/10): no Jina; 'cmax,jina' to add it
     [string]$Python = 'D:\GitHub\r2ai-stage3\.venv\Scripts\python.exe'
 )
 $wt = (Resolve-Path "$PSScriptRoot\..\..").Path

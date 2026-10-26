@@ -16,9 +16,11 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from r2ai import paths  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import rh_inputs  # noqa: E402
 
 run, name = Path(sys.argv[1]), sys.argv[2]
-m = pd.read_parquet(next(p for p in (paths.RUNS_DIR / "s40" / "rehearsal-input" / "id-map-rh100.parquet", paths.RUNS_DIR / "s40" / "abl" / "rehearsal-input" / "id-map-rh100.parquet") if p.exists()))
+m = rh_inputs.id_map()
 to_new = dict(zip(m.orig_id.astype(int), m.id.astype(int)))
 new = pd.read_parquet(run / "build" / name / "apply" / f"docsel-{name}.parquet")
 old = pd.read_parquet(paths.RUNS_DIR / "release" / "120A-free-v2" / "apply" / "docsel-120A-free-v2.parquet")

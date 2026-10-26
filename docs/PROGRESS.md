@@ -1,8 +1,8 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-26 11:50 (UTC+7)
+- Cập nhật: 2026-10-26 13:15 (UTC+7)
 - Model thực hiện: Claude Opus 5.5 (S40)
-- Commit HEAD đã kiểm trước cập nhật này: `64695a6b`, nhánh `feat/s40-private` (tách từ `origin/main` `e179ffd`)
+- Commit HEAD đã kiểm trước cập nhật này: `25042066`, nhánh `feat/s40-private` (tách từ `origin/main` `e179ffd`)
 - **S40 private (26/10):** ba ablation khung free đã dựng, validator ok, chưa nộp: FREE-noJina 100.014.559 B `153aba8b…c918d`, FREE-noCmax 100.327.272 B `1c19caf3…e2f4`, FREE-nowin 96.951.936 B `2ffa3b2a…ce9a` (Doc F2 dự đoán 0,4253 / 0,4240 / 0,4250; free-v2 0,4250, LB 0,4101). Lệnh query mới `python -m r2ai.newq prepare | export-scoring | import-scores | build [--no-jina] [--no-cmax]` (không đọc dữ liệu theo id query public). Diễn tập 100 query đang chạy (4B Kaggle, Jina). Probe chunk FREE-split T1536 đang dựng. Chi tiết `docs/s40-private.md`.
 - **S35 release (26/10):** `release/final` hợp nhất s25, s26, s27, s29, s31, s32, s33-btc, s35, s36, s37, s38 (s22 không hợp nhất vì 31 khối xung đột mã zh_v2, chờ Vu). Lệnh `python -m r2ai.release build --config configs/s36-handoff-120A-{p4b-v3|free-v2}.json` dựng lại hai ZIP trùng từng byte với bàn giao (p4b-v3 `34d235f6…37e2`, free-v2 `fba176c6…da3f`, mỗi bản khoảng 20 phút, CPU). Ba ablation trên p4b-v3 (nowin, noJina, noCmax) đã dựng, chưa nộp (`docs/s36-fuse4.md`). Xem `README_RELEASE.md`, `docs/release-merge-report.md`, `docs/release-artifacts.md`, `docs/release-private.md`.
 - **S25 canonical (18/10):** `data/canonical-20261018/` có 887.151 doc_id v2 (vi 727.681, zh 159.470), mỗi ID đúng một text; 5.647.948 chunk t256 verbatim 100%; 5.599.214 vector khớp text; 48.734 chunk chờ re-embed (VOV 47.298). Đối chiếu P1/P2 còn lệch đã liệt kê (3.435 chunk Tâm Anh trong P2 là text base cũ bị S18 supersede; 1.261 ID không có text). Pha 3 chưa chạy: chờ Vu duyệt và GPU queue S15 rỗng. Chi tiết `reports/s25-canonical.md`.
@@ -630,6 +630,7 @@ Cập nhật 2026-10-23 13:10 (UTC+7), Claude Sonnet 5.5, HEAD kiểm trước c
 
 | Thời gian (UTC+7) | Ai | Thay đổi |
 |---|---|---|
+| 2026-10-26 13:15 | Claude Opus 5.5 | S40: LB (Vu) noJina 0,4111 / noCmax 0,4077 / nowin 0,4070 / FREE-split T1536 0,4103 → pipeline private chốt cosine + 4B + C-max, không Jina, full body + w768; `newq` mặc định không Jina, ghim SHA đầu vào (`configs/s40-newq-pins.json`, `ledger.json`); C-max tất định (lệch free-v2 do ghép batch bf16); diễn tập đạt theo F2 kỳ vọng (chênh −0,0004); FREE-noJina-canon đang dựng; kế hoạch private viết lại. |
 | 2026-10-26 11:50 | Claude Opus 5.5 | S40: ablation khung free (noJina / noCmax / nowin) dựng xong, validator ok, chưa nộp; `r2ai.newq` (chuỗi lệnh cho query mới); diễn tập 100 query đang chạy; probe FREE-split T1536 (FREE-half bỏ theo Vu); ghi `docs/s40-private.md`. |
 | 2026-10-18 16:20 | Claude Opus 5.5 | S25: Vu cho phép 39 mục pytest ổ C: copy sang `D:\_to_delete_r2ai`, kiểm SHA từng file rồi mới xoá gốc; `relocate` thêm nhánh copy-verify-delete. Kiểm lại: 128 mục / 24.052.056.637 B, 0 bị chặn; vẫn chờ gate GPU S15, chưa di chuyển. |
 | 2026-10-18 16:10 | Claude Opus 5.5 | S25 Q2/Q3: Vu chốt không chứa 1.261 ID chỉ-có-ID; duyệt delete-plan (SHA `c032c340…`). Chưa di chuyển: gate GPU S15 chưa rỗng (`delta_vi_2` queued). `relocate --check`: 89 mục/23,99 GB sẵn sàng, 39 mục ổ C: bỏ qua. Dựng lại P2 từ canonical (khô): chỉ lệch 3.435 chunk Q1; đặt lại chúng thì SHA = P2 đã duyệt `47515fd7…`. |

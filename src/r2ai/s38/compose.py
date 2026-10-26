@@ -81,6 +81,7 @@ THIN_JUNK_SHARE = 0.5   # thin carrier: >= 50% of the chunk is base64 lines + {p
                         # (non-thin carriers: junk share <= 0.059; thin ones: 0.79-0.96), so 0.5 catches exactly the 24
 BTC_CEILING = 104_857_600   # BTC upload limit for new files: 100 MiB (docs/PROGRESS.md, "Trần dùng cho file mới")
 RESERVE = 2_257_600   # default margin below BTC_CEILING: ZIP limit 102,600,000 B (the S29 internal ceiling); the only knob
+NO_P1 = False           # S40 --no-p1: no P1 chunk text as carrier body (every body from canonical / 120ask / Pharmacity); validator --no-p1
 RATE_FULL = 94.3        # B per 768 window: (102,599,152 - 101,181,680) / 15,026 (CH-full+w768-t1849 on J3-thrC)
 FULL_MIN_T = 1536
 NO_WINDOWS = 10 ** 9     # threshold of a probe build without any second chunk
@@ -162,7 +163,7 @@ def s29_chunk_texts(pairs: pd.DataFrame) -> dict[tuple[int, int], tuple[str | No
     from r2ai.s29.qwen_judge import _inputs, _load_submission
 
     inputs = _inputs()
-    p1_rows = [] if reg.QUERY_SET is not None else _load_submission(inputs["p1"], with_chunks=True)   # S40 new query set: no P1 text
+    p1_rows = [] if reg.QUERY_SET is not None or NO_P1 else _load_submission(inputs["p1"], with_chunks=True)   # S40 new query set / --no-p1
     own = {(int(r["id"]), int(c["doc_id"])): c["chunk_text"] for r in p1_rows for c in r["relevant_chunks"]}
     first: dict[int, str] = {}
     for r in p1_rows:
@@ -455,6 +456,8 @@ def prepare(out: Path, name: str, base_zip: Path | None, docsel_path: Path | Non
                               "base64_baophutho": base64 if rule.startswith("clean") else None, "thin": thin}
     if reg.QUERY_SET is not None:
         report["query_set"] = reg.QUERY_SET["run"]
+    if NO_P1:
+        report["no_p1"] = True
     if base_zip is not None:
         rows = read_bundle(base_zip)
         report.update({"base_zip": str(base_zip), "base_zip_bytes": base_zip.stat().st_size, "base_zip_sha256": _sha256(base_zip)})
@@ -649,6 +652,8 @@ def run_validator(out: Path, label: str, rule: str, target: Path, doc_ids) -> di
         cmd += ["--max-chunks-per-doc", "2"]
     if reg.QUERY_SET is not None:                             # S40 new query set: its own query ids, P1 is no verbatim source
         cmd += ["--queries", reg.QUERY_SET["queries"], "--no-p1"]
+    elif NO_P1:
+        cmd += ["--no-p1"]
     cmd += [str(target), str(paths.OUT_DIR / PHARM_HANDOFF)]
     extra = reg.validator_extra(out / f"{label}.validator-extra", reg.registry_index(), doc_ids)
     if extra is not None:
@@ -897,15 +902,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--fit-step", type=int, default=25, help="fit-carriers: resolution in carriers")
     parser.add_argument("--query-set", type=Path, default=None,
                         help="S40: run dir of r2ai.newq (a new query set; recorded in prepare.json, later commands reuse it)")
+    parser.add_argument("--no-p1", action="store_true", help="S40: no P1 chunk text (recorded in prepare.json, later commands reuse it)")
     args = parser.parse_args(argv)
     out = paths.resolve_path(args.out or run_root() / "compose")
     if not out.is_relative_to(paths.RUNS_DIR):
         raise ValueError(f"S38 output must stay below RUNS_DIR: {out}")
     paths.assert_writable(out)
     out.mkdir(parents=True, exist_ok=True)
-    query_set = args.query_set
-    if query_set is None and (out / f"{args.name}.prepare.json").exists():
-        query_set = json.loads((out / f"{args.name}.prepare.json").read_text(encoding="utf-8")).get("query_set")
+    global NO_P1
+    query_set, NO_P1 = args.query_set, args.no_p1
+    if (out / f"{args.name}.prepare.json").exists():
+        prep0 = json.loads((out / f"{args.name}.prepare.json").read_text(encoding="utf-8"))
+        query_set, NO_P1 = query_set or prep0.get("query_set"), NO_P1 or bool(prep0.get("no_p1"))
     if query_set:
         reg.use_query_set(paths.resolve_path(query_set))
     if args.command in ("prepare", "run") and not (out / f"{args.name}.prepare.json").exists():

@@ -1,0 +1,21 @@
+{
+  "frame": "120A-free-v2 (configs/s36-handoff-120A-free-v2.json) on a new query set",
+  "depth": 300,
+  "keep": 400,
+  "a": 0.5298075151496865,
+  "b": -1.40969757276664,
+  "s_free": 1.7405181516323944,
+  "g_depth": 211,
+  "t_c": 0.2030746281894702,
+  "rrf_k": 60,
+  "carriers": {
+    "rule": "fair",
+    "target_per_query": 146.29
+  },
+  "sources": {
+    "a_b": "out/runs/s36-fuse4/cal/cal.json variants.p4b.fit",
+    "s_free": "out/runs/s36-fuse4/cal/ef2-free.json",
+    "t_c": "configs/s36-handoff-120A-free-v2.json",
+    "target_per_query": "175,548 carriers / 1,200 queries of 120A-free-v2"
+  }
+}

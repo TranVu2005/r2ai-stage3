@@ -163,16 +163,19 @@ def prepare_rdoc(out: Path) -> dict[str, Any]:
 
 # ------------------------------------------------------------------------------------- R-chk
 
-def select_like_s32(pairs: pd.DataFrame, log: Callable[[str], None], supplement: Path, out: Path) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+def select_like_s32(pairs: pd.DataFrame, log: Callable[[str], None], supplement: Path, out: Path,
+                    qvec: dict[int, np.ndarray] | None = None) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     """S32 chunk choice for ``pairs`` (src_pair_id, query_id, doc_id, cosine_rank, cosine_score, lang, source).
 
     Same owner map, slots, stored vectors, top-n and ties as ``r2ai.s32.chunks.prepare``; chunk
     texts over 512 Qwen3 tokens are cut with ``truncate_document`` as there.
+    ``qvec`` (S40, a new query set): query_id -> dense vector; default the S29 vectors of the public queries.
     """
     inputs = _inputs()
     canonical = inputs["canonical"]
-    manifest31 = json.loads((s31_root() / "pool" / "manifest.json").read_text(encoding="utf-8"))
-    qvec = s32.load_query_vectors(manifest31)
+    if qvec is None:
+        manifest31 = json.loads((s31_root() / "pool" / "manifest.json").read_text(encoding="utf-8"))
+        qvec = s32.load_query_vectors(manifest31)
     groups, cid_to_doc = s29_build._load_aliases(canonical / "chunks_t256.parquet", canonical / "docs.parquet")
     ph_chunks_all = s32.load_pharmacity_chunks(inputs)
     ph_docs = set(ph_chunks_all.doc_id.astype(int))

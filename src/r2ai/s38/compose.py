@@ -162,7 +162,7 @@ def s29_chunk_texts(pairs: pd.DataFrame) -> dict[tuple[int, int], tuple[str | No
     from r2ai.s29.qwen_judge import _inputs, _load_submission
 
     inputs = _inputs()
-    p1_rows = _load_submission(inputs["p1"], with_chunks=True)
+    p1_rows = [] if reg.QUERY_SET is not None else _load_submission(inputs["p1"], with_chunks=True)   # S40 new query set: no P1 text
     own = {(int(r["id"]), int(c["doc_id"])): c["chunk_text"] for r in p1_rows for c in r["relevant_chunks"]}
     first: dict[int, str] = {}
     for r in p1_rows:
@@ -398,13 +398,16 @@ def best_t256(carriers: pd.DataFrame, text: dict[int, str], owner: dict[int, int
             pieces[d] = sub.assign(idx=np.arange(len(sub)))
     if not docs:                                              # only registry docs
         return reg.best_spans(carriers, text, index, choose)
-    cp = pd.read_parquet(paths.OUT_DIR / S32_ROOT / "pool" / "chunk_pairs.parquet",
-                         columns=["pair_id", "query_id", "doc_id", "chunk_id", "field"])
-    cp = cp.merge(carriers[["query_id", "doc_id"]], on=["query_id", "doc_id"])
-    sc = pd.read_parquet(paths.OUT_DIR / S32_SCORES, columns=["pair_id", "score"])
-    judge = cp[cp.field.isin(SUBMITTABLE)].merge(sc, on="pair_id")
-    judge = {(int(q), int(d), int(c)): float(s) for q, d, c, s in zip(judge.query_id, judge.doc_id, judge.chunk_id, judge.score)}
-    qv = load_query_vectors()
+    if reg.QUERY_SET is not None:                             # S40 new query set: the 0.6B scores of its own C-max chunk rows, its query vectors
+        judge, qv = reg.QUERY_SET["chunk_scores"], reg.QUERY_SET["qvec"]
+    else:
+        cp = pd.read_parquet(paths.OUT_DIR / S32_ROOT / "pool" / "chunk_pairs.parquet",
+                             columns=["pair_id", "query_id", "doc_id", "chunk_id", "field"])
+        cp = cp.merge(carriers[["query_id", "doc_id"]], on=["query_id", "doc_id"])
+        sc = pd.read_parquet(paths.OUT_DIR / S32_SCORES, columns=["pair_id", "score"])
+        judge = cp[cp.field.isin(SUBMITTABLE)].merge(sc, on="pair_id")
+        judge = {(int(q), int(d), int(c)): float(s) for q, d, c, s in zip(judge.query_id, judge.doc_id, judge.chunk_id, judge.score)}
+        qv = load_query_vectors()
     dense = np.load(paths.DATA_DIR / CANONICAL / "vectors" / "dense.npy", mmap_mode="r")
     with np.load(paths.RUNS_DIR / "s32-chunk-judge" / "pool" / "supplement_vectors.npz") as sup:
         sup_row = {(str(o), int(c)): k for k, (o, c) in enumerate(zip(sup["origin"], sup["chunk_id"]))}
@@ -450,6 +453,8 @@ def prepare(out: Path, name: str, base_zip: Path | None, docsel_path: Path | Non
     started = time.monotonic()
     report: dict[str, Any] = {"name": name, "rule": rule, "docsel": str(docsel_path) if docsel_path else None,
                               "base64_baophutho": base64 if rule.startswith("clean") else None, "thin": thin}
+    if reg.QUERY_SET is not None:
+        report["query_set"] = reg.QUERY_SET["run"]
     if base_zip is not None:
         rows = read_bundle(base_zip)
         report.update({"base_zip": str(base_zip), "base_zip_bytes": base_zip.stat().st_size, "base_zip_sha256": _sha256(base_zip)})
@@ -642,6 +647,8 @@ def run_validator(out: Path, label: str, rule: str, target: Path, doc_ids) -> di
     cmd = [sys.executable, "-u", str(paths.ROOT / VALIDATOR)]
     if rule == "full+w768":
         cmd += ["--max-chunks-per-doc", "2"]
+    if reg.QUERY_SET is not None:                             # S40 new query set: its own query ids, P1 is no verbatim source
+        cmd += ["--queries", reg.QUERY_SET["queries"], "--no-p1"]
     cmd += [str(target), str(paths.OUT_DIR / PHARM_HANDOFF)]
     extra = reg.validator_extra(out / f"{label}.validator-extra", reg.registry_index(), doc_ids)
     if extra is not None:
@@ -888,12 +895,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--drop", type=int, default=0, help="write: drop this many lowest-P4B carriers (their chunks, not the docs)")
     parser.add_argument("--fit-carriers", action="store_true", help="run: drop the fewest lowest-P4B carriers that let the ZIP fit, then search T")
     parser.add_argument("--fit-step", type=int, default=25, help="fit-carriers: resolution in carriers")
+    parser.add_argument("--query-set", type=Path, default=None,
+                        help="S40: run dir of r2ai.newq (a new query set; recorded in prepare.json, later commands reuse it)")
     args = parser.parse_args(argv)
     out = paths.resolve_path(args.out or run_root() / "compose")
     if not out.is_relative_to(paths.RUNS_DIR):
         raise ValueError(f"S38 output must stay below RUNS_DIR: {out}")
     paths.assert_writable(out)
     out.mkdir(parents=True, exist_ok=True)
+    query_set = args.query_set
+    if query_set is None and (out / f"{args.name}.prepare.json").exists():
+        query_set = json.loads((out / f"{args.name}.prepare.json").read_text(encoding="utf-8")).get("query_set")
+    if query_set:
+        reg.use_query_set(paths.resolve_path(query_set))
     if args.command in ("prepare", "run") and not (out / f"{args.name}.prepare.json").exists():
         if not (args.rule and (args.base_zip or args.docsel)):
             parser.error("prepare needs --rule and --base-zip (or --docsel alone: the base bundle is built from the docsel)")

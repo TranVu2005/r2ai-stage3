@@ -57,11 +57,12 @@ Từ `release/final`, `python -m r2ai.release build --config <config>` (apply �
 
 `scripts/s36/handoff_s30.py --verify --out out/runs/release/handoff-verify` cho cả hai config: `docsel`, `carriers`, `pcal`, `keep` trùng SHA, `inputs_sha256`, `apply_outputs_sha256`, `zip` của manifest mới sinh ra trùng với manifest bàn giao; 19 tệp nền trùng. Chỉ phần `code` khác (commit hiện tại), đúng dự kiến. Không sửa config nào cho khớp.
 
-## 4. s22-reextract: không hợp nhất, cần Vu quyết
+## 4. s22-reextract: không hợp nhất (quyết định của Vu, 26/10)
 
-Merge `feat/s22-reextract` (5 commit trên nền `a65b56a`; `main` có thêm 97 commit so với nền đó) xung đột ở 31 khối mã: `src/r2ai/zh_v2/ingest.py` 13, `src/r2ai/zh_full_ingest/extract.py` 8, `src/r2ai/zh_v2/extract.py` 4, `src/r2ai/zh_v2/index.py` 3, `src/r2ai/index/segments.py` 2, `src/r2ai/zh_v2/__init__.py` 1 (cộng 3 khối PROGRESS). Cùng hiện tượng `main` đã ghi ở `8dc8c80` ("S22 merge blocked on zh_v2 conflicts"). Đã `git merge --abort`, release không chứa s22.
-
-Hai bản cuối không đọc mã s22 (crawl/extract zh_v2): trong `src/r2ai/s29`, `s31`, `s36`, `s38` và `scripts/s36` không có tham chiếu `zh_v2` hay `zh_full_ingest`, chỉ `src/r2ai/s37/qa.py` có và nó dùng mã đã nằm trong `main`; corpus canonical đã dựng ở S25 nên đầu vào cố định. Giải xung đột thật sự cần người nắm mã zh_v2 (chọn giữa mã main và mã s22 cho từng khối). Tôi không đoán; hỏi Vu có cần s22 trong bản cuối không.
+- Nhánh `feat/s22-reextract`, HEAD `6e600bfbb6bf4473de4f5506c6a571e4ecf54895`, đã nằm nguyên trạng trên `origin/feat/s22-reextract` (đối chiếu `git ls-remote` 26/10, cùng hash); không push gì thêm.
+- Năm commit trên nền `a65b56a`: `21b484d` (pipeline crawl zh_v2 trực tiếp, resume được), `3af405e` (stage các lô S20 recovery cho S15), `662f285` (nhận doc CJK ngắn khi recovery), `dc040cd` (bundle resegment zh theo ngưỡng token tối thiểu), `6e600bf` (ghi kiểm tra tính tất định của extract S22).
+- Phạm vi: extract lại zh với ngưỡng từ 50 chữ Hán. Dữ liệu kết quả đã nằm trong corpus canonical (`data/canonical-20261018/`, ghim SHA trong `docs/release-artifacts.md`), nên hai bản cuối không cần mã của nhánh này.
+- Không hợp nhất vì merge xung đột ở 31 khối mã: `src/r2ai/zh_v2/ingest.py` 13, `src/r2ai/zh_full_ingest/extract.py` 8, `src/r2ai/zh_v2/extract.py` 4, `src/r2ai/zh_v2/index.py` 3, `src/r2ai/index/segments.py` 2, `src/r2ai/zh_v2/__init__.py` 1 (cộng 3 khối PROGRESS), cùng hiện tượng `main` đã ghi ở `8dc8c80` ("S22 merge blocked on zh_v2 conflicts"). Đã `git merge --abort`; `release/final` và `main` không chứa s22. Muốn dùng lại mã s22 thì cần giải các khối đó bởi người nắm zh_v2.
 
 ## 5. Thay đổi trong release ngoài các merge
 

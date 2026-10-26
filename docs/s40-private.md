@@ -127,41 +127,48 @@ Lần dựng đầu (12:07) bị validator loại (866 chunk không nguyên văn
 
 ## 5. Kế hoạch private 01–04/11 (pipeline chốt: cosine + 4B + C-max, không Jina)
 
-Giả định N = 1.200 query; giờ tỷ lệ thuận với N trừ compose. **T0 = lúc Vu có tệp query** (giờ mở đề 01/11 chưa biết). Hạn nộp 04/11 23:59 (UTC+7), tối đa 5 lượt. Tệp query: parquet có cột `id` (int, duy nhất) và `query` (text); Vu gửi kèm SHA256, `prepare` ghi SHA vào `prepare.json`, các bước sau kiểm qua `ledger.json`.
+**Chỗ Vu cần điền:** (A) giờ mở đề 01/11: `____`; (B) private có hiện điểm sau mỗi lượt không: `____`; (C) cách tính lượt (lượt lỗi định dạng có bị tính không): `____`; (D) giá RunPod RTX 4090 thực trả (USD/giờ): `____`.
 
-**Tốc độ đo trong diễn tập (26/10, 100 query) và ngoại suy:**
+Giả định N = 1.200 query; giờ tỷ lệ thuận với N, trừ compose. **T0 = lúc Vu có tệp query.** Hạn nộp 04/11 23:59 (UTC+7), tối đa 5 lượt. Tệp query: parquet, cột `id` (int, duy nhất) và `query` (text); Vu gửi kèm SHA256. Không dùng 2 tài khoản Kaggle (điều khoản Kaggle): **một phiên Kaggle + một pod RunPod RTX 4090**, mỗi bên một nửa số cặp 4B.
 
-| bước | nơi | đo (100 query) | 1.200 query |
+**Tốc độ (đo trong diễn tập 26/10, 100 query) và ngoại suy:**
+
+| bước | nơi | đo | 1.200 query |
 |---|---|---|---:|
-| kiểm ghim 79 tệp | máy | 20 s mỗi lệnh | 20 s mỗi lệnh |
-| prepare (embed, cosine top-400, ghép 120ask) | máy (GPU cho embed) | 41 s | khoảng 2 phút (chưa đo ở 1.200) |
-| export 4B + C-max (text 512, chọn chunk S32) | máy CPU | khoảng 3,5 phút | 10 đến 20 phút (chưa đo ở 1.200) |
-| 4B, 360.000 cặp | Kaggle 2×T4 | 6,7 cặp/s | **14,9 giờ** một luồng; 3 phần × 5,0 giờ |
+| kiểm ghim 79 tệp | máy | 20 s mỗi lệnh | 20 s |
+| prepare | máy (GPU cho embed) | 41 s | khoảng 2 phút (chưa đo ở 1.200) |
+| export 4B (2 phần + reg 1.000) + C-max | máy CPU | khoảng 3,5 phút | 10 đến 20 phút (chưa đo ở 1.200) |
+| 4B nửa Kaggle, 180.000 cặp | Kaggle 2×T4 | 6,7 cặp/s | **7,5 giờ** (dưới mức dừng 10,5 giờ của notebook) |
+| 4B nửa RunPod, 180.000 cặp | RTX 4090 | **chưa đo** (diễn tập RunPod 5.000 cặp, trước 31/10) | điền sau diễn tập: `____` giờ |
+| cổng hồi quy 1.000 cặp | Kaggle (đầu phiên) + RunPod (đầu pod) | Kaggle: khoảng 2,5 phút + nạp mô hình | |
 | C-max, 939.600 dòng | GPU máy, bf16 | 26,0 dòng/s | **10,0 giờ** |
-| build (chọn doc) | máy | 2 s | dưới 1 phút |
-| compose full+w768 + dò T + validator | máy CPU | 3,5 phút | 35 đến 45 phút (ablation free 1.200 query: 38,5 và 44,3 phút) |
+| build + compose + dò T + validator | máy CPU | 3,5 phút (100 query) | 35 đến 45 phút |
 
-**Đường găng:** 4B. GPU máy chỉ còn C-max (10 giờ), chạy song song với 4B trên Kaggle. Tách 4B thành 3 phần (`export-scoring --parts-4b 3`, mỗi phần một dataset + notebook, khoảng 5 giờ). Nếu chạy được 2 phiên GPU cùng lúc (2 tài khoản Kaggle, hoặc 1 phần trên RunPod; **chưa kiểm, Vu xác nhận**), 4B xong sau khoảng 10 giờ; một phiên nối tiếp thì khoảng 15 giờ (3 phiên × 5 giờ, mỗi phiên dưới mức dừng 10,5 giờ của notebook). RunPod 4090: chưa đo; scorer ghim chạy trên mọi GPU CUDA cùng lệnh `score` / `status` / `collect`, nhưng số học khác T4 (S31: lệch tới 0,0047), nên nếu dùng thì thử 200 cặp trước 01/11. Quota Kaggle: private cần khoảng 15 giờ phiên.
+**Đường găng:** C-max trên GPU máy (10 giờ) khi 4B chia đôi (Kaggle 7,5 giờ, RunPod dự kiến ngắn hơn). Bản chính có sau khoảng T0 + 11 giờ. Phương án dự phòng chỉ Kaggle: 4B 14,9 giờ (2 phiên nối tiếp, 7,5 giờ mỗi phiên), bản chính sau khoảng T0 + 16 giờ.
 
-**Lịch theo giờ:**
+**Chuẩn bị trước 31/10:**
 
-| mốc | việc | ai | đầu ra / kiểm |
+1. Diễn tập RunPod: upload `out/runs/s40/rh100/4b/sample-rp5k/` (5.000 cặp của bộ 100 query, đã có điểm Kaggle trong `rh100-4b-1`), chạy `DATASET=/workspace/sample-rp5k bash scripts/s40/run_runpod_4b.sh`; tải `s40-rh100-4b-rp5k-runpod.tar.gz`; `python scripts/s40/gate_4b.py out/runs/s40/rh100/4b/rh100-4b-1/scores-extra.parquet <runpod>/rh100-4b-rp5k/qwen3-reranker-4b/scores-extra.parquet`. Ghi: tốc độ (`runpod-timing.json`, cặp/s), chi phí (giờ pod × giá), Spearman, |Δ| TB / p99 / max. Đặt `TRANSFORMERS_VERSION` bằng bản Kaggle in ra ở ô 2 của notebook, để hai bên dùng cùng phiên bản.
+2. Cổng: Spearman ≥ 0,99 và |Δ| TB nhỏ (S31 đo T4 so với máy khác: lệch tới 0,0047). Không đạt thì dùng phương án chỉ Kaggle.
+
+**Lịch theo giờ (phương án Kaggle + RunPod):**
+
+| mốc | việc | ai | kiểm |
 |---|---|---|---|
-| T0 + 0:00 | `newq pins` (20 s) rồi `newq prepare --queries <tệp> --run out/runs/s40/private` | tôi | 1.200 × 300 cặp trong `top.parquet` |
-| T0 + 0:05 | `newq export-scoring --run ... --parts-4b 3` | tôi | 3 dataset 4B (120.000 cặp mỗi phần), pool C-max |
-| T0 + 0:25 | Vu upload 3 dataset, chạy phần 1 (và phần 2 nếu được song song); máy chạy C-max (`scripts/s40/run_newq_gpu.ps1 -Stages cmax`, supervisor tự khởi động lại) | Vu, tôi | log `gpu.log`, ETA theo phần |
-| T0 + 5:30 | phần 4B đầu về → `import-scores --source 4b --tag ...-4b-1`; Vu chạy phần tiếp | Vu, tôi | SHA, revision, số cặp |
-| T0 + 10:30 | C-max xong → `import-scores --source cmax` | tôi | 939.600 dòng, 0 thiếu |
-| T0 + 10:30 đến 15:30 | phần 4B còn lại về, nhập | Vu, tôi | |
-| khi đủ 4B (T0 + 10 đến 16 giờ) | **bản chính** `newq build --run ...` (cosine + 4B + C-max), compose, validator (khoảng 45 phút) | tôi | ZIP < 102.600.000 B, validator 0 lỗi |
-| ngay sau đó | **bản dự phòng B0** `newq build --no-cmax` (cosine + 4B) chỉ khi C-max hỏng; nếu C-max đã xong thì B0 không cần | tôi | |
-| trước 03/11 | Vu nộp bản chính (lượt 1) | Vu | |
-| 03/11 đến 04/11 | dự phòng: chạy lại phần lỗi, sửa định dạng | | |
+| T0 + 0:00 | `newq pins`; `newq prepare --queries <tệp> --run out/runs/s40/private` | tôi | SHA tệp query = SHA Vu gửi |
+| T0 + 0:05 | `newq export-scoring --run ... --parts-4b 2 --reg-pairs 1000` | tôi | `private-4b-1` (+ `private-4b-reg` trong cùng dataset), `private-4b-2` |
+| T0 + 0:25 | Vu: dataset `kaggle-dataset-private-4b-1` lên Kaggle, chạy notebook `private-4b-1.ipynb` (chấm `-reg` trước rồi phần 1); pod RunPod nhận `kaggle-dataset-private-4b-2` và thư mục `private-4b-reg` (`TAGS="private-4b-reg private-4b-2"`); máy chạy C-max (`scripts/s40/run_newq_gpu.ps1 -Run ...`) | Vu, tôi | 3 nơi chạy song song |
+| T0 + 0:45 | điểm `-reg` của hai bên về → `gate_4b.py` | tôi | đạt: tiếp; không đạt: dừng pod, phần 2 chuyển sang phiên Kaggle thứ hai sau phần 1 |
+| T0 + 4 đến 6 giờ (chờ số đo) | RunPod xong phần 2 → `import-scores --source 4b --tag private-4b-2`; dừng pod | Vu, tôi | 180.000 cặp, revision, SHA |
+| T0 + 8:00 | Kaggle xong phần 1 → `import-scores --source 4b --tag private-4b-1` | Vu, tôi | |
+| T0 + 10:30 | C-max xong → `import-scores --source cmax` | tôi | 939.600 dòng |
+| T0 + 11:15 | **bản chính** `newq build --run ...` → ZIP, validator | tôi | ZIP < 102.600.000 B, 0 lỗi |
+| sau đó | Vu nộp lượt 1 (trước 03/11) | Vu | |
 
 **Điểm dừng an toàn:**
 
-* C-max hỏng hoặc chậm (GPU máy lỗi): dựng **cosine + 4B** (`build --no-cmax`); LB public của cấu hình này chưa đo trực tiếp, gần nhất là FREE-noCmax 0,4077 (vẫn có Jina). Nên nộp B0 trước 03/11 nếu đến T0 + 24 giờ C-max chưa xong.
-* 4B thiếu một phần: bắt buộc có 4B cho mọi cặp (p_cal và cắt EF2 dựa trên P4B); `build` từ chối khi thiếu. Chạy lại phần thiếu (notebook resume theo phần). Chưa có luật dựng khi một số query thiếu 4B: Vu quyết nếu xảy ra sau 04/11 12:00.
-* Máy hỏng: mọi bước resume được từ checkpoint (phần 4B, phần C-max, `ledger.json`); compose chỉ cần CPU.
+* Cổng RunPod không đạt, hoặc pod lỗi: phần 2 chạy trên Kaggle sau phần 1 (phương án chỉ Kaggle; 4B xong T0 + 16 giờ).
+* C-max hỏng hoặc quá chậm: bản **cosine + 4B** (`build --no-cmax`), nộp nếu đến T0 + 24 giờ C-max chưa xong (gần nhất trên LB public: FREE-noCmax 0,4077, có Jina; cấu hình cosine + 4B không Jina chưa đo trên LB). Có thể chia C-max cho RunPod sau khi pod xong 4B (giảm còn khoảng 5 giờ), nhưng điểm bf16 khác GPU lệch cỡ nhiễu ghép batch (mục 3); mặc định giữ máy.
+* 4B thiếu: `build` từ chối; chạy lại phần thiếu (resume theo phần). Chưa có luật khi đến 04/11 12:00 vẫn thiếu: Vu quyết.
 
-**5 lượt private (đề xuất, Vu quyết):** (1) bản chính cosine + 4B + C-max, nộp ngay khi có (trước 03/11); (2) giữ cho bản sửa nếu lượt 1 có lỗi định dạng hay validator BTC; (3) đến (5) để dành. Chưa rõ private có hiện điểm sau mỗi lượt không (Vu xác nhận); nếu có, có thể thử biến thể ở lượt 2 hoặc 3.
+**5 lượt private (đề xuất, chờ (B) và (C)):** (1) bản chính, ngay khi có; (2) giữ cho bản sửa lỗi; (3) đến (5) để dành. Nếu private hiện điểm, có thể dùng lượt 2 hoặc 3 cho biến thể.

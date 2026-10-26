@@ -303,20 +303,25 @@ def split_queries(per_query: pd.Series, parts: int) -> list[list[int]]:
     return [blk.tolist() for blk in np.split(ids, edges) if len(blk)]
 
 
-def notebook_for(tag: str, pairs: int, dataset: Path) -> dict[str, Any]:
-    """The pinned final-4b notebook with only TAGS / EXPECT / the dataset name changed."""
+def notebook_for(tags: dict[str, int], dataset: Path) -> dict[str, Any]:
+    """The pinned final-4b notebook with only TAGS / EXPECT / the dataset name changed; ``tags`` (tag -> pairs) run in this order."""
     nb = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
-    dataset_dir, hits = dataset.name, 0
+    dataset_dir, hits, main = dataset.name, 0, list(tags)[-1]
+    tag_list = ", ".join(f'"{t}"' for t in tags)
+    expect = ", ".join(f'"{t}": {n}' for t, n in tags.items())
     for cell in nb["cells"]:
         text = "".join(cell["source"])
         new = text.replace("`out/runs/s36-fuse4/d300/kaggle-dataset-final4b/` (`judge_score.py` + `final-4b/`)",
-                           f"`{dataset.as_posix()}/` (`judge_score.py` + `{tag}/`)")
-        new = new.replace("(`final-4b/qwen3-reranker-4b/parts`)", f"(`{tag}/qwen3-reranker-4b/parts`)")
-        new = new.replace('TAGS = ["final-4b"]', f'TAGS = ["{tag}"]').replace('EXPECT = {"final-4b": 47833}', f'EXPECT = {{"{tag}": {pairs}}}')
-        new = new.replace("/kaggle/working/final-4b/", f"/kaggle/working/{tag}/").replace("kaggle-dataset-final4b", dataset_dir)
+                           f"`{dataset.as_posix()}/` (`judge_score.py` + " + " + ".join(f"`{t}/`" for t in tags) + ")")
+        new = new.replace("(`final-4b/qwen3-reranker-4b/parts`)", f"(`{main}/qwen3-reranker-4b/parts`)")
+        new = new.replace('TAGS = ["final-4b"]', f"TAGS = [{tag_list}]").replace('EXPECT = {"final-4b": 47833}', f"EXPECT = {{{expect}}}")
+        new = new.replace("/kaggle/working/final-4b/", f"/kaggle/working/{main}/").replace("kaggle-dataset-final4b", dataset_dir)
         if cell["cell_type"] == "markdown" and text.startswith("# S36"):
-            new = (f"# S40 Qwen3-Reranker-4B on Kaggle (2x T4): {tag}\n\n{pairs:,} pairs of a new query set (r2ai.newq), dataset `{dataset_dir}`. "
-                   "The cells are the pinned S36 final-4b notebook; only the subset name, the pair count and the dataset name differ. "
+            new = (f"# S40 Qwen3-Reranker-4B on Kaggle (2x T4): {', '.join(tags)}\n\n"
+                   + "; ".join(f"`{t}` {n:,} pairs" for t, n in tags.items())
+                   + f" of a new query set (r2ai.newq), dataset `{dataset_dir}`, subsets scored in this order (a `-reg` subset is the "
+                   "1,000-pair Kaggle / RunPod regression gate: download its scores-extra.parquet as soon as it is collected). "
+                   "The cells are the pinned S36 final-4b notebook; only the subset names, the pair counts and the dataset name differ. "
                    "The notes below are those of S36.\n\n" + new)
         hits += new != text
         cell["source"] = new.splitlines(keepends=True)
@@ -328,52 +333,84 @@ def notebook_for(tag: str, pairs: int, dataset: Path) -> dict[str, Any]:
     return nb
 
 
-def export_4b(run: Path, top: pd.DataFrame, texts: pd.DataFrame, queries: dict[int, str], parts: int, log) -> dict[str, Any]:
+def write_4b_subset(sub: Path, tag: str, todo: pd.DataFrame, texts: pd.DataFrame, queries: dict[int, str], shard_no: int,
+                    extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    """One 4B subset in the S31 pool-extra layout: ``sub/{shards/pool-<n>.parquet, extra_pairs.parquet, manifest.json}``."""
+    from r2ai.s36 import d300
+
+    if (sub / "manifest.json").exists():
+        return json.loads((sub / "manifest.json").read_text(encoding="utf-8"))
+    todo = todo.sort_values(["query_id", "cosine_rank"]).reset_index(drop=True)
+    t = texts.set_index("doc_id").loc[todo.doc_id.to_numpy()]
+    shard_name = f"pool-{shard_no}.parquet"
+    (sub / "shards").mkdir(parents=True, exist_ok=True)
+    shard = pa.table({
+        "pair_id": pa.array(todo.pair_id, pa.int64()), "query_id": pa.array(todo.query_id, pa.int64()), "doc_id": pa.array(todo.doc_id, pa.int64()),
+        "cosine_rank": pa.array(todo.cosine_rank, pa.int32()), "cosine_score": pa.array(todo.cosine_score, pa.float64()),
+        "in_pool13": pa.array([False] * len(todo), pa.bool_()), "lang": pa.array(t.lang.tolist(), pa.string()),
+        "query_text": pa.array([queries[int(q)] for q in todo.query_id], pa.string()),
+        "doc_text": pa.array(t.doc_text.tolist(), pa.string()), "doc_tokens": pa.array(t.doc_tokens.to_numpy(), pa.int32())})
+    paths.assert_writable(sub / "shards" / shard_name)
+    pq.write_table(shard, sub / "shards" / shard_name, compression="zstd", row_group_size=5_000)
+    pd.DataFrame({"pair_id": todo.pair_id, "query_id": todo.query_id, "doc_id": todo.doc_id, "cosine_rank": todo.cosine_rank,
+                  "cosine_score": todo.cosine_score, "source": f"newq-{tag}", "free": todo.cosine_rank <= 211, "capped": False}
+                 ).to_parquet(sub / "extra_pairs.parquet", index=False)
+    q = sorted(todo.query_id.unique())
+    man = {"status": "prepared", "tag": tag, "model": "qwen3-reranker-4b", "revision": REVISION_4B, "pairs": int(len(todo)),
+           "queries": [int(q[0]), int(q[-1]), len(q)], "pair_id_range": [int(todo.pair_id.min()), int(todo.pair_id.max())],
+           "lang_counts": t.lang.value_counts().to_dict(), "doc_tokens_mean": float(t.doc_tokens.mean()),
+           "eta_hours_kaggle_2xT4": round(len(todo) / 6.7 / 3600, 2),
+           "extra_pairs_sha256": sha256(sub / "extra_pairs.parquet"), "shard_sha256": sha256(sub / "shards" / shard_name),
+           "judge_score_py_sha256": JUDGE_SHA, **(extra or {})}
+    atomic_json(sub / "manifest.json", man)
+    return man
+
+
+def export_4b(run: Path, top: pd.DataFrame, texts: pd.DataFrame, queries: dict[int, str], parts: int, log, reg_pairs: int = 0) -> dict[str, Any]:
+    """``parts`` subsets ``<run>-4b-<k>`` (contiguous query blocks, each its own dataset ``kaggle-dataset-<tag>`` + notebook; the same
+    folder is what ``scripts/s40/run_runpod_4b.sh`` takes). ``reg_pairs`` > 0: a regression subset ``<run>-4b-reg`` of that many random
+    pairs (seed 40) of part 1, put in the part-1 dataset and scored there FIRST, and also scored by RunPod: the Kaggle / RunPod gate."""
     from r2ai.s36 import d300
 
     if sha256(d300.JUDGE_SCORE) != JUDGE_SHA:
         raise SystemExit("judge_score.py SHA differs from the pinned S31 scorer")
     out = run / "4b"
     name = run.name
-    by_doc = texts.set_index("doc_id")
     result = {}
     for k, block in enumerate(split_queries(top.groupby("query_id").size(), parts), 1):
         tag = f"{name}-4b-{k}"
         ds = out / f"kaggle-dataset-{tag}"
-        sub = ds / tag
-        if (sub / "manifest.json").exists():
-            result[tag] = json.loads((sub / "manifest.json").read_text(encoding="utf-8"))
-            nb = notebook_for(tag, int(result[tag]["pairs"]), ds)
-            (out / f"{tag}.ipynb").write_text(json.dumps(nb, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
-            continue
-        todo = top[top.query_id.isin(block)].sort_values(["query_id", "cosine_rank"]).reset_index(drop=True)
-        t = by_doc.loc[todo.doc_id.to_numpy()]
-        shard_name = f"pool-{SHARD_4B + k}.parquet"
-        (sub / "shards").mkdir(parents=True, exist_ok=True)
-        shard = pa.table({
-            "pair_id": pa.array(todo.pair_id, pa.int64()), "query_id": pa.array(todo.query_id, pa.int64()), "doc_id": pa.array(todo.doc_id, pa.int64()),
-            "cosine_rank": pa.array(todo.cosine_rank, pa.int32()), "cosine_score": pa.array(todo.cosine_score, pa.float64()),
-            "in_pool13": pa.array([False] * len(todo), pa.bool_()), "lang": pa.array(t.lang.tolist(), pa.string()),
-            "query_text": pa.array([queries[int(q)] for q in todo.query_id], pa.string()),
-            "doc_text": pa.array(t.doc_text.tolist(), pa.string()), "doc_tokens": pa.array(t.doc_tokens.to_numpy(), pa.int32())})
-        paths.assert_writable(sub / "shards" / shard_name)
-        pq.write_table(shard, sub / "shards" / shard_name, compression="zstd", row_group_size=5_000)
-        pd.DataFrame({"pair_id": todo.pair_id, "query_id": todo.query_id, "doc_id": todo.doc_id, "cosine_rank": todo.cosine_rank,
-                      "cosine_score": todo.cosine_score, "source": f"newq-{tag}", "free": todo.cosine_rank <= 211, "capped": False}
-                     ).to_parquet(sub / "extra_pairs.parquet", index=False)
+        todo = top[top.query_id.isin(block)]
+        result[tag] = write_4b_subset(ds / tag, tag, todo, texts, queries, SHARD_4B + k)
+        tags = {tag: int(result[tag]["pairs"])}
+        if reg_pairs and k == 1:
+            reg = f"{name}-4b-reg"
+            pick = todo.sample(n=min(reg_pairs, len(todo)), random_state=40)
+            result[reg] = write_4b_subset(ds / reg, reg, pick, texts, queries, SHARD_4B + 90, {"regression_gate": True, "subset_of": tag})
+            tags = {reg: int(result[reg]["pairs"]), **tags}
         shutil.copyfile(d300.JUDGE_SCORE, ds / "judge_score.py")
-        man = {"status": "prepared", "tag": tag, "model": "qwen3-reranker-4b", "revision": REVISION_4B, "pairs": int(len(todo)),
-               "queries": [int(block[0]), int(block[-1]), len(block)], "pair_id_range": [int(todo.pair_id.min()), int(todo.pair_id.max())],
-               "lang_counts": t.lang.value_counts().to_dict(), "doc_tokens_mean": float(t.doc_tokens.mean()),
-               "eta_hours_kaggle_2xT4": round(len(todo) / d300.KAGGLE_PAIRS_PER_S / 3600, 2),
-               "extra_pairs_sha256": sha256(sub / "extra_pairs.parquet"), "shard_sha256": sha256(sub / "shards" / shard_name),
-               "judge_score_py_sha256": JUDGE_SHA}
-        atomic_json(sub / "manifest.json", man)
-        nb = notebook_for(tag, int(len(todo)), ds)
+        nb = notebook_for(tags, ds)
         (out / f"{tag}.ipynb").write_text(json.dumps(nb, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
-        log(f"4B {tag}: {len(todo)} pairs, {len(block)} queries, dataset {ds}")
-        result[tag] = man
+        log(f"4B {', '.join(tags)}: {sum(tags.values())} pairs, dataset {ds}")
     return result
+
+
+def export_4b_sample(run: Path, suffix: str, pairs: int, seed: int) -> dict[str, Any]:
+    """A 4B subset ``<run>-4b-<suffix>`` of ``pairs`` random pool pairs in ``<run>/4b/sample-<suffix>/`` (RunPod rehearsal, speed and gate
+    against Kaggle). It is never imported into a build (``load_4b`` only reads ``kaggle-dataset-<tag>`` parts)."""
+    from r2ai.s36 import d300
+
+    log = log_to(run)
+    check_pins(log)
+    require(run, ["queries.parquet", "top.parquet", "texts.parquet"])
+    top, texts = pd.read_parquet(run / "top.parquet"), pd.read_parquet(run / "texts.parquet")
+    tag = f"{run.name}-4b-{suffix}"
+    ds = run / "4b" / f"sample-{suffix}"
+    man = write_4b_subset(ds / tag, tag, top.sample(n=min(pairs, len(top)), random_state=seed), texts, query_texts(run), SHARD_4B + 80,
+                          {"sample": True, "seed": seed})
+    shutil.copyfile(d300.JUDGE_SCORE, ds / "judge_score.py")
+    log(f"4B sample {tag}: {man['pairs']} pairs in {ds}")
+    return man
 
 
 def ask_chunk_rows(pairs: pd.DataFrame, queries: dict[int, str], qvec: dict[int, np.ndarray], tok, log) -> tuple[pd.DataFrame, pd.DataFrame, set]:
@@ -516,7 +553,7 @@ def export_jina(run: Path, top: pd.DataFrame, texts: pd.DataFrame, queries: dict
     return man
 
 
-def export_scoring(run: Path, parts_4b: int, sources: Sequence[str]) -> dict[str, Any]:
+def export_scoring(run: Path, parts_4b: int, sources: Sequence[str], reg_pairs: int = 0) -> dict[str, Any]:
     log = log_to(run)
     check_pins(log)
     require(run, ["queries.parquet", "query_vectors.npz", "top.parquet"])
@@ -528,7 +565,7 @@ def export_scoring(run: Path, parts_4b: int, sources: Sequence[str]) -> dict[str
     for source in sources:
         t0 = time.monotonic()
         if source == "4b":
-            report["4b"] = export_4b(run, top, texts, queries, parts_4b, log)
+            report["4b"] = export_4b(run, top, texts, queries, parts_4b, log, reg_pairs)
         elif source == "cmax":
             report["cmax"] = export_cmax(run, top, texts, queries, log)
         else:
@@ -546,8 +583,13 @@ def export_scoring(run: Path, parts_4b: int, sources: Sequence[str]) -> dict[str
 # ---------------------------------------------------------------------------------------------------------- 3. import-scores
 
 def import_4b(run: Path, tag: str, scores: Path, report: Path) -> dict[str, Any]:
-    sub = run / "4b" / f"kaggle-dataset-{tag}" / tag
+    found = [d / tag for d in sorted((run / "4b").glob("kaggle-dataset-*")) if (d / tag / "manifest.json").exists()]
+    if len(found) != 1:
+        raise SystemExit(f"tag {tag}: {len(found)} exported subsets")
+    sub = found[0]
     man = json.loads((sub / "manifest.json").read_text(encoding="utf-8"))
+    if man.get("regression_gate") or man.get("sample"):
+        raise SystemExit(f"{tag} is a regression / sample subset: compare it with scripts/s40/gate_4b.py, do not import it")
     rep = json.loads(report.read_text(encoding="utf-8"))
     sc, ex = pd.read_parquet(scores), pd.read_parquet(sub / "extra_pairs.parquet")
     digest, errors = sha256(scores), []
@@ -774,7 +816,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--device", default="cuda")
     e = sub.add_parser("export-scoring")
     e.add_argument("--run", type=Path, required=True)
-    e.add_argument("--parts-4b", type=int, default=1, help="4B datasets (one Kaggle session / machine each)")
+    e.add_argument("--parts-4b", type=int, default=1, help="4B datasets (one Kaggle session / machine each); private: 2 (Kaggle + RunPod)")
+    e.add_argument("--reg-pairs", type=int, default=0, help="Kaggle / RunPod regression subset of part 1 (private: 1000)")
     e.add_argument("--sources", default="4b,cmax", help="add ,jina only if Jina is wanted (not in the private pipeline)")
     i = sub.add_parser("import-scores")
     i.add_argument("--run", type=Path, required=True)
@@ -793,6 +836,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     b.add_argument("--no-compose", action="store_true", help="docsel / carriers only")
     s = sub.add_parser("status")
     s.add_argument("--run", type=Path, required=True)
+    sp = sub.add_parser("export-4b-sample", help="RunPod rehearsal / gate subset (never imported)")
+    sp.add_argument("--run", type=Path, required=True)
+    sp.add_argument("--suffix", required=True)
+    sp.add_argument("--pairs", type=int, required=True)
+    sp.add_argument("--seed", type=int, default=40)
     pp = sub.add_parser("pins")
     pp.add_argument("--write", action="store_true")
     args = parser.parse_args(argv)
@@ -805,7 +853,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.cmd == "prepare":
         result = prepare(paths.resolve_path(args.queries), run, args.config, args.device)
     elif args.cmd == "export-scoring":
-        result = export_scoring(run, args.parts_4b, [x for x in args.sources.split(",") if x])
+        result = export_scoring(run, args.parts_4b, [x for x in args.sources.split(",") if x], args.reg_pairs)
     elif args.cmd == "import-scores":
         if args.source == "4b":
             if not (args.tag and args.scores and args.report):
@@ -816,6 +864,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             result = import_jina(run, args.scores)
         log_to(run)(f"import {args.source}: {json.dumps(result, default=str)}")
+    elif args.cmd == "export-4b-sample":
+        result = export_4b_sample(run, args.suffix, args.pairs, args.seed)
     elif args.cmd == "build":
         result = build(run, args.name, not args.jina, args.no_cmax, args.missing_last, args.rounds, not args.no_compose)
     else:

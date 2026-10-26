@@ -30,9 +30,9 @@ def test_split_queries_balanced_contiguous():
 
 def test_notebook_only_tag_expect_dataset_change(tmp_path):
     ds = tmp_path / "kaggle-dataset-x-4b-1"
-    nb = newq.notebook_for("x-4b-1", 123, ds)
+    nb = newq.notebook_for({"x-4b-reg": 7, "x-4b-1": 123}, ds)
     src = "\n".join("".join(c["source"]) for c in nb["cells"])
-    assert 'TAGS = ["x-4b-1"]' in src and 'EXPECT = {"x-4b-1": 123}' in src
+    assert 'TAGS = ["x-4b-reg", "x-4b-1"]' in src and 'EXPECT = {"x-4b-reg": 7, "x-4b-1": 123}' in src
     code = "\n".join("".join(c["source"]) for c in nb["cells"] if c["cell_type"] == "code")
     assert "final-4b" not in code and "x-4b-1/qwen3-reranker-4b/parts" in src
     assert all(c.get("outputs", []) == [] for c in nb["cells"] if c["cell_type"] == "code")

@@ -17,7 +17,7 @@ LOG="$RUN/sel2.log"
 say() { echo "$(date -Is) $*" | tee -a "$LOG"; }
 echo $$ > "$RUN/sel2.pid"
 CHLOG="D:/GitHub/r2ai-stage3/out/runs/s41/ch/ch.log"
-until [ ! -f "$CHLOG" ] || tail -1 "$CHLOG" | grep -qE "all done|FAILED"; do sleep 60; done
+until [ "${NO_WAIT:-0}" = 1 ] || { [ -f "$CHLOG" ] && tail -1 "$CHLOG" | grep -qE "all done|FAILED"; }; do sleep 60; done   # NO_WAIT=1: rebuild on a winner now
 if [ -f "$RUN/$NAME.sel2.json" ] && grep -q '"ok": true' "$RUN/$NAME.sel2.json"; then say "$NAME skipped (validated)"; exit 0; fi
 say "$NAME start (base $BASE_ZIP)"
 "$PY" -u -m r2ai.s41.sel2 --name "$NAME" --base-zip "$BASE_ZIP" --base-sha "$BASE_SHA" --docsel "$DOCSEL" --out "$RUN" >> "$RUN/$NAME.log" 2>&1 \

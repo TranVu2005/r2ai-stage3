@@ -39,14 +39,52 @@ Khác với free-v2 có chủ ý (chờ Vu quyết, 26/10): (1) text body của 
 | cắt text 512 token (27.764 doc) | máy | khoảng 2,3 phút |
 | gói 4B + pool Jina + pool C-max | máy | khoảng 1,2 phút (C-max: chọn chunk S32, 23 chunk nhúng CPU) |
 | C-max 0.6B, 78.205 dòng (2,61 dòng/cặp) | GPU máy | 3.011 s (26,0 dòng/s) |
-| Jina v3.5 b10s0 | GPU máy | đang chạy |
-| 4B, 30.000 cặp | Kaggle 2×T4 (Vu) | đang chạy |
+| Jina v3.5 b10s0, 100 query | GPU máy | 2.283 s (2,63 query/phút, không OOM) |
+| 4B, 30.000 cặp | Kaggle 2×T4 (Vu) | 8.961 s T4 cộng hai worker, khoảng 1,24 giờ thực (6,7 cặp/s); SHA điểm `241ea4a7…d303`, revision `22e68366…`, fp16 |
+| build (chọn doc), mỗi bản | máy | khoảng 2 s |
 
 Pool so với free-v2 (`scripts/s40/compare_pool.py`): 82/100 query trùng tập top-300; 18 query khác tổng 543 doc. 5 query khác 77 đến 135 doc đều do một khối hoà cosine (215 đến 378 doc trùng nội dung có đúng một cosine) vắt qua mốc 300: bản sao nào lọt top-400 / top-300 là tuỳ ý ở cả hai bên; 13 query khác 1 đến 8 doc do vector query không trùng bit với q_dense S26 (cosine ≥ 0,99992 mỗi query, 56% số query trùng bit; cách chia batch của S26 không được ghi lại, thử lô 1 / 8 / 16 / 32 / 64 / 128 / 256 có và không xếp theo độ dài đều không ra 100%).
+
+**Docsel diễn tập** (`newq build --no-compose`):
+
+| bản | doc | carrier | Doc F2 dự đoán |
+|---|---:|---:|---:|
+| rh100-free (4 nguồn) | 17.912 | 14.629 | 0,4194 |
+| rh100-free-noJina | 17.921 | 14.629 | 0,4188 |
+| rh100-free-noCmax | 17.718 | 14.629 | 0,4199 |
+| rh100-free-noJina-noCmax (B0) | 17.768 | 14.628 | 0,4183 |
+
+Free-v2 trên cùng 100 query: 18.070 doc, Doc F2 dự đoán 0,4183.
+
+**So docsel với free-v2 và nguyên nhân từng lệch** (`scripts/s40/attribute_docsel.py`: thay từng nguồn từ free-v2 sang bản mới, chạy `newq.select` mỗi bước; đếm query có tập doc trùng free-v2, và doc chỉ có ở một phía):
+
+| bước | nguồn thay | query trùng tập doc | doc chỉ ở mới / chỉ ở free-v2 |
+|---|---|---:|---:|
+| 0 | không (pool, P4B, C-max, Jina của free-v2) | **100 (cả thứ tự)** | 0 / 0 |
+| 0b | thêm điểm Jina mới cho 3.183 cặp (52 query) mà free-v2 không có Jina (xếp cuối) | 59 | 279 / 448 |
+| 1 | pool top-300 mới (điểm free-v2 nếu có) | 50 | 326 / 458 |
+| 2 | P4B mới | 44 | 331 / 462 |
+| 3 | C-max mới | 25 | 380 / 561 |
+| 4 | Jina mới (= bản diễn tập) | 2 | 729 / 887 |
+
+Bước 0 trùng tuyệt đối: lõi chọn doc của `newq` (PoolFrame, hằng số trong config) cho đúng docsel free-v2, nên mọi lệch ở bước sau đến từ đầu vào. Giải thích từng nguồn:
+
+* **Jina** (bước 0b và 4, phần lớn lệch): Jina là listwise, điểm của một doc phụ thuộc 9 doc cùng khối và cách xáo khối (hạt giống theo query id, ở đây id đã đổi). Free-v2 không chấm Jina trên top-300: điểm đến từ pool S35 (J4-K40 ∪ pool13), phần bù S36 và lần chấm lại S37, còn 31.645 cặp D = 300 không có điểm (xếp cuối). Chấm lại trên đúng pool top-300 cho ra thứ tự Jina khác; lệch điểm trên cặp chung TB 0,047, tối đa 0,31. Không có cách khớp 1:1 nếu không tái tạo đúng các pool cũ.
+* **Pool** (bước 1): 18 query có tập top-300 khác (mục trên: khối hoà cosine, vector query không trùng bit).
+* **P4B** (bước 2): cùng pair, cùng text, cùng scorer; lệch TB 0,0005, tối đa 0,012 (số học fp16 trên T4 giữa hai lần chạy); 6 query đổi tập doc ở vùng biên.
+* **C-max** (bước 3): chọn chunk trùng ở 20.445/20.455 cặp có trong S32; trên cùng chunk, điểm 0.6B lệch p99 0,046, tối đa 0,139 (số học GPU khi chấm lại theo lô khác); 19 query đổi tập doc.
+
+Kết luận: chuỗi lệnh tương đương free-v2 về thuật toán (bước 0); lệch của bản diễn tập là do chấm lại (chủ yếu Jina listwise), không phải lỗi mã. Với bộ private, mọi nguồn được chấm một lần trên đúng pool top-300, nên không còn cặp thiếu Jina như free-v2.
 
 ## 4. Probe chunk FREE-split (Vu, 26/10)
 
 Trên docsel / carrier / thin của free-v2, T = 1536 cố định (Vu: trần ZIP không ràng buộc T ở luật chia vì không nhân đôi text; T nhỏ còn làm ZIP nhỏ đi do khối 4T cắt body). Body > T: các đoạn liền kề, không chồng lấn, nguyên văn, cắt ở cuối câu; n = ceil(token / T) đoạn phủ hết body khi body ≤ 4T; body > 4T: 4 đoạn ≈ T trong khối 4T căn quanh chunk t256 tốt nhất (dịch vào trong khi chạm đầu hoặc cuối), phần ngoài khối bỏ. Validator `--max-chunks-per-doc 4`. Mã `scripts/s40/split_compose.py`, driver `scripts/s40/run_split_half.sh`. FREE-half T1536 bỏ (gần như trùng split ở T này). Nếu LB của FREE-split T1536 thắng Chunk F2 0,3800 thì dựng FREE-split T1024 và FREE-half T1024; thua thì dừng hướng chia.
+
+**FREE-split T1536 (26/10 12:35):** `out/runs/s40/split/FREE-split-t1536.zip`, 96.773.825 B, SHA256 `ef709999f48524643f467f4e04c97aa5a3376b829f6f85678aaf7747c411a2b2`, validator ok (`--max-chunks-per-doc 4`, 0 lỗi, `p1_pair` 63.489, `canonical_substring` 147.482). 220.599 doc, 174.990 carrier, 210.971 chunk (tối đa 4 chunk một doc). Doc bị chia 34.186 (19,5% carrier), 70.167 đoạn, **2,053 đoạn TB/doc bị chia**; token mỗi đoạn P10/P50/P90/max = 788 / 893 / 1.210 / 1.990. Cắt ở cuối câu trừ 2 mốc (đầu từ), 0 doc phải giữ nguyên vì đoạn rỗng / trùng. 877 doc bị chia trên body span canonical vì body P1 không còn là chuỗi con của doc_text hiện tại (P1 cắt từ text cũ).
+
+Doc dài hơn 4T = 6.144 token: **208 doc** (0,12% carrier), lấy khối 4 đoạn quanh chunk tốt nhất (cả 208 đều có chunk tốt nhất), bỏ 645.359 token ngoài khối. Host: tamanhhospital.vn 47, hellobacsi.com 33, a-hospital.com 28, thanhnien.vn 25, zhongyibaodian.net 20, msdmanuals.cn 14, medlatec.vn 7, youmed.vn 5, vietnamnet.vn 5, test.pmphai.com 5, 11 host còn lại 19.
+
+Lần dựng đầu (12:07) bị validator loại (866 chunk không nguyên văn, do chia trực tiếp body P1 cũ), giữ ở `out/runs/s40/split/v1-p1body-not-verbatim/`, không nộp.
 
 ## 5. Kế hoạch private 01–04/11 (nháp 26/10, theo tốc độ đo ở diễn tập)
 

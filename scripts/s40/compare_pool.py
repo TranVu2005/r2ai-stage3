@@ -12,7 +12,7 @@ from r2ai import paths  # noqa: E402
 from r2ai.s36 import d300  # noqa: E402
 
 run = Path(sys.argv[1]) if len(sys.argv) > 1 else paths.RUNS_DIR / "s40" / "rh100"
-m = pd.read_parquet(paths.RUNS_DIR / "s40" / "rehearsal-input" / "id-map-rh100.parquet")
+m = pd.read_parquet(next(p for p in (paths.RUNS_DIR / "s40" / "rehearsal-input" / "id-map-rh100.parquet", paths.RUNS_DIR / "s40" / "abl" / "rehearsal-input" / "id-map-rh100.parquet") if p.exists()))
 new = pd.read_parquet(run / "top.parquet")
 old = d300.merged_top(300)
 old = old[old.query_id.isin(m.orig_id)]

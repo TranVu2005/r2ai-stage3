@@ -2,6 +2,7 @@
 differ from 120A-free-v2. r2ai.newq.select is run on the 100 rehearsal queries with the sources swapped one at a time from free-v2 to new:
 
     0 old      free-v2 pools, P4B, C-max, Jina (must give the free-v2 docsel exactly: the selection core is equivalent)
+    0b fill    + the new Jina score for the free-v2 pool pairs that had none (free-v2 ranked them last)
     1 pool     new top-300 pools, every score taken from free-v2 where it exists (new score for a doc free-v2 never scored)
     2 +4b      new P4B
     3 +cmax    new C-max
@@ -23,7 +24,7 @@ from r2ai.s36 import d300, fuse, s37  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 run = Path(sys.argv[1])
-m = pd.read_parquet(paths.RUNS_DIR / "s40" / "rehearsal-input" / "id-map-rh100.parquet")
+m = pd.read_parquet(next(p for p in (paths.RUNS_DIR / "s40" / "rehearsal-input" / "id-map-rh100.parquet", paths.RUNS_DIR / "s40" / "abl" / "rehearsal-input" / "id-map-rh100.parquet") if p.exists()))
 to_old = dict(zip(m.id.astype(int), m.orig_id.astype(int)))
 to_new = {v: k for k, v in to_old.items()}
 spec = json.loads((ROOT / "configs" / "s36-handoff-120A-free-v2.json").read_text(encoding="utf-8"))
@@ -81,6 +82,7 @@ def prefer(old: dict, new: dict) -> dict:
 
 steps = {
     "0 old": (copy.deepcopy(pools_old), jina_old, cmax_old),
+    "0b fill": (copy.deepcopy(pools_old), prefer(jina_old, jina_new), cmax_old),     # free-v2 pairs without Jina (ranked last) get the new score
     "1 pool": (pools_new(prefer(p4b_old, p4b_new)), prefer(jina_old, jina_new), prefer(cmax_old, cmax_new)),
     "2 +4b": (pools_new(p4b_new), prefer(jina_old, jina_new), prefer(cmax_old, cmax_new)),
     "3 +cmax": (pools_new(p4b_new), prefer(jina_old, jina_new), cmax_new),

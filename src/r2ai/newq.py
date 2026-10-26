@@ -554,6 +554,8 @@ class PoolFrame:
 def load_4b(run: Path) -> dict[int, float]:
     out: dict[int, float] = {}
     for f in sorted((run / "4b").glob("*/scores-extra.parquet")):
+        if not (run / "4b" / f"kaggle-dataset-{f.parent.name}").exists():      # only imported parts (import_4b), not a download folder
+            continue
         frame = pd.read_parquet(f, columns=["pair_id", "score"])
         if set(frame.pair_id.astype(int)) & set(out):
             raise ValueError(f"{f}: pair ids scored twice")
@@ -671,7 +673,7 @@ def status(run: Path) -> dict[str, Any]:
     for f in ("queries.parquet", "query_vectors.npz", "pool.npz", "top.parquet", "texts.parquet", "cmax.parquet", "jina.parquet"):
         out[f] = (run / f).exists()
     out["4b_parts_exported"] = sorted(p.name for p in (run / "4b").glob("kaggle-dataset-*")) if (run / "4b").exists() else []
-    out["4b_parts_imported"] = sorted(p.parent.name for p in (run / "4b").glob("*/scores-extra.parquet")) if (run / "4b").exists() else []
+    out["4b_parts_imported"] = sorted(p.parent.name for p in (run / "4b").glob("*/scores-extra.parquet") if (run / "4b" / f"kaggle-dataset-{p.parent.name}").exists()) if (run / "4b").exists() else []
     out["builds"] = sorted(p.name for p in (run / "build").iterdir()) if (run / "build").exists() else []
     return out
 

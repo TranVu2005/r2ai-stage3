@@ -19,7 +19,8 @@ Cut rule: each edge (a cut target, and the two block ends when they are inside t
 by space or end, or a line break) whose token index is nearest to its target within +-T/4 tokens, else the nearest word start (every 8th token
 if preceded by whitespace; for CJK any 8th token); edges strictly increase. Pieces are body[e_k:e_k+1] with surrounding whitespace stripped
 (substrings of the body, so of the doc text). A body whose pieces would repeat a text (after the metric normalisation) or be empty keeps the
-full body (counted).
+full body (counted). A carrier whose shipped body (a P1 chunk) is not a substring of its doc text is split on the canonical body span
+instead (``window._body_span``, the fallback compose uses for its 768 window: the pieces must be verbatim in the doc text).
 """
 from __future__ import annotations
 
@@ -76,13 +77,22 @@ def prepare() -> dict:
     car = [(int(r["id"]), int(c["doc_id"]), c["chunk_text"]) for r in rows for c in r["relevant_chunks"]]
     log(f"carriers {len(car)}")
     frame0 = pd.DataFrame(car, columns=["query_id", "doc_id", "body"])
-    text, _, owner, pharm, key = cp.doc_texts(set(frame0.doc_id.astype(int)))
-    best, _ = cp.best_t256(frame0[["query_id", "doc_id"]], text, owner, pharm)
+    text, lang, owner, pharm, key = cp.doc_texts(set(frame0.doc_id.astype(int)))
+    best, t256 = cp.best_t256(frame0[["query_id", "doc_id"]], text, owner, pharm)
+    empty = pd.DataFrame({"field": [], "char_start": [], "char_end": []})
+    alt = {}
+    for q, d, b in car:
+        t = text[d] or ""
+        if b not in t:                                    # P1 body of an older text: split the canonical body span (compose fallback)
+            a, e = cp._body_span(t, str(lang.get(d, "vi")), t256.get(d, empty))
+            alt[(q, d)] = t[a:e]
+    car = [(q, d, alt.get((q, d), b)) for q, d, b in car]
+    log(f"carriers whose body is not in the doc text (split on the canonical body span): {len(alt)}")
     hosts = cp.host_map(set(key.values()))
     index = reg.registry_index()
     log(f"best t256 chunks {len(best)} of {len(car)} carriers")
     tok = load_tokenizer()
-    out = {"query_id": [], "doc_id": [], "tokens": [], "cut_char": [], "cut_tok": [], "cut_sent": [], "best_mid_tok": [], "host": []}
+    out = {"query_id": [], "doc_id": [], "tokens": [], "cut_char": [], "cut_tok": [], "cut_sent": [], "best_mid_tok": [], "host": [], "alt_body": []}
     for begin in range(0, len(car), 5_000):
         part = car[begin:begin + 5_000]
         enc = tok([b for _, _, b in part], add_special_tokens=False, return_offsets_mapping=True)
@@ -100,12 +110,13 @@ def prepare() -> dict:
             if span is not None and at >= 0 and 0 <= (span[0] + span[1]) / 2 - at < len(body):
                 mid = int(np.searchsorted(starts, (span[0] + span[1]) / 2 - at, side="right")) - 1
             out["best_mid_tok"].append(max(mid, -1))
+            out["alt_body"].append(alt.get((q, d)))
             out["host"].append("120ask.com" if d in index else "pharmacity.vn" if d in pharm else str(hosts.get(key.get(d), "")))
         log(f"tokenised {begin + len(part)}/{len(car)}")
     frame = pd.DataFrame(out)
     paths.assert_writable(OUT / "split.cands.parquet")
     frame.to_parquet(OUT / "split.cands.parquet", index=False)
-    rep = {"carriers": len(frame), "tokens_p50_p90_p99": [float(x) for x in np.quantile(frame.tokens, [.5, .9, .99])], "seconds": round(time.monotonic() - t0, 1)}
+    rep = {"carriers": len(frame), "alt_body": len(alt), "tokens_p50_p90_p99": [float(x) for x in np.quantile(frame.tokens, [.5, .9, .99])], "seconds": round(time.monotonic() - t0, 1)}
     (OUT / "split.prepare.json").write_text(json.dumps(rep, indent=1) + "\n", encoding="utf-8")
     return rep
 
@@ -156,10 +167,11 @@ def chosen_for(t: int, rows: list[dict]) -> tuple[dict, dict]:
 
     cands = pd.read_parquet(OUT / "split.cands.parquet")
     body = {(int(r["id"]), int(c["doc_id"])): c["chunk_text"] for r in rows for c in r["relevant_chunks"]}
-    chosen, stats = {}, {"split_docs": 0, "pieces": 0, "kept_dup_or_empty": 0, "word_start_edges": 0, "piece_tokens": [],
+    body.update({(int(q), int(d)): a for q, d, a in zip(cands.query_id, cands.doc_id, cands.alt_body) if isinstance(a, str)})
+    chosen, stats = {}, {"split_on_canonical_span": 0, "split_docs": 0, "pieces": 0, "kept_dup_or_empty": 0, "word_start_edges": 0, "piece_tokens": [],
                          "cases": {"cover": 0, "block": 0, "block-nobest": 0}, "block_hosts": {}, "block_tokens_dropped": 0}
-    for q, d, n_tok, cc, ct, cs, mid, host in zip(cands.query_id, cands.doc_id, cands.tokens, cands.cut_char, cands.cut_tok, cands.cut_sent,
-                                                   cands.best_mid_tok, cands.host):
+    for q, d, n_tok, cc, ct, cs, mid, host, alt in zip(cands.query_id, cands.doc_id, cands.tokens, cands.cut_char, cands.cut_tok, cands.cut_sent,
+                                                        cands.best_mid_tok, cands.host, cands.alt_body):
         if n_tok <= t:
             continue
         text = body[(int(q), int(d))]
@@ -171,6 +183,7 @@ def chosen_for(t: int, rows: list[dict]) -> tuple[dict, dict]:
             stats["kept_dup_or_empty"] += 1
             continue
         chosen[(int(q), int(d))] = pieces
+        stats["split_on_canonical_span"] += isinstance(alt, str)
 
         def tok_at(c: int) -> int:
             return int(n_tok) if c >= len(text) else 0 if c <= 0 else int(ct[np.searchsorted(cc, c)])

@@ -47,3 +47,39 @@ Pool so với free-v2 (`scripts/s40/compare_pool.py`): 82/100 query trùng tập
 ## 4. Probe chunk FREE-split (Vu, 26/10)
 
 Trên docsel / carrier / thin của free-v2, T = 1536 cố định (Vu: trần ZIP không ràng buộc T ở luật chia vì không nhân đôi text; T nhỏ còn làm ZIP nhỏ đi do khối 4T cắt body). Body > T: các đoạn liền kề, không chồng lấn, nguyên văn, cắt ở cuối câu; n = ceil(token / T) đoạn phủ hết body khi body ≤ 4T; body > 4T: 4 đoạn ≈ T trong khối 4T căn quanh chunk t256 tốt nhất (dịch vào trong khi chạm đầu hoặc cuối), phần ngoài khối bỏ. Validator `--max-chunks-per-doc 4`. Mã `scripts/s40/split_compose.py`, driver `scripts/s40/run_split_half.sh`. FREE-half T1536 bỏ (gần như trùng split ở T này). Nếu LB của FREE-split T1536 thắng Chunk F2 0,3800 thì dựng FREE-split T1024 và FREE-half T1024; thua thì dừng hướng chia.
+
+## 5. Kế hoạch private 01–04/11 (nháp 26/10, theo tốc độ đo ở diễn tập)
+
+Giả định: N = 1.200 query (đổi N thì mọi giờ tỷ lệ thuận, trừ compose). Giờ mở đề (01/11) chưa biết: T0 = lúc Vu có tệp query. Hạn nộp 04/11 23:59. Bộ query nhận dạng `id` (int) + `query` (text), tệp parquet.
+
+**Tốc độ đo (26/10, 100 query) và ngoại suy cho 1.200:**
+
+| bước | nơi | đo | 1.200 query |
+|---|---|---|---:|
+| prepare (embed + cosine + ghép 120ask) | máy | 41 s | khoảng 2 phút (nạp mô hình / vector là phần lớn; nhân ma trận tăng tuyến tính, chưa đo ở 1.200) |
+| export (text 512 + gói 4B / C-max / Jina) | máy CPU | khoảng 3,5 phút | khoảng 10 đến 20 phút (phần đọc canonical cố định khoảng 80 s; phần tokenize tăng theo số doc; chưa đo) |
+| 4B, 360.000 cặp | Kaggle 2×T4 | 6,7 cặp/s (8.961 s T4 cho 30.000 cặp) | **14,9 giờ** liền, hoặc 3 phần × 5,0 giờ |
+| C-max, 939.600 dòng (2,61 dòng/cặp) | GPU máy | 26,0 dòng/s | **10,0 giờ** |
+| Jina b10s0 | GPU máy | 2,63 query/phút, không OOM | **7,6 giờ** (S37 đo 1,49 đến 1,96 khi GPU dùng chung: tới 13,4 giờ) |
+| build (chọn doc) | máy | 2 s | dưới 1 phút |
+| compose full+w768 + validator | máy CPU | (diễn tập: chờ đo) | khoảng 20 phút với T biết trước, 35 đến 45 phút khi dò T (ablation: 38,5 và 44,3 phút) |
+
+**Đường găng:** GPU máy chỉ chạy một job: C-max rồi Jina = 17,6 giờ (tới 23 giờ nếu Jina chậm như S37). 4B trên Kaggle 14,9 giờ nếu một phiên nối tiếp (phải tách: phiên Kaggle tự dừng ở 10,5 giờ theo notebook). Hai nhánh chạy song song, nên bản đủ 4 nguồn có sau khoảng T0 + 18 đến 24 giờ.
+
+**4B song song (giảm nửa thời gian):** `export-scoring --parts-4b 3` tạo 3 dataset + 3 notebook (5 giờ mỗi phần). Nếu Kaggle cho chạy 2 phiên GPU cùng lúc (chưa kiểm, Vu xác nhận) hoặc 1 phần chạy trên RunPod, 4B xong sau khoảng 5 đến 10 giờ. RunPod 4090: **chưa đo**; `judge_score.py` (scorer ghim) chạy được trên mọi GPU CUDA với cùng lệnh `score` / `status` / `collect`, nhưng fp16 trên 4090 khác số học T4 (S31: lệch tới 0,0047 giữa máy), nên cần một lần thử 200 cặp trước 01/11 nếu dùng. Quota Kaggle: diễn tập dùng khoảng 1,3 giờ; private cần khoảng 15 giờ phiên trong tuần 01–04/11.
+
+**Lịch theo giờ (T0 = lúc có tệp query):**
+
+| mốc | việc | ai |
+|---|---|---|
+| T0 + 0:00 | `newq prepare --queries <tệp> --run out/runs/s40/private` | tôi |
+| T0 + 0:20 | `export-scoring --parts-4b 3`; Vu upload 3 dataset, chạy notebook (song song nếu được); GPU máy bắt đầu C-max (`scripts/s40/run_newq_gpu.ps1`) | tôi, Vu |
+| T0 + 5 đến 15 giờ | các phần 4B về; `import-scores --source 4b --tag ...` sau mỗi phần | Vu, tôi |
+| khi đủ 4B | **bản dự phòng B0 = cosine + 4B** (`build --no-jina --no-cmax`), validator; Vu nộp sớm, trước 03/11 | tôi, Vu |
+| T0 + 10 giờ | C-max xong, nhập; Jina bắt đầu tự động; dựng B1 = cosine + 4B + C-max (`build --no-jina`) nếu cần | tôi |
+| T0 + 18 giờ | Jina xong, nhập; **bản chính = đủ 4 nguồn** (`build`) | tôi |
+| còn lại | dự phòng thời gian cho sự cố (OOM, phiên Kaggle đứt: notebook resume theo phần) | |
+
+**Điểm dừng an toàn:** mỗi nguồn nhập độc lập; thiếu nguồn nào thì dựng bản không có nguồn đó (`--no-jina`, `--no-cmax`). 4B là bắt buộc (p_cal, cắt EF2 dựa trên P4B): nếu đến 04/11 12:00 vẫn thiếu 4B của một số query thì cần quyết định của Vu (chưa có luật cho query thiếu 4B; hiện `build` từ chối). Mọi job dài: supervisor tự khởi động lại, log và checkpoint theo phần.
+
+**Phân bổ 5 lượt private (đề xuất, Vu quyết):** (1) B0 cosine + 4B, nộp ngay khi có, để luôn có một bản hợp lệ; (2) bản chính đủ 4 nguồn; (3) biến thể tốt nhất theo LB public của ablation / probe chunk (noJina / noCmax / FREE-split nếu thắng free-v2); (4) và (5) để dành cho sửa lỗi định dạng hay bản cuối. Chưa rõ private có hiện điểm sau mỗi lượt hay không (Vu xác nhận); nếu không hiện thì nên nộp bản chính cuối cùng.

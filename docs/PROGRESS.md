@@ -1,8 +1,9 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-27 01:10 (UTC+7)
-- Model thực hiện: Claude Opus 5.5 (S40)
-- Commit HEAD đã kiểm trước cập nhật này: `81136bcb`, nhánh `feat/s40-private` (tách từ `origin/main` `e179ffd`)
+- Cập nhật: 2026-10-27 04:20 (UTC+7)
+- Model thực hiện: Claude Opus 5.5 (S41)
+- Commit HEAD đã kiểm trước cập nhật này: `96524664`, nhánh `feat/s41` (tách từ `feat/s40-private` `8201378`)
+- **S41 27/10 (docs/s41.md):** chuỗi số doc/query trên FREE-noJina với (a, b, s) 18 số, λ toàn cục: FREE-cut150 100.778.859 B `18336407…48b9`, FREE-cut130 90.324.391 B `c4f76e07…e9cc` (compose đủ), FREE-cut110-sub 76.500.136 B `519296c6…cf9d`, FREE-cut90-sub 63.409.062 B `05980432…b1d2` (lọc từ JSON cut150, chỉ để đo Doc); validator ok cả bốn, chưa nộp. Doc F2 dự đoán (ngoại suy) 0,4750 / 0,4918 / 0,4989 / 0,4882. Mở rộng alias: không có đòn bẩy (thiếu 1 ID).
 - **S40 27/10:** fit lại (a, b, s) trên đủ 18 số LB Doc P/R/F2: 1,585 / −2,647 / 1,654 (RMSE 0,0042); recal2 chọn 110,4 doc/query, ngoài [160, 200], không dựng ZIP; recal 26/10 không nộp. `newq build --impute-4b`: cặp thiếu 4B lấy p_cal từ ánh xạ cosine toàn cục, xếp cuối nguồn 4B; diễn tập 30% thiếu vẫn ra ZIP hợp lệ, Doc F2 0,3886 so với 0,4188 khi đủ. D400 chờ Kaggle.
 - **S40 tối ưu LB (26/10 tối):** FREE-noJina-canon LB 0,4111 trùng FREE-noJina (chỉ 1.738 chunk khác text). Fit lại (a, b, s) trên LB khung free: 0,53 / −1,41 / 1,741 → 1,27 / −2,27 / 1,664 (RMSE 0,030 → 0,0038, nhưng (a, b) chỉ nhờ P/R của EF2-free); FREE-noJina-recal 141.422 doc, ZIP 65.243.441 B `c96adecc…a422`, validator ok, chưa nộp. D400: gói Kaggle 70.116 cặp 4B (khoảng 2,9 giờ) chờ Vu chạy, C-max D400 xong (71.270 cặp, `45900157…fe33`). Kế hoạch private chỉ Kaggle (đường găng khoảng 16,5 giờ). Chi tiết `docs/s40-private.md` mục 5 đến 8.
 - **S40 private (26/10):** ba ablation khung free đã dựng, validator ok, chưa nộp: FREE-noJina 100.014.559 B `153aba8b…c918d`, FREE-noCmax 100.327.272 B `1c19caf3…e2f4`, FREE-nowin 96.951.936 B `2ffa3b2a…ce9a` (Doc F2 dự đoán 0,4253 / 0,4240 / 0,4250; free-v2 0,4250, LB 0,4101). Lệnh query mới `python -m r2ai.newq prepare | export-scoring | import-scores | build [--no-jina] [--no-cmax]` (không đọc dữ liệu theo id query public). Diễn tập 100 query đang chạy (4B Kaggle, Jina). Probe chunk FREE-split T1536 đang dựng. Chi tiết `docs/s40-private.md`.
@@ -817,3 +818,4 @@ Cập nhật 2026-10-23 13:10 (UTC+7), Claude Sonnet 5.5, HEAD kiểm trước c
 | 2026-10-24 13:10 | Claude Sonnet 5.5 | S37: crawl 120ask dừng (không kết nối được từ VPS và điện thoại), pack lô 6 (5.994 URL), ingest + embed + C-max lô 6; cộng dồn 59.021 cặp mới. |
 | 2026-10-24 23:00 | Claude Sonnet 5.5 | S37: chốt phạm vi (6 lô + b0007), embed + C-max b0007, `pairs_new_final` 59.378 cặp, 4B b001–006 nhập local, pool Jina cuối (976 query, 590 chấm lại) + watchdog, `r2ai.s37.handoff` (manifest S35 bản tạm), `deploy/s37/TERMINATE.md`; 4B b0007 và Jina chưa xong. |
 | 2026-10-25 22:30 | Claude Sonnet 5.5 | S37: chốt crawl (b0008–b0009, v2 76.489 cặp), Jina bù final2 (1.002 query), segment en 239.771 doc + vector, C-max d300 31.495 cặp, health_watch, manifest bàn giao final=true; 4B 17.111 cặp do S35 gộp Kaggle. |
+| 2026-10-27 04:20 | Claude Opus 5.5 | S41 (`feat/s41`): FREE-cut130 dựng xong (sửa thin_swap khi không còn carrier thay thế; write chạy lại riêng), `r2ai.s41.doc_probe` (probe doc lọc từ bundle đã validate, 4 test), FREE-cut110-sub / FREE-cut90-sub, config `s41-cut90.json`; chưa nộp. |

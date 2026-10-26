@@ -3,6 +3,9 @@
     python scripts/s40/d400_export.py count     counts only: out/runs/s40/d400/counts.json
     python scripts/s40/d400_export.py export    Kaggle 4B dataset out/runs/s40/d400/kaggle-dataset-d400-4b/ + notebook d400-4b.ipynb,
                                                 pairs_final.parquet (the new 4B pairs and their ids), cmax_pairs.parquet (top-400 pairs without a C-max)
+    python scripts/s40/d400_export.py import --scores scores-extra.parquet --report collect-extra-report.json
+                                                checks the Kaggle result like r2ai.s36.d300 import4b, stores it as
+                                                out/runs/s40/d400/d400-4b/gpu/qwen3-reranker-4b/scores-extra.parquet (what configs/s40-d400-noJina.json pins)
 
 Corpus: the one FREE-noJina was built on (canonical + Pharmacity cosine top-400 of out/runs/s37/pool.npz merged with every 120ask segment,
 ``r2ai.s36.d300.merged_top``), no en lane. "Scored" is the S36 union plus the 4B / C-max files that configs/s40-abl-free-v2-noJina.json pins,
@@ -100,7 +103,40 @@ def main(cmd: str) -> dict:
     return man
 
 
+def import_scores(scores: Path, report: Path) -> dict:
+    """Same checks as ``r2ai.s36.d300.import4b``: SHA in the report, model and revision, one score per exported pair, no NaN."""
+    import shutil
+
+    man = json.loads((OUT / f"kaggle-dataset-{TAG}" / TAG / "manifest.json").read_text(encoding="utf-8"))
+    rep = json.loads(report.read_text(encoding="utf-8"))
+    sc, ex = pd.read_parquet(scores), pd.read_parquet(OUT / f"kaggle-dataset-{TAG}" / TAG / "extra_pairs.parquet")
+    sha, errors = _sha256(scores), []
+    if sha != rep.get("scores_sha256"):
+        errors.append(f"scores SHA256 {sha} != report {rep.get('scores_sha256')}")
+    if rep.get("revisions") != [d300.REVISION_4B] or rep.get("model") != "qwen3-reranker-4b":
+        errors.append(f"report model/revision {rep.get('model')} {rep.get('revisions')}")
+    if len(sc) != man["pairs"] or sc.pair_id.nunique() != len(sc):
+        errors.append(f"{len(sc)} rows / {sc.pair_id.nunique()} unique pair_id, expected {man['pairs']}")
+    elif set(sc.pair_id) != set(ex.pair_id):
+        errors.append("pair_id set differs from extra_pairs.parquet")
+    elif sc.score.isna().any():
+        errors.append("NaN scores")
+    if errors:
+        raise SystemExit("import refused: " + "; ".join(errors))
+    dest = OUT / TAG / "gpu" / "qwen3-reranker-4b"
+    paths.assert_writable(dest)
+    if (dest / "scores-extra.parquet").exists():
+        raise SystemExit(f"{dest} already holds scores: not overwritten")
+    dest.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(scores, dest / "scores-extra.parquet")
+    shutil.copyfile(report, dest / "collect-extra-report.json")
+    return {"tag": TAG, "pairs": len(sc), "scores_sha256": sha, "dir": str(dest)}
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 2 or sys.argv[1] not in ("count", "export"):
+    if len(sys.argv) == 6 and sys.argv[1] == "import" and sys.argv[2] == "--scores" and sys.argv[4] == "--report":
+        print(json.dumps(import_scores(Path(sys.argv[3]), Path(sys.argv[5])), indent=1))
+    elif len(sys.argv) != 2 or sys.argv[1] not in ("count", "export"):
         raise SystemExit(__doc__)
-    print(json.dumps(main(sys.argv[1]), indent=1, ensure_ascii=False, default=str))
+    else:
+        print(json.dumps(main(sys.argv[1]), indent=1, ensure_ascii=False, default=str))

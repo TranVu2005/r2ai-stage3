@@ -176,3 +176,32 @@ Giả định N = 1.200 query, D = 300; giờ tỷ lệ thuận với N, trừ c
 So hai ZIP theo khoá (query, doc, thứ tự chunk trong doc) (`scratchpad cmp_canon*.py`, chuẩn hoá metric `r2ai.eval.scorer.normalize_metric`): danh sách doc giống hệt, tập khoá chunk giống hệt; **88.086 chunk đổi nguồn P1 → canonical nhưng chỉ 1.738 chunk có text khác** (text thô khác cũng là khác sau chuẩn hoá), ở 476 query. 86.348 chunk P1 còn lại vốn đã là đúng chuỗi canonical. Trong 1.738 chunk khác: 1.733 bản canon ngắn hơn; tỷ lệ LCS từ / độ dài (hai phía, xấp xỉ luật v2): ≥ 0,99 có 1.267, 0,9 đến 0,99 có 414, 0,4 đến 0,9 có 57 (chủ yếu doc 120ask: P1 có cả câu hỏi + trả lời, canon chỉ phần trả lời), < 0,4 không có.
 
 P/R trùng đến 4 chữ số là hợp lý: 1.681 / 1.738 chunk khác dưới 1% số từ, không đổi kết quả khớp ngưỡng 0,4 trừ ca biên; chỉ 57 chunk (0,03% số chunk) có thể lật. Một lần lật đổi Chunk P của một query khoảng 1/180, tức khoảng 5·10⁻⁶ trên trung bình 1.200 query; cần cỡ 10 lần lật cùng chiều mới thấy ở chữ số thứ 4.
+
+## 7. Fit lại p_cal trên điểm LB khung free (Vu, 26/10)
+
+Mã `scripts/s40/refit_pcal.py`, kết quả `out/runs/s40/recal/refit.json`. Mô hình giữ nguyên (p_cal = sigmoid(a logit(P4B) + b), G_q = s (tổng p_cal cosine top-211 + đuôi), P / R / F2 macro); một G_q chung cho mọi bản (cosine top-211 của corpus hiện tại, P4B của đầu vào FREE-noJina), doc nộp mang P4B của docsel. Bình phương tối thiểu trên mọi số LB Doc có (trọng số bằng nhau), chỉ dùng số tổng hợp. Kiểm: với (a, b, s) cũ, FREE-noJina dự đoán 0,42534 (apply báo 0,4253), FUSE4-free 0,41059 (neo cũ 0,4104).
+
+Số LB dùng (Vu báo, docs): EF2-free Doc F2 0,4184 / P 0,226 / R 0,6076; FUSE4-free 0,4104; 120A-free-v0 0,4344; 120A-free-v2 0,4402; FREE-noCmax 0,4370 (0,4402 − 0,0032). CR-fair có cùng docsel với EF2-free nên không thêm thông tin Doc. FREE-noJina: chưa có Doc F2 / P / R riêng trong docs (chỉ Final 0,4111), chưa dùng.
+
+| | a | b | s | RMSE | max \|sai\| |
+|---|---:|---:|---:|---:|---:|
+| cũ | 0,5298 | −1,4097 | 1,7405 | 0,0304 | 0,0763 (R EF2-free) |
+| mới (7 số) | **1,2722** (SE 0,24) | **−2,2745** (SE 0,27) | **1,6642** (SE 0,015) | 0,0038 | 0,0061 (F2 EF2-free) |
+| mới, bỏ FUSE4-free | 1,2136 | −2,2026 | 1,6610 | 0,0036 | |
+| chỉ Doc F2 (5 số) | suy biến: a 9,1, b chạm biên −10 | | | 0,0040 | |
+
+Sai số mới theo bản (dự đoán − LB, Doc F2): EF2-free +0,0061, FUSE4-free +0,0041, 120A-free-v0 −0,0019, 120A-free-v2 −0,0058, FREE-noCmax −0,0029; P và R của EF2-free khớp ±0,0006. Sai số còn lại có hệ thống: dự đoán cao ở hai bản trước 120ask, thấp ở các bản có 120ask.
+
+**Giới hạn:** (a, b) chỉ được xác định nhờ P / R của **một** bản (EF2-free); bỏ P / R thì fit suy biến. Mọi bản trong dữ liệu fit có 180 đến 190 doc mỗi query; với a mới, EF2 chọn 118 doc mỗi query, ngoài vùng có dữ liệu, nên Doc F2 dự đoán của bản recal là ngoại suy. Có Doc P / R LB của 120A-free-v0, 120A-free-v2, FREE-noJina, FREE-noCmax thì fit xác định được (a, b) mà không phụ thuộc một bản.
+
+**FREE-noJina-recal** (a, b, s mới; mọi thứ khác như FREE-noJina; `configs/s40-recal-noJina.json`, `apply` nhận khoá `a` / `b` / `s_free`, driver `scripts/s40/run_recal.sh`): 141.422 doc (FREE-noJina 220.436), k/query P10/P50/P90 = 29 / 105 / 228, là **tập con đúng** của docsel FREE-noJina (cùng thứ tự RRF, cắt sớm hơn): bỏ 79.014 doc, P4B của doc bị bỏ P10/P50/P90 = 0,030 / 0,215 / 0,558. Carrier: tổng 175.548 không đặt được (lớn hơn số doc), dùng CR-fair ρ toàn cục mặc định 0,7876 (111.966 carrier; FREE-noJina giải ρ = 0,7937). Doc F2 dự đoán (mô hình mới): recal 0,4824, FREE-noJina 0,4356 (cũ 0,4253).
+
+ZIP `out/runs/s40/recal/compose/FREE-noJina-recal-full+w768-t1536.zip`, 65.243.441 B, SHA256 `c96adecc53a63c17d2ec8c31018123266da22f3616fb32aec90bbd4f5c1da422`, T 1536, 21.542 cửa sổ, 133.175 chunk, 141.422 doc, không bỏ carrier nào, validator S26 ok (0 lỗi, `p1_pair` 61.517, `canonical_substring` 71.658). Chưa nộp.
+
+## 8. D = 400 (Vu, 26/10)
+
+`scripts/s40/d400_export.py` (`count` / `export` / `import`): cosine top-400 của corpus chốt (canonical + Pharmacity của `pool.npz` + 120ask, `d300.merged_top`), không en; "đã có điểm" = union S36 + các tệp 4B / C-max mà `configs/s40-abl-free-v2-noJina.json` ghim.
+
+* 4B cần chấm: **70.116 cặp**, tất cả ở hạng 301..400 (hạng ≤ 300 đủ), 932 query, 8.792 cặp 120ask; vi 46.487 / zh 23.629; **khoảng 2,9 giờ Kaggle 2×T4** (6,7 cặp/s). Gói `out/runs/s40/d400/kaggle-dataset-d400-4b/` (`judge_score.py` SHA `688948a7…`, `d400-4b/{manifest.json, extra_pairs.parquet, shards/pool-93005.parquet}`), notebook `out/runs/s40/d400/d400-4b.ipynb` (TAGS `d400-4b`, EXPECT 70.116), pair_id 6.000.000 đến 6.070.115. SHA: extra_pairs `128a3a81…7abe4`, shard `16cd7a43…bdc3a`, pairs_final `440d586b…10edf`, cmax_pairs `6fc68acd…3dce5f`.
+* C-max cần chấm: **71.270 cặp** (gồm 1.154 cặp đã có 4B nhưng chưa có C-max), 188.734 dòng (10.818 cặp 1 dòng, 3.440 cặp 2, 57.012 cặp 3; 4.314 cặp chấm doc_text), chọn chunk bằng đúng mã của C-max d300 (worktree `s35-part-jina`, gate 1.000 cặp S32: 0 lệch), chấm bằng `scripts/s37/run_cmax.ps1` (bf16, 8.192 token / 16 dòng). Driver `scripts/s40/run_d400_cmax.ps1`, kết quả `out/runs/s37/cmax_scores-d400.parquet`.
+* Sau khi Vu chạy Kaggle: `python scripts/s40/d400_export.py import --scores <scores-extra.parquet> --report <collect-extra-report.json>`, rồi `python -m r2ai.s36.s37 apply --config configs/s40-d400-noJina.json` (FREE-noJina với depth 400 và thêm ba tệp D400; a, b, s_free, t_c, carrier 175.548 giữ nguyên), rồi compose như mục 1.

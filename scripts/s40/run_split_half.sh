@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# S40 (26/10): FREE-split and FREE-half at T = 1536 (Vu), after the free-v2 ablations (one compose-sized job at a time: RAM).
+# S40 (26/10): FREE-split at T = 1536 (Vu; FREE-half only at T = 1024 if split wins on the LB), after the free-v2 ablations (one compose-sized job at a time: RAM).
 # Checkpointed: a ZIP whose compose.json has a validator result is skipped, so the watchdog can rerun this script.
 set -u
 WT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -13,7 +13,7 @@ until grep -q "ALL DONE" D:/GitHub/r2ai-stage3/out/runs/s40/abl/abl.log 2>/dev/n
 if [ ! -f "$OUT/split.cands.parquet" ]; then
   say "prepare start"; "$PY" -u scripts/s40/split_compose.py prepare >> "$OUT/prepare.out" 2>&1 || { say "prepare FAILED"; exit 1; }; say "prepare done"
 fi
-for MODE in split half; do
+for MODE in split; do              # FREE-half T1536 dropped (Vu 26/10: same as split at T = 1536)
   NAME="FREE-$MODE-t1536"
   if [ -f "$OUT/$NAME.compose.json" ] && grep -q '"validator"' "$OUT/$NAME.compose.json"; then continue; fi
   say "$NAME start"; "$PY" -u scripts/s40/split_compose.py write --t 1536 --mode "$MODE" >> "$OUT/$NAME.out" 2>&1 || { say "$NAME FAILED"; exit 1; }; say "$NAME done"

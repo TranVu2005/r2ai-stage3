@@ -23,6 +23,6 @@ build() {  # name apply-dir
     || { say "compose $1 FAILED"; exit 1; }
   say "compose $1 done"
 }
-build FREE-D400-cut150lam "$RUN/apply"
+[ "${WITH_CUT150LAM:-0}" = 1 ] && build FREE-D400-cut150lam "$RUN/apply"   # off: Vu 27/10 (cut series stopped, private keeps the old calibration)
 build FREE-noJina-D400 "D:/GitHub/r2ai-stage3/out/runs/s40/d400/apply"
 say "all done"

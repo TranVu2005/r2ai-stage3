@@ -668,9 +668,11 @@ def import_jina(run: Path, scores: Path | None) -> dict[str, Any]:
 class PoolFrame:
     """The part of ``r2ai.s36.cal.Frame`` that ``Calibrated`` / ``ef2_keep`` / ``chosen_rows`` use, built from the new pools only
     (``cal.Frame`` also loads the baseline submission and the S36 union of the public queries). Same ranking: ``fuse.rank_missing_last``
-    for Jina / C-max, ``select_rrf`` over ``keys`` with k = ``RRF_K``."""
+    for Jina / C-max, ``select_rrf`` over ``keys`` with k = ``RRF_K``. ``w_cos`` (S43) weighs the cosine source: ``w_cos / (k + cosine
+    rank)`` + the other sources unweighted; 1 is the plain RRF (the frozen private config)."""
 
-    def __init__(self, keys: Sequence[str], pools: dict[int, list[dict[str, Any]]], jina: dict, cmax: dict, allow_missing: bool) -> None:
+    def __init__(self, keys: Sequence[str], pools: dict[int, list[dict[str, Any]]], jina: dict, cmax: dict, allow_missing: bool,
+                 w_cos: float = 1.0) -> None:
         from r2ai.s31.select import RRF_K, select_rrf
         from r2ai.s36 import fuse
 
@@ -684,7 +686,8 @@ class PoolFrame:
                 self.missing[source] += n
                 self.missing[f"queries_{source}"] += bool(n)
         self.pools = pools
-        self.order = {q: select_rrf(rows, len(rows), self.keys, RRF_K) for q, rows in pools.items()}
+        weights = None if w_cos == 1.0 else [float(w_cos)] + [1.0] * (len(self.keys) - 1)
+        self.order = {q: select_rrf(rows, len(rows), self.keys, RRF_K, weights) for q, rows in pools.items()}
         self.qids = sorted(pools)
 
     def fused(self, variant: str, p4b: np.ndarray, jina: np.ndarray) -> np.ndarray:
@@ -757,25 +760,36 @@ def pools_from(top: pd.DataFrame, scores_4b: dict[int, float], impute: dict[str,
 
 
 def select(pools: dict[int, list[dict[str, Any]]], jina: dict, cmax: dict, cfg: dict[str, Any], rrf_keys: Sequence[str],
-           allow_missing: bool) -> dict[str, Any]:
-    """Free-v2 selection on given pools (``r2ai.s36.s37.apply``, pool ``fixed``): RRF, p_cal, G_q, EF2 cut. Returns the frame, the
-    calibration, keep and the chosen rows."""
+           allow_missing: bool, w_cos_doc: float = 1.0) -> dict[str, Any]:
+    """Free-v2 selection on given pools (``r2ai.s36.s37.apply``, pool ``fixed``): RRF (cosine weight ``w_cos_doc``), p_cal, G_q, EF2 cut.
+    Returns the frame, the calibration, keep and the chosen rows."""
     from r2ai.s36 import cal
 
-    frame = PoolFrame(rrf_keys, pools, jina, cmax, allow_missing)
+    frame = PoolFrame(rrf_keys, pools, jina, cmax, allow_missing, w_cos_doc)
     calibrated = cal.Calibrated(frame, "p4b", float(cfg["a"]), float(cfg["b"]), float(cfg["s_free"]), use_tail=True, g_depth=int(cfg["g_depth"]))
     keep = cal.ef2_keep(calibrated)
     return {"frame": frame, "calibrated": calibrated, "keep": keep, "chosen": cal.chosen_rows(frame, keep)}
 
 
-def choose_carriers(sel: pd.DataFrame, rule: dict[str, Any], queries: int) -> tuple[pd.DataFrame, dict[str, Any], int | None]:
+def choose_carriers(sel: pd.DataFrame, rule: dict[str, Any], queries: int, w_cos: float | None = None,
+                    rrf_keys: Sequence[str] | None = None) -> tuple[pd.DataFrame, dict[str, Any], int | None]:
     """Carriers of a docsel (``query_id, doc_id, rank, p4b``). ``rule["order"]``: ``rank`` (S41 CH-rrf, the private default: CR-fair in the
-    docsel RRF order, ``r2ai.s41.carriers``) or ``p4b`` (S36 CR-fair, what FREE-noJina used; also when ``order`` is absent)."""
+    docsel RRF order, ``r2ai.s41.carriers``) or ``p4b`` (S36 CR-fair, what FREE-noJina used; also when ``order`` is absent).
+    ``w_cos`` (S43, order ``rank`` only): carriers in the order of ``w_cos / (60 + cosine_rank)`` + 1 / (60 + rank) of the other
+    ``rrf_keys`` (pool ranks, columns of ``sel``), ties by docsel rank; ``None`` keeps the docsel order (``apply_selection`` passes None
+    when the carrier weight equals the doc weight)."""
+    from r2ai.s31.select import RRF_K
     from r2ai.s36 import carriers as carrier_rules
     from r2ai.s41 import carriers as s41_carriers
 
     target = int(round(float(rule["target_per_query"]) * queries)) if "target_per_query" in rule else rule.get("target")
     order = rule.get("order", "p4b")
+    if w_cos is not None:
+        if order != "rank" or not rrf_keys or rrf_keys[0] != "cosine_rank":
+            raise ValueError("a carrier cosine weight needs order rank and rrf_keys starting with cosine_rank")
+        sel = sel.assign(wrrf_score=sum((float(w_cos) if k == "cosine_rank" else 1.0) / (RRF_K + sel[k].astype(int)) for k in rrf_keys))
+        carriers, info = s41_carriers.select(sel, rule.get("rule", "fair"), "wrrf", target)
+        return carriers, {**info, "order": "wrrf", "w_cos": float(w_cos)}, target
     if order == "p4b":
         carriers, info = carrier_rules.select_carriers(sel, rule.get("rule", "fair"), target, rule.get("drop"), rule.get("rho"))
     else:
@@ -784,14 +798,16 @@ def choose_carriers(sel: pd.DataFrame, rule: dict[str, Any], queries: int) -> tu
 
 
 def apply_selection(pools: dict[int, list[dict[str, Any]]], jina: dict, cmax: dict, cfg: dict[str, Any], rrf_keys: Sequence[str],
-                    missing_last: bool, name: str, apply_dir: Path, keep_fn=None) -> dict[str, Any]:
+                    missing_last: bool, name: str, apply_dir: Path, keep_fn=None, w_cos_doc: float = 1.0,
+                    w_cos_carrier: float = 1.0) -> dict[str, Any]:
     """``select`` + carriers, then ``perq-``, ``carriers-``, ``pcal-``, ``docsel-``, ``keep-<name>`` in ``apply_dir`` (the part of ``build``
     before compose; ``scripts/s41/regress_public.py`` runs it on the 1,200 public queries). ``keep_fn(select result) -> {query: k}``
-    replaces the EF2 cut (S41 probe ``r2ai.s41.kfit``; the docs are still the top ``k`` of the RRF order)."""
+    replaces the EF2 cut (S41 probe ``r2ai.s41.kfit``; the docs are still the top ``k`` of the RRF order). ``w_cos_doc`` /
+    ``w_cos_carrier`` (S43): cosine weight of the doc RRF / of the carrier order; both 1 is the frozen private config."""
     from r2ai.s36 import cal
     from r2ai.s36.build import docsel_writer
 
-    res = select(pools, jina, cmax, cfg, rrf_keys, missing_last)
+    res = select(pools, jina, cmax, cfg, rrf_keys, missing_last, w_cos_doc)
     if keep_fn is not None:
         res["keep"] = keep_fn(res)
         res["chosen"] = cal.chosen_rows(res["frame"], res["keep"])
@@ -800,10 +816,11 @@ def apply_selection(pools: dict[int, list[dict[str, Any]]], jina: dict, cmax: di
     perq["f2"] = 5 * perq.tp / (4 * perq.g + perq.k)
     atomic_parquet(perq, apply_dir / f"perq-{name}.parquet")
     t_c = float(cfg["t_c"])
-    sel = pd.DataFrame([(q, int(r["doc_id"]), k, float(r["judge_score"])) for q, rows in chosen.items() for k, r in enumerate(rows, 1)],
-                       columns=["query_id", "doc_id", "rank", "p4b"])
+    sel = pd.DataFrame([(q, int(r["doc_id"]), k, float(r["judge_score"]), *(int(r[key]) for key in rrf_keys))
+                        for q, rows in chosen.items() for k, r in enumerate(rows, 1)], columns=["query_id", "doc_id", "rank", "p4b", *rrf_keys])
     sel["chunk"] = sel.p4b >= t_c
-    carriers, carrier_info, target = choose_carriers(sel, cfg["carriers"], len(frame.qids))
+    w_car = None if w_cos_carrier == w_cos_doc else w_cos_carrier        # equal weights: the docsel RRF order itself
+    carriers, carrier_info, target = choose_carriers(sel, cfg["carriers"], len(frame.qids), w_car, rrf_keys)
     atomic_parquet(carriers, apply_dir / f"carriers-{name}.parquet")
     chunk_ids = {int(q): g.doc_id.astype(int).tolist() for q, g in carriers.groupby("query_id")}
     pcal = pd.DataFrame([{"query_id": q, "doc_id": int(r["doc_id"]), "p_fused": float(f), "p_cal": float(p)}
@@ -815,7 +832,8 @@ def apply_selection(pools: dict[int, list[dict[str, Any]]], jina: dict, cmax: di
 
 
 def build(run: Path, name: str | None, no_jina: bool, no_cmax: bool, missing_last: bool, rounds: int, compose: bool = True,
-          impute_4b: bool = False, drop_4b: float = 0.0, drop_seed: int = 40) -> dict[str, Any]:
+          impute_4b: bool = False, drop_4b: float = 0.0, drop_seed: int = 40, w_cos_doc: float = 1.0,
+          w_cos_carrier: float = 1.0) -> dict[str, Any]:
     import subprocess
     import sys
 
@@ -827,7 +845,8 @@ def build(run: Path, name: str | None, no_jina: bool, no_cmax: bool, missing_las
     cfg = run_config(run)
     require(run, ["queries.parquet", "query_vectors.npz", "top.parquet"] + ([] if no_jina else ["jina.parquet"]) + ([] if no_cmax else ["cmax.parquet", "cmax_chunks.parquet"]))
     name = name or (f"{run.name}-free" + ("" if no_jina else "-jina") + ("-noCmax" if no_cmax else "")
-                    + (f"-drop4b{round(drop_4b * 100)}" if drop_4b else "") + ("-impute4b" if impute_4b else ""))
+                    + (f"-drop4b{round(drop_4b * 100)}" if drop_4b else "") + ("-impute4b" if impute_4b else "")
+                    + (f"-wcd{w_cos_doc:g}" if w_cos_doc != 1.0 else "") + (f"-wcc{w_cos_carrier:g}" if w_cos_carrier != 1.0 else ""))
     work = run / "build" / name
     apply_dir, compose_dir = work / "apply", work / "compose"
     paths.assert_writable(work)
@@ -854,7 +873,8 @@ def build(run: Path, name: str | None, no_jina: bool, no_cmax: bool, missing_las
         c = pd.read_parquet(run / "cmax.parquet")
         cmax = dict(zip(zip(c.query_id.astype(int), c.doc_id.astype(int)), c.cmax.astype(float)))
     rrf_keys = [k for k in fuse.FOUR_KEYS if not (no_jina and k == "jina_rank") and not (no_cmax and k == "cmax_rank")]
-    applied = apply_selection(pools, jina, cmax, cfg, rrf_keys, missing_last, name, apply_dir)
+    applied = apply_selection(pools, jina, cmax, cfg, rrf_keys, missing_last, name, apply_dir, w_cos_doc=w_cos_doc,
+                              w_cos_carrier=w_cos_carrier)
     frame, calibrated, keep, chosen = applied["frame"], applied["calibrated"], applied["keep"], applied["chosen"]
     carriers, carrier_info, target = applied["carriers"], applied["carrier_info"], applied["target"]
     imputed = pd.DataFrame([{"query_id": q, "doc_id": int(r["doc_id"]), "pair_id": int(r["pair_id"]), "cosine_score": float(r["cosine_score"]),
@@ -865,6 +885,7 @@ def build(run: Path, name: str | None, no_jina: bool, no_cmax: bool, missing_las
     chosen_keys = {(q, int(r["doc_id"])) for q, rows in chosen.items() for r in rows}
     report: dict[str, Any] = {
         "name": name, "run": str(run), "queries": len(frame.qids), "rrf_keys": rrf_keys, "missing": frame.missing,
+        "w_cos": {"doc": w_cos_doc, "carrier": w_cos_carrier},
         "missing_4b": {"test_dropped_pairs": dropped, "drop_seed": drop_seed if drop_4b else None, "imputed_pairs": int(len(imputed)),
                        "imputed_chosen": int(sum((q, d) in chosen_keys for q, d in zip(imputed.query_id, imputed.doc_id))),
                        "imputed_carriers": int(len(carriers.merge(imputed[["query_id", "doc_id"]], on=["query_id", "doc_id"]))),
@@ -942,6 +963,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     b.add_argument("--test-drop-seed", type=int, default=40)
     b.add_argument("--rounds", type=int, default=10)
     b.add_argument("--no-compose", action="store_true", help="docsel / carriers only")
+    b.add_argument("--w-cos-doc", type=float, default=1.0, help="S43 probe: cosine weight in the doc RRF (1 = frozen private config)")
+    b.add_argument("--w-cos-carrier", type=float, default=1.0, help="S43 probe: cosine weight in the carrier order (1 = frozen private config)")
     s = sub.add_parser("status")
     s.add_argument("--run", type=Path, required=True)
     sp = sub.add_parser("export-4b-sample", help="RunPod rehearsal / gate subset (never imported)")
@@ -976,7 +999,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = export_4b_sample(run, args.suffix, args.pairs, args.seed)
     elif args.cmd == "build":
         result = build(run, args.name, not args.jina, args.no_cmax, args.missing_last, args.rounds, not args.no_compose,
-                       args.impute_4b, args.test_drop_4b, args.test_drop_seed)
+                       args.impute_4b, args.test_drop_4b, args.test_drop_seed, args.w_cos_doc, args.w_cos_carrier)
     else:
         result = status(run)
     print(json.dumps(result, indent=1, ensure_ascii=False, default=str))

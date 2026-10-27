@@ -7,7 +7,8 @@ FREE-cut150 (EF2 cut in RRF order, nearly every doc a carrier) swapped 23k of FR
 (median 0,147 against 0,255) but a much higher C-max (0,915 against 0,562), and Chunk F2 went up (+0,0026: P +0,004, R -0,003).
 C-max is the chunk-level judge (best of the top-3 t256 chunks), so it may rank carriers better than the doc-level P4B.
 
-* ``--order``: ``p4b`` (CR-fair as S36), ``rank`` (docsel RRF rank), ``cmax`` (C-max score; missing C-max last), ties by rank.
+* ``--order``: ``p4b`` (CR-fair as S36), ``rank`` (docsel RRF rank), ``cmax`` (C-max score; missing C-max last), ties by rank;
+  ``wrrf`` (S43, used by ``r2ai.newq.choose_carriers``) sorts by a precomputed ``wrrf_score`` column (cosine-weighted RRF).
 * ``--rule fair``: top ``ceil(rho |D_q|)`` in that order, ``rho`` solved for ``--target`` (``r2ai.s36.carriers.solve_rho``).
 * ``--rule ef2``: in that order, query q takes the n maximising the expected chunk F2 ``5 sum_{i<=n} p_i / (4 s g_q + n)`` (p = p_cal of the
   docsel, g_q = the apply's G_q, s one global scale of the gold chunk count), n in [1, |D_q|]; s solved so that the total is closest to
@@ -29,7 +30,7 @@ from r2ai import paths
 from r2ai.s29.qwen_judge import _atomic_json, _sha256
 from r2ai.s36.carriers import describe, solve_rho
 
-ORDERS = ("p4b", "rank", "cmax")
+ORDERS = ("p4b", "rank", "cmax", "wrrf")
 
 
 def ordered(docsel: pd.DataFrame, order: str) -> pd.DataFrame:
@@ -40,7 +41,7 @@ def ordered(docsel: pd.DataFrame, order: str) -> pd.DataFrame:
     if order == "rank":
         frame = frame.sort_values(["query_id", "rank"], kind="stable")
     else:
-        frame["_key"] = frame[order].fillna(-np.inf)
+        frame["_key"] = frame["wrrf_score" if order == "wrrf" else order].fillna(-np.inf)
         frame = frame.sort_values(["query_id", "_key", "rank"], ascending=[True, False, True], kind="stable").drop(columns="_key")
     frame["pos"] = frame.groupby("query_id").cumcount()
     return frame

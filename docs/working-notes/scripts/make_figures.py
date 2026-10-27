@@ -167,7 +167,7 @@ def ablation() -> None:
     for i, (v, f) in enumerate(zip(ab.d, ab.final)):
         ax.text(v + (0.0003 if v >= 0 else -0.0003), i, f"{v:+.4f} ({f:.4f})", va="center",
                 ha="left" if v >= 0 else "right", fontsize=6.8, color=INK2)
-    ax.set_xlim(-0.0125, 0.006)
+    ax.set_xlim(min(ab.d.min(), 0) - 0.0045, max(ab.d.max(), 0) + 0.0035)
     ax.set_xlabel("Δ Final vs control (public LB; one component changed)")
     ax.grid(axis="y", visible=False)
     save(fig, "ablation_free")

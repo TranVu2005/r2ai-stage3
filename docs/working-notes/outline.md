@@ -103,12 +103,13 @@ Mốc so sánh lịch sử: S20 (17/10) vi 87,00%, zh 58,90% (`codex/s23-cc-news
   - split: FREE-split T1536 +0,0002, CH-sel2 +0,0002.
   - D400: −0,0074.
   - cắt mạnh hơn: cut150 −0,0007, cut130 −0,0071.
+  - số doc theo K_q học được (FREE-Kfit): −0,0144 (mục 8.2).
   - carrier theo C-max: −0,0087.
   - 0,6B thêm vào 4B: J4-rrf3-ph979 0,3994 vs J4-rrf-ph979 0,3997.
 
 ## 7. Tổng quát hoá và tái lập
 
-- Khung free vs p4b: p4b-v3 0,4176 vs free-v2 0,4101 (−0,0075); p4b cần K_q (số doc của bản nền cho từng query public), không có với query mới (`docs/release-private.md` mục B).
+- Khung free vs p4b: p4b-v3 0,4176 vs free-v2 0,4101 (−0,0075); p4b cần K_q (số doc của bản nền cho từng query public), không có với query mới (`docs/release-private.md` mục B). Học K_q từ đặc trưng khung free không thay được (FREE-Kfit 0,3994, mục 8.2).
 - Pipeline query mới: `python -m r2ai.newq prepare → export-scoring → (Kaggle 4B, GPU C-max) → import-scores → build`; ghim SHA 79 tệp (`docs/s40-private.md` mục 2; `configs/s41-private-final.json`).
 - Diễn tập 100 query đổi id: Doc F2 kỳ vọng chênh −0,0004 so với FREE-noJina (ngưỡng ±0,002) (`docs/s40-private.md` mục 3).
 - Một lệnh dựng lại trùng SHA: `python -m r2ai.release build --config …` (19,6 / 20,2 phút CPU, trùng SHA từng byte) (`README_RELEASE.md` mục 3).
@@ -128,13 +129,16 @@ Ba hạn chế chính (Vu chốt 27/10: ghi vào bài, không mở lại cấu h
 
 **8.2 Số doc mỗi query do mô hình hiệu chỉnh toàn cục quyết định.**
 - Số đo hiện có: (a, b, s) toàn cục fit trên 4 số LB tổng hợp; mô hình cũ thấp Doc R 0,07–0,11 ở mọi bản (RMSE 0,055); fit lại trên 18 số ngoại suy sai (cut150 dự đoán +0,04, thực −0,004; cut130 thực −0,010); khung free thua p4b 0,0075 (p4b dùng K_q theo query) (`docs/s40-private.md` mục 7b; `docs/s41.md`; `docs/s36-handoff-s30.md`).
-- **Chờ S41 (Kfit, phân bổ số doc theo query) rồi mới viết mục này.**
+- Phép thử phân bổ theo query (S41, FREE-Kfit): đích K_q = số doc của P1-vi+10 (bản nộp 18/10); GBM trên 55 đặc trưng chỉ từ khung free của chính query (p_cal / P4B / cosine / C-max trên pool top-300, tỉ lệ zh, độ dài query), CV 5 fold out-of-fold R² 0,654, Spearman 0,809; k_q = round(1,0154 · K̂_q), cùng tổng 220.436 doc như CH-rrf, carrier và chunk như CH-rrf (`feat/s41:docs/s41.md` mục FREE-Kfit, `86d5d47`).
+- LB (Vu 27/10): FREE-Kfit **0,3994**, thua CH-rrf 0,0144 (Doc F2 −0,016, tức khoảng 0,425; Chunk F2 suy ra khoảng 0,374). Mức thua ngoài vùng nhiễu ≈ 0,003, nên kết luận được.
+- Kết luận ghi vào bài (Vu): lợi thế của khung p4b đến từ thông tin chỉ có ở query public (K_q của bản nộp cũ); với query mới, cắt EF2 theo xác suất là cách phân bổ số doc tốt nhất đã kiểm.
+- Ghi kèm khi viết (số đo, không đổi kết luận): đặc trưng mạnh nhất của mô hình là độ dài query và cosine ở hạng cố định 25–100 (tương quan đơn với K_q khoảng 0,71), gợi ý mô hình học lại luật đếm của P1 hơn là số gold; 35% phương sai K_q không dự đoán được từ khung free; khung p4b còn khác pool (top-n_q cosine), không chỉ khác số doc.
 
 **8.3 Nhiều quyết định nằm trong vùng nhiễu của LB.**
 - Nguyên tắc: ngưỡng chấp nhận một thay đổi khoảng |Δ Final| ≈ 0,003 (Vu, 27/10); dưới ngưỡng thì giữ hay bỏ theo chi phí, tính tất định và độ đơn giản, không theo dấu của Δ. Chưa có phép đo phương sai LB (open-questions D4).
 - Bảng: `data/noise_decisions.csv` (18 quyết định; 17 trong vùng, 1 ở biên: FREE-nowin −0,0031). Đáng ghi: cấu hình private CH-rrf chọn với +0,0027, cũng trong vùng nhiễu; lý do giữ là không tốn thêm chi phí và cùng tập doc.
 - Jina: bỏ với +0,0010 (trong vùng); lý do giữ quyết định là chi phí (2,63 query/phút trên RTX 3050, khoảng 7,6 giờ cho 1.200 query, OOM lặp lại trên GPU 6 GB) và tính không tất định (listwise: điểm một doc phụ thuộc 9 doc cùng khối và hạt giống; nguồn lệch lớn nhất của diễn tập, 729 / 887 doc) (`docs/s40-private.md` mục 3; `docs/PROGRESS.md` mục S37).
-- Ngoài vùng (có thể kết luận): D400 −0,0074, cut130 −0,0071, CH-cmax −0,0087, thêm 120ask +0,0172 (CR-fair 0,3861 → 120A-free-v0 0,4033).
+- Ngoài vùng (có thể kết luận): FREE-Kfit −0,0144, D400 −0,0074, cut130 −0,0071, CH-cmax −0,0087, thêm 120ask +0,0172 (CR-fair 0,3861 → 120A-free-v0 0,4033).
 
 Hạn chế khác:
 - Phụ thuộc text extract: AUC theo extractor 0,739–0,924; trần AUC < 1 nhiều khả năng do khác text với BTC.

@@ -36,10 +36,11 @@ Chỗ số liệu lệch, thiếu nguồn, hoặc cần Vu quyết cách viết.
 3. Mục 4(e) "thiên lệch do pool" của baseline BTC: Vu muốn lập luận nào? Docs có: baseline P 0,88 ở ~30–38 doc/query, R 0,51; bge-reranker trên pool cosine không tái tạo được (Doc P 0,343). Tôi chưa thấy phân tích "gold sinh từ pool của baseline" có số đo; không viết nếu không có nguồn.
 4. Nhiễu LB: có lần nào nộp lại cùng một ZIP để đo độ dao động không? (FREE-noJina-canon trùng FREE-noJina ở mọi chữ số, nhưng ZIP khác nhau.)
 5. Kết quả private (sau 04/11): cập nhật bảng và tóm tắt.
-6. Mục 8.2 (phân bổ số doc theo query): chờ kết quả Kfit của S41 (LB nếu có) rồi viết.
+6. FREE-Kfit: Vu báo Doc −0,016 (làm tròn). Xin Doc F2 / P / R và Chunk F2 chính xác nếu có; CSV đang để Doc 0,4253 và Chunk 0,3735 (suy ra).
 
 ## E. Đã chốt (Vu, 27/10)
 
 - Ba hạn chế ở outline mục 8 chỉ ghi vào bài; không mở lại cấu hình private CH-rrf.
 - 8.1: pipeline kiểu baseline (hybrid chunk + bge-reranker) đã chạy ở sub02–RD150; ghi kèm điều kiện corpus v1 / chỉ vi / độ phủ thấp hơn và fingerprint hybrid 0,701 vs 0,924. (Trả lời một phần C5.)
 - 8.3: ngưỡng chấp nhận |Δ Final| ≈ 0,003; bảng `data/noise_decisions.csv`; Jina bỏ vì chi phí và tính tất định.
+- 8.2 (27/10, sau LB FREE-Kfit 0,3994): lợi thế khung p4b đến từ thông tin chỉ có ở query public; EF2 theo xác suất là cách phân bổ tốt nhất đã kiểm cho query mới.

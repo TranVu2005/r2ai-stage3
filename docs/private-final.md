@@ -85,3 +85,20 @@ T0 = lúc Vu có tệp query. Run `out/runs/private` (tên cố định; chưa t
 * 4B thiếu mà không dùng `--impute-4b`: `build` từ chối; Vu quyết.
 
 **5 lượt private:** (1) bản chính ngay khi có; (2) giữ cho bản sửa lỗi; (3) đến (5) để dành (chờ (B), (C)).
+
+## 6. Nếu một nguồn hỏng: mất bao nhiêu, làm gì (đo trên 1.200 query public, Vu 27/10)
+
+Mã `scripts/s41/fallback_public.py` (đi qua đúng các hàm của `newq build`: `pools_from`, `cosine_pcal_map`, `apply_selection`; config chốt), driver `scripts/s41/run_fallback.sh`, run `out/runs/s41/fallback/<bản>`. Đối chứng FULL (đủ 4B, cùng đường mã) cho docsel và carrier trùng CH-rrf (220.436 doc, 175.548 carrier, 0 lệch). Doc F2 dự đoán chấm docsel của từng bản bằng mô hình p_cal của bản **đủ 4B** (cùng G_q), nên so được với nhau; mô hình này coi EF2 đủ 4B là tối ưu và chỉ để xếp hạng, LB mới là số thật.
+
+| nguồn hỏng | bản đo | doc (TB/query) | Doc F2 dự đoán | Δ so CH-rrf | LB (Vu) | hành động |
+|---|---|---:|---:|---:|---|---|
+| không (đối chứng) | CH-rrf | 220.436 (183,7) | 0,4253 | 0 | 0,4138 | bản chính |
+| C-max (hỏng / quá chậm) | **B0**: `build --no-cmax`, RRF cosine + 4B | 220.472 (183,7) | 0,4245 | −0,0008 | chờ | nộp B0 nếu C-max chưa xong ở T0 + 24 giờ |
+| 30% cặp 4B (phiên Kaggle dở / hết quota) | **IMP30**: xoá 30% (seed 2026), `build --impute-4b` | 289.469 (241,2) | 0,3984 | −0,027 | chờ | `build --impute-4b` |
+| toàn bộ 4B | **COS**: xoá 100%, `--impute-4b`, C-max giữ | 358.759 (299,0) | 0,3786 | −0,047 | chờ | xem ghi chú COS |
+
+Ghi chú:
+* **B0:** khác CH-rrf 15.784 doc (7%), Doc F2 dự đoán gần như không đổi. LB public cũ của cấu hình có Jina (FREE-noCmax) mất 0,0034 Final, chủ yếu ở Doc.
+* **IMP30:** ánh xạ cosine → p_cal fit trên 70% cặp còn điểm (c 12,861, d −9,754). Cặp được suy điểm xếp cuối nguồn 4B, nhưng p_cal suy ra vẫn đủ cao để EF2 giữ nhiều doc hơn (241 doc/query): recall dự đoán tăng (0,589), precision giảm (0,199).
+* **COS:** `newq build --impute-4b` hiện **từ chối** khi còn dưới 1.000 cặp có 4B (không fit được ánh xạ). Bản đo dùng ánh xạ fit trên toàn bộ 4B public (c 12,890, d −9,773). Muốn dùng được ở private cần ghim hai hằng số này vào config. Nguồn 4B trong RRF thành hằng, nên RRF chỉ còn cosine + C-max; EF2 giữ gần cả pool (299 doc/query, chạm trần 300).
+* ZIP và SHA: compose B0 bắt đầu 27/10 16:22; IMP30 và COS compose 19:00 (`VARIANTS="IMP30 COS" bash scripts/s41/run_fallback.sh`).

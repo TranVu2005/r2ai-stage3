@@ -87,3 +87,30 @@ def test_pin_key_repo_relative(tmp_path):
     assert newq.pin_key(newq.ROOT / "src" / "r2ai" / "newq.py") == "repo:src/r2ai/newq.py"
     assert newq.pin_path("repo:src/r2ai/newq.py") == newq.ROOT / "src" / "r2ai" / "newq.py"
     assert not newq.pin_key(tmp_path / "x").startswith("repo:")
+
+
+def test_cos_config_inherits_frozen_and_adds_only_the_map():
+    base, cos = newq.load_config(None), newq.load_config(newq.COS_CONFIG)
+    assert all(cos[k] == base[k] for k in newq.SELECTION_KEYS) and "impute_4b" not in base
+    m = newq.cos_only_map(cos)
+    assert m["mode"] == "cos_only" and abs(m["c"] - 12.890) < 1e-3 and abs(m["d"] + 9.773) < 1e-3 and m["a"] == base["a"]
+    with pytest.raises(SystemExit):
+        newq.cos_only_map(base)
+
+
+def test_inheriting_config_pinned_and_limited(tmp_path):
+    good = json.loads(newq.COS_CONFIG.read_text(encoding="utf-8"))
+    p = tmp_path / "c.json"
+    p.write_text(json.dumps({**good, "a": 1.0}), encoding="utf-8")
+    with pytest.raises(SystemExit):
+        newq.load_config(p)
+    p.write_text(json.dumps({**good, "inherits_sha256": "0" * 64}), encoding="utf-8")
+    with pytest.raises(SystemExit):
+        newq.load_config(p)
+
+
+def test_build_cos_only_excludes_impute_and_drop(tmp_path):
+    with pytest.raises(SystemExit):
+        newq.build(tmp_path, None, True, False, False, 1, impute_4b=True, cos_only=True)
+    with pytest.raises(SystemExit):
+        newq.build(tmp_path, None, True, False, False, 1, drop_4b=0.3, cos_only=True)

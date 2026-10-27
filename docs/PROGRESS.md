@@ -1,8 +1,9 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-27 16:45 (UTC+7)
+- Cập nhật: 2026-10-27 17:10 (UTC+7)
 - Model thực hiện: Claude Opus 5.5 (S41)
-- Commit HEAD đã kiểm trước cập nhật này: `86d5d47` (main `64f950a`, tag `v-private-2026-10-28`), nhánh `feat/s41` (tách từ `feat/s40-private` `8201378`)
+- Commit HEAD đã kiểm trước cập nhật này: `3f19a1a` (main `64f950a`, tag `v-private-2026-10-28`), nhánh `feat/s41` (tách từ `feat/s40-private` `8201378`)
+- **S41 chốt cuối 27/10 17:10:** FREE-Kfit LB 0,3994 (Doc 0,4253, Chunk 0,3736; thua CH-rrf 0,0144) → bác. CH-rrf, tag `v-private-2026-10-28` là bản cuối; đóng băng. Việc còn lại: chạy private theo `docs/private-final.md`.
 - **S41 merge 27/10 16:45:** `feat/s40-private` và `feat/s41` đã merge vào `main` (merge commit `2beaff4`, `64f950a`, không force), test toàn bộ trên bản merge 1.070 passed; tag `v-private-2026-10-28` (cấu hình CH-rrf) trỏ `64f950a`. Nếu FREE-Kfit thắng LB (≥ 0,4168): đổi config sang Kfit, merge, tag `v-private-2026-10-29`.
 - **S41 27/10 chiều (docs/s41.md, docs/private-final.md):** chốt private = CH-rrf (LB 0,4138): `configs/s41-private-final.json` là mặc định của `newq` (carrier CR-fair theo RRF), ghim `configs/s41-newq-pins.json` (79 tệp, khoá `repo:` cho tệp trong repo). Hồi quy public: docsel + carrier trùng tuyệt đối, JSON trong ZIP trùng từng byte CH-rrf. Diễn tập rh100 ok (build 5 phút / 100 query). FREE-Kfit (K_q học từ P1, GBM R² OOF 0,654) 97.746.891 B `5e66bedc…0a63`, validator ok, chưa nộp. Test 1.070 passed.
 - **S41 27/10 sáng (docs/s41.md):** trên nền FREE-noJina (doc giữ nguyên), validator ok, chưa nộp: CH-rrf 100.651.136 B `b12b8591…08c8` (T 1536), CH-cmax 102.599.825 B `7feb5ff5…bd58` (T 1605), CH-ef2 100.924.856 B `3c636312…05b0` (T 1536), CH-sel2 99.021.212 B `ebaa2013…9bca` (θ P4B 0,7786, 11.456 doc chia 2 nửa); FREE-noJina-D400 (hiệu chỉnh cũ, 216 doc/query) 99.554.424 B `1b5b9795…4fc4`. Dừng chuỗi cut theo LB (cut150 0,4104, cut130 0,4040 < 0,4111).
@@ -825,3 +826,4 @@ Cập nhật 2026-10-23 13:10 (UTC+7), Claude Sonnet 5.5, HEAD kiểm trước c
 | 2026-10-27 08:10 | Claude Opus 5.5 | S41: `r2ai.s41.carriers` (CH-rrf / CH-cmax / CH-ef2) và `r2ai.s41.sel2` (CH-sel2), compose cả bốn trên FREE-noJina; FREE-noJina-D400 hiệu chỉnh cũ; LB chuỗi cut ghi vào `docs/s41.md`; chưa nộp. |
 | 2026-10-27 16:00 | Claude Opus 5.5 | S41: chốt CH-rrf vào `newq` (config `s41-private-final.json`, pins `s41-newq-pins.json`), hồi quy public (JSON trùng CH-rrf), diễn tập rh100, bảng ablation, `docs/private-final.md` (kế hoạch + checklist giờ G), `r2ai.s41.kfit` + FREE-Kfit; chưa nộp, chưa merge main. |
 | 2026-10-27 16:45 | Claude Opus 5.5 | S41: `kfit report` (R² / Spearman từng fold, độ quan trọng trên fold giữ lại); merge `feat/s40-private` + `feat/s41` vào `main` (`64f950a`), 1.070 test passed, tag `v-private-2026-10-28`. |
+| 2026-10-27 17:10 | Claude Opus 5.5 | S41: LB FREE-Kfit 0,3994 ghi vào `docs/s41.md`, giả thuyết bác; giữ CH-rrf, tag `v-private-2026-10-28` là bản cuối, đóng băng. |

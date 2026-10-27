@@ -18,7 +18,9 @@ Thay mục 5 của `docs/s40-private.md` (các phần còn lại của tài li�
 ## 2. Kiểm tra trước khi đóng băng
 
 * **Hồi quy public** (`scripts/s41/regress_public.py`): `newq.apply_selection` với config chốt trên đúng pool / 4B / C-max của FREE-noJina (1.200 query public) cho docsel trùng FREE-noJina ở mọi cột trừ Jina và cờ carrier, và tập carrier trùng CH-rrf (175.548, ρ 0,7937, 0 lệch). Compose: xem `docs/s41.md` mục hồi quy.
-* **Diễn tập 100 query** (`scripts/s41/run_rehearsal.sh`, run `out/runs/s41/rh100-final`): xem `docs/s41.md` mục diễn tập.
+* **Hồi quy public:** compose ra JSON trùng từng byte JSON trong ZIP CH-rrf (`eeb51b06…3da2`); ZIP lệch 8 B chỉ vì tên tệp JSON bên trong.
+* **Diễn tập 100 query** (`scripts/s41/run_rehearsal.sh`, run `out/runs/s41/rh100-final`): prepare 50 s, export 205 s, import 2 s, build (compose gồm) 295 s; `--impute-4b` 253 s; thiếu 30% 4B + impute 257 s; ba ZIP validator ok. Chi tiết `docs/s41.md`.
+* **FREE-Kfit** (số doc/query theo K_q học từ P1, chờ LB; chỉ thay cấu hình chốt nếu ≥ 0,4168): `docs/s41.md`.
 
 ## 3. Thời gian (N = 1.200, D = 300)
 

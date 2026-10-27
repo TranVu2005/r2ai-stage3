@@ -1,8 +1,9 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-27 19:40 (UTC+7)
+- Cập nhật: 2026-10-27 21:40 (UTC+7)
 - Model thực hiện: Claude Opus 5.5 (S41)
-- Commit HEAD đã kiểm trước cập nhật này: `6ac453b` (main `64f950a`, tag `v-private-2026-10-28`), nhánh `feat/s41` (tách từ `feat/s40-private` `8201378`)
+- Commit HEAD đã kiểm trước cập nhật này: `bd9b4aa` (main `64f950a`, tag `v-private-2026-10-28`), nhánh `feat/s41` (tách từ `feat/s40-private` `8201378`)
+- **S41 COS ghim 27/10 21:40 (`docs/private-final.md` mục 6.1, 6.2):** config riêng `configs/s41-private-fallback-cos.json` (kế thừa config chốt, chỉ thêm `impute_4b` cos_only, c / d đủ chữ số) + `newq build --cos-only`; config chốt không đổi. Hồi quy: CH-rrf mặc định ZIP `b12b8591…08c8` trùng từng byte; COS qua `--cos-only` ZIP `1c5600bb…0fc1` trùng từng byte; rh100 không 4B chạy hết (build 200 s), validator ok. Bảng lệnh + điều kiện chuyển nhánh CH-rrf / B0 / IMP30 / COS. Test 1.073 passed. Chưa tag mới, chờ Vu duyệt.
 - **S41 dự phòng private 27/10 19:40 (`docs/private-final.md` mục 6):** đo trên 1.200 query public, config chốt CH-rrf, validator ok cả ba, chưa nộp (Vu nộp): B0 (`--no-cmax`) 98.383.174 B `d2f234e9…0d29`, Doc F2 dự đoán 0,4245 (−0,0008); IMP30 (xoá 30% 4B + `--impute-4b`) 97.989.849 B `ba25768d…9ea0`, 0,3984 (−0,027); COS (xoá 100% 4B, ánh xạ cosine fit trên 4B public) 99.424.114 B `1c5600bb…0fc1`, 0,3786 (−0,047). COS muốn dùng ở private phải ghim hằng số ánh xạ vào config (chưa làm, config đóng băng; Vu quyết).
 - **S41 chốt cuối 27/10 17:10:** FREE-Kfit LB 0,3994 (Doc 0,4253, Chunk 0,3736; thua CH-rrf 0,0144) → bác. CH-rrf, tag `v-private-2026-10-28` là bản cuối; đóng băng. Việc còn lại: chạy private theo `docs/private-final.md`.
 - **S41 merge 27/10 16:45:** `feat/s40-private` và `feat/s41` đã merge vào `main` (merge commit `2beaff4`, `64f950a`, không force), test toàn bộ trên bản merge 1.070 passed; tag `v-private-2026-10-28` (cấu hình CH-rrf) trỏ `64f950a`. Nếu FREE-Kfit thắng LB (≥ 0,4168): đổi config sang Kfit, merge, tag `v-private-2026-10-29`.
@@ -829,3 +830,4 @@ Cập nhật 2026-10-23 13:10 (UTC+7), Claude Sonnet 5.5, HEAD kiểm trước c
 | 2026-10-27 16:45 | Claude Opus 5.5 | S41: `kfit report` (R² / Spearman từng fold, độ quan trọng trên fold giữ lại); merge `feat/s40-private` + `feat/s41` vào `main` (`64f950a`), 1.070 test passed, tag `v-private-2026-10-28`. |
 | 2026-10-27 17:10 | Claude Opus 5.5 | S41: LB FREE-Kfit 0,3994 ghi vào `docs/s41.md`, giả thuyết bác; giữ CH-rrf, tag `v-private-2026-10-28` là bản cuối, đóng băng. |
 | 2026-10-27 19:40 | Claude Opus 5.5 | S41: dự phòng private trên public (B0, IMP30, COS): compose xong, validator ok, ZIP + SHA và bảng "nguồn hỏng → mất bao nhiêu → hành động" trong `docs/private-final.md` mục 6; chưa nộp. |
+| 2026-10-27 21:40 | Claude Opus 5.5 | S41: config COS riêng + `newq build --cos-only`; hồi quy CH-rrf và COS trùng từng byte, rh100 cos-only ok; lệnh từng nhánh dự phòng trong `docs/private-final.md` mục 6.2; chưa tag. |

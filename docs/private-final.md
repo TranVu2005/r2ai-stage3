@@ -82,7 +82,7 @@ T0 = lúc Vu có tệp query. Run `out/runs/private` (tên cố định; chưa t
 * Phiên Kaggle chết: chạy lại notebook của phần đó (bỏ qua part đã xong).
 * Hết quota hoặc đến 04/11 vẫn thiếu 4B: `build --impute-4b` (cặp thiếu 4B lấy p_cal từ ánh xạ cosine, xếp cuối nguồn 4B). Diễn tập thiếu 30%: Doc F2 mô hình khoảng 0,389 so với 0,419 khi đủ.
 * C-max hỏng hoặc quá chậm: `build --no-cmax`, nộp nếu đến T0 + 24 giờ C-max chưa xong.
-* 4B thiếu mà không dùng `--impute-4b`: `build` từ chối; Vu quyết.
+* 4B thiếu mà không dùng `--impute-4b`: `build` từ chối. Không có phần 4B nào: `build --cos-only` (mục 6.2).
 
 **5 lượt private:** (1) bản chính ngay khi có; (2) giữ cho bản sửa lỗi; (3) đến (5) để dành (chờ (B), (C)).
 
@@ -100,7 +100,7 @@ Mã `scripts/s41/fallback_public.py` (đi qua đúng các hàm của `newq build
 Ghi chú:
 * **B0:** khác CH-rrf 15.784 doc (7%), Doc F2 dự đoán gần như không đổi. LB public cũ khi bỏ C-max ở cấu hình còn Jina (free-v2 0,4101 → FREE-noCmax 0,4077): mất 0,0024 Final, Doc −0,0032.
 * **IMP30:** ánh xạ cosine → p_cal fit trên 70% cặp còn điểm (c 12,861, d −9,754). Cặp được suy điểm xếp cuối nguồn 4B, nhưng p_cal suy ra vẫn đủ cao để EF2 giữ nhiều doc hơn (241 doc/query): recall dự đoán tăng (0,589), precision giảm (0,199).
-* **COS:** `newq build --impute-4b` hiện **từ chối** khi còn dưới 1.000 cặp có 4B (không fit được ánh xạ). Bản đo dùng ánh xạ fit trên toàn bộ 4B public (c 12,890, d −9,773). Muốn dùng được ở private cần ghim hai hằng số này vào config. Nguồn 4B trong RRF thành hằng, nên RRF chỉ còn cosine + C-max; EF2 giữ gần cả pool (299 doc/query, chạm trần 300).
+* **COS:** `newq build --impute-4b` vẫn **từ chối** khi còn dưới 1.000 cặp có 4B (không fit được ánh xạ). Nhánh này đi bằng `newq build --cos-only` (Vu duyệt 27/10): không đọc điểm 4B nào, mọi cặp lấy p_cal từ ánh xạ ghim trong config riêng `configs/s41-private-fallback-cos.json` (xem bên dưới). Nguồn 4B trong RRF thành hằng, nên RRF chỉ còn cosine + C-max; EF2 giữ gần cả pool (299 doc/query, chạm trần 300).
 * ZIP (chưa nộp):
 
   | bản | ZIP | B | SHA256 | T | chunk (cửa sổ) | validator |
@@ -110,3 +110,36 @@ Ghi chú:
   | COS | `out/runs/s41/fallback/COS/compose/FB-COS-full+w768-t1536.zip` | 99.424.114 | `1c5600bbd54b80fc2095927d583cc37635b0920940503b172feda0b270790fc1` | 1536 | 207.939 (33.457) | ok, 0 carrier bị bỏ |
 
   Driver `scripts/s41/run_fallback.sh` (tuần tự, log `out/runs/s41/fallback/fallback.log`): B0 44,8 phút, IMP30 43,5 phút, COS 44,0 phút.
+
+### 6.1 Config COS và `--cos-only` (Vu 27/10)
+
+Mã `--cos-only` và config COS hiện chỉ có trên `feat/s41` (từ `bd9b4aa`), **chưa** có trong tag `v-private-2026-10-28`. Chưa tag mới, chờ Vu duyệt kết quả hồi quy.
+
+* `configs/s41-private-fallback-cos.json` (SHA256 `81ba043f299f674002da532c9b6c2ab3fef4000cc4e935883c57d087beca22e9`) kế thừa `configs/s41-private-final.json` (ghim SHA256 `61922113…4ca4759`) và chỉ thêm `impute_4b = {mode: cos_only, c 12,890141042157486, d −9,772626922053805, source}`. `load_config` từ chối config kế thừa có khoá nào khác ngoài `impute_4b` / `note`, hoặc khi SHA256 tệp gốc lệch. `configs/s41-private-final.json` không đổi.
+* `build --cos-only` chỉ đọc c / d từ config này (mặc định, hoặc `--cos-config`). Nó dừng nếu các khoá chọn doc (depth, keep, a, b, s_free, g_depth, t_c, rrf_k, carriers) khác config của run, và không đi cùng `--impute-4b` / `--test-drop-4b`. `--impute-4b` thường vẫn fit ánh xạ riêng và vẫn cần ≥ 1.000 cặp có 4B.
+* Hằng số ghim **đủ chữ số** (giá trị fit trong `out/runs/s41/fallback/COS/fallback.json`, SHA256 `5fba1514…84bb`). Bản làm tròn 3 chữ số (12,890 / −9,773) cho docsel thiếu 2 doc và lệch 1 carrier so với FB-COS, nên không ra đúng ZIP `1c5600bb…`.
+
+**Hồi quy** (driver `scripts/s41/run_cos_regress.sh`, log `out/runs/s41/cos-regress/cos-regress.log`, 27/10 19:45 đến 21:11):
+
+| kiểm | kết quả |
+|---|---|
+| a. CH-rrf mặc định (`regress_public.py --variant CH-rrf --compose`, config chốt) | docsel 220.436 dòng trùng, carrier 175.548 trùng (0 lệch); ZIP 100.651.136 B, SHA256 `b12b85912ba03ec45062fb817b806583c0182633a89feaa2ae4f1372767908c8` **trùng từng byte**; compose 43,0 phút |
+| b. COS qua đường `--cos-only` (`regress_public.py --variant COS --compose`: `load_config(COS_CONFIG)`, `cos_only_map`, `pools_from` không 4B, trên pool / C-max public) | docsel 358.759 dòng trùng (SHA256 tệp cũng trùng), carrier 175.787 trùng; ZIP 99.424.114 B, SHA256 `1c5600bbd54b80fc2095927d583cc37635b0920940503b172feda0b270790fc1` **trùng từng byte**; compose 35,5 phút |
+| c. rh100 `--cos-only`, không nhập phần 4B nào (run `out/runs/s41/rh100-cos`) | prepare 52 s, export 167 s, import C-max 1 s, `build --cos-only` (compose gồm) 200 s; 29.920 doc (299,2/query), 30.000 cặp suy điểm, ZIP 10.571.362 B `029afc848914901754b35988e1030262e5d37a5185b1f9e6a760a57e328c6d96`, validator ok, 0 carrier bị bỏ; Doc F2 mô hình 0,387 |
+
+Hồi quy a và b đi qua `newq.apply_selection` trên pool public dựng lại như `r2ai.s36.s37.apply` (như hồi quy mục 2), không qua `newq prepare`, vì public không có run newq. Tên build đặt trùng bản tham chiếu (`CH-rrf`, `FB-COS`) để tên JSON trong ZIP trùng.
+
+### 6.2 Lệnh từng nhánh và điều kiện chuyển (run `out/runs/private`)
+
+Kiểm trước khi chọn: `python -m r2ai.newq status --run out/runs/private` (phần 4B đã nhập, có `cmax.parquet` không). Mỗi nhánh ghi vào thư mục build riêng, nên dựng được nhiều nhánh rồi chọn bản nộp. ZIP + SHA256 nằm ở `out/runs/private/build/<tên>/build.json` khoá `zip`.
+
+| nhánh | khi nào | lệnh | tên build |
+|---|---|---|---|
+| CH-rrf (chính) | đủ mọi phần 4B và đã nhập C-max | `python -m r2ai.newq build --run out/runs/private` | `private-free` |
+| B0 | đủ 4B; C-max hỏng hoặc chưa xong ở T0 + 24 giờ | `python -m r2ai.newq build --run out/runs/private --no-cmax` | `private-free-noCmax` |
+| IMP30 | thiếu một phần 4B (phiên Kaggle chết, hết quota) mà đến 04/11 vẫn không chạy bù được; còn ≥ 1.000 cặp có 4B | `python -m r2ai.newq build --run out/runs/private --impute-4b` | `private-free-impute4b` |
+| COS | không phần 4B nào nhập được (dưới 1.000 cặp có 4B: `--impute-4b` từ chối) | `python -m r2ai.newq build --run out/runs/private --cos-only` | `private-free-cosonly` |
+
+* C-max cũng thiếu: thêm `--no-cmax` vào lệnh IMP30 / COS. Tổ hợp này chưa đo trên public.
+* Thứ tự ưu tiên khi có nhiều lựa chọn: CH-rrf > B0 > IMP30 > COS (Doc F2 dự đoán 0,4253 / 0,4245 / 0,3984 / 0,3786).
+* Một phần 4B về muộn: nhập rồi dựng lại nhánh tốt hơn; bản đã nộp giữ nguyên.

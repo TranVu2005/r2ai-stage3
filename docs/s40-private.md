@@ -127,6 +127,8 @@ Lần dựng đầu (12:07) bị validator loại (866 chunk không nguyên văn
 
 ## 5. Kế hoạch private 01–04/11 (pipeline chốt: cosine + 4B + C-max, không Jina; **chỉ Kaggle**)
 
+**S41 27/10: thay bằng `docs/private-final.md`** (cấu hình chốt CH-rrf, `configs/s41-private-final.json`, checklist giờ G). Phần dưới giữ để tham khảo.
+
 Vu 26/10: bỏ diễn tập RunPod; 4B private chỉ chạy trên một tài khoản Kaggle (không dùng 2 tài khoản, điều khoản Kaggle). `scripts/s40/run_runpod_4b.sh` và `gate_4b.py` giữ trong repo nhưng không nằm trong kế hoạch.
 
 **Chỗ Vu cần điền:** (A) giờ mở đề 01/11: `____`; (B) private có hiện điểm sau mỗi lượt không: `____`; (C) cách tính lượt (lượt lỗi định dạng có bị tính không): `____`; (D) quota GPU Kaggle còn lại trong tuần chứa 01–02/11 (cần khoảng 15 giờ, cộng phần đã dùng cho D400 public nếu cùng tuần): `____` giờ.

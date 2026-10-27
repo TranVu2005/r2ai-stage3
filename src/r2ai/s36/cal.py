@@ -248,6 +248,34 @@ def ef2_keep(cal: Calibrated, tail: bool = True) -> dict[int, int]:
     return keep
 
 
+def ef2_keep_scaled(cal: Calibrated, lam: float, tail: bool = True) -> dict[int, int]:
+    """EF2 cut with the marginal threshold scaled by a global ``lam`` (S40 probes FREE-cut150 / -cut130). The EF2 optimum k* of a query
+    also maximises sum_{i<=k} p_i - (F2*_q / 5) k (F2*_q = the query's EF2 value; Dinkelbach), so ``lam`` = 1 gives ``ef2_keep`` and
+    ``lam`` > 1 cuts earlier: k = argmax_k sum_{i<=k} p_i - lam (F2*_q / 5) k over [min(20, depth), depth], first k on ties."""
+    keep = {}
+    for q in cal.frame.qids:
+        p, depth = cal.p[q], len(cal.p[q])
+        g = cal.g[q] if tail else cal.g_pool[q]
+        k = np.arange(1, depth + 1)
+        cum = np.cumsum(p)
+        lo = min(FLOOR_K, depth)
+        f_star = float(np.max((5 * cum / (4 * g + k))[lo - 1:]))
+        value = cum - lam * f_star / 5 * k
+        keep[q] = int(lo + np.argmax(value[lo - 1:]))
+    return keep
+
+
+def solve_lambda(cal: Calibrated, mean_docs: float, tail: bool = True) -> tuple[float, dict[int, int]]:
+    """Global ``lam`` whose ``ef2_keep_scaled`` mean docs per query is closest to ``mean_docs`` (bisection on log lam, 60 steps)."""
+    lo, hi = 0.05, 50.0
+    mean = lambda lam: float(np.mean(list(ef2_keep_scaled(cal, lam, tail).values())))  # noqa: E731  decreasing in lam
+    for _ in range(60):
+        mid = math.sqrt(lo * hi)
+        lo, hi = (mid, hi) if mean(mid) > mean_docs else (lo, mid)
+    lam = min((lo, hi), key=lambda x: abs(mean(x) - mean_docs))
+    return lam, ef2_keep_scaled(cal, lam, tail)
+
+
 def thr_keep(frame: Frame, threshold_of_doc) -> dict[int, int]:
     """clip(#docs of the pool with P4B >= their threshold, ceil(0.5 K_q), floor(1.3 K_q))."""
     keep = {}

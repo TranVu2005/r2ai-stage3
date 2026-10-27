@@ -2,6 +2,8 @@
 
     python d300_cmax.py prepare [--limit N]    out/runs/s37/cmax-d300/pool/{shards, judge_score.py, manifest.json}, gate on 1,000 S32 pairs
     python d300_cmax.py reduce                 pool scores -> out/runs/s37/cmax_scores-d300.parquet (query_id, doc_id, cmax, fallback)
+    S40 D = 400: --src out/runs/s40/d400/cmax_pairs.parquet --out out/runs/s37/cmax-d400 --dest out/runs/s37/cmax_scores-d400.parquet
+                 --src-id-base 51000000 --row-id-base 61000000 (defaults: the d300 run, unchanged)
 
 Standalone: it needs the S33 / S36 packages of the worktree `s35-part-jina` (PYTHONPATH=<worktree>/src, see run_d300_cmax.ps1).
 Chunks are chosen exactly as S32 / S36 `extra cmax-prepare` (r2ai.s33.pool.select_like_s32, same gate); the 0.6B scoring itself is
@@ -28,6 +30,8 @@ RUN = paths.RUNS_DIR / 's37'
 SRC = paths.RUNS_DIR / 's36-fuse4' / 'd300' / 'cmax_pairs.parquet'
 OUT = RUN / 'cmax-d300'
 POOL = OUT / 'pool'
+DEST = RUN / 'cmax_scores-d300.parquet'
+D300 = paths.RUNS_DIR / 's36-fuse4' / 'd300'
 CANONICAL = paths.DATA_DIR / 'canonical-20261018'
 QUERY = paths.DATA_DIR / 'raw' / 'query.parquet'
 JUDGE = paths.RUNS_DIR / 's31-strong-judge' / 'pool-extra' / 'kaggle' / 'judge_score.py'
@@ -103,8 +107,9 @@ def prepare(limit: int | None = None) -> dict:
     lang = dict(zip(canon.doc_id.astype(int), canon.lang))
     miss = sorted(set(tab.doc_id.astype(int)) - set(lang))
     if miss:                                    # docs outside the canonical bundle: the S36 pair tables know their language, Pharmacity docs are vi
-        for name in ('pairs_final', 'pairs_d300'):
-            t = pd.read_parquet(SRC.with_name(name + '.parquet'), columns=['doc_id', 'lang'])
+        tables = [SRC.with_name(n + '.parquet') for n in ('pairs_final', 'pairs_d300')] + [D300 / (n + '.parquet') for n in ('pairs_final', 'pairs_d300')]
+        for f in dict.fromkeys(t for t in tables if t.exists()):
+            t = pd.read_parquet(f, columns=['doc_id', 'lang'])
             for d, lg in zip(t.doc_id.astype(int), t.lang):
                 lang.setdefault(d, lg)
         miss = sorted(set(tab.doc_id.astype(int)) - set(lang))
@@ -217,17 +222,28 @@ def reduce() -> dict:
     res = g.score.max().rename('cmax').reset_index()
     fb = m[m.chunk_source == 'fallback'].set_index(['query_id', 'doc_id']).index
     res['fallback'] = res.set_index(['query_id', 'doc_id']).index.isin(fb)
-    dest = RUN / 'cmax_scores-d300.parquet'
+    dest = DEST
+    paths.assert_writable(dest)
+    if dest.exists():
+        raise SystemExit(f'{dest} exists: not overwritten')
     res.to_parquet(dest, index=False)
     return {'pairs': len(res), 'fallback': int(res.fallback.sum()), 'cmax_p10_p50_p90': [float(res.cmax.quantile(x)) for x in (.1, .5, .9)],
             'sha256': _sha256(dest)}
 
 
 def main() -> int:
+    global SRC, OUT, POOL, DEST, SRC_ID_BASE, ROW_ID_BASE
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('command', choices=('prepare', 'reduce'))
     ap.add_argument('--limit', type=int, default=None)
+    ap.add_argument('--src', type=Path, default=SRC)
+    ap.add_argument('--out', type=Path, default=OUT)
+    ap.add_argument('--dest', type=Path, default=DEST)
+    ap.add_argument('--src-id-base', type=int, default=SRC_ID_BASE)
+    ap.add_argument('--row-id-base', type=int, default=ROW_ID_BASE)
     a = ap.parse_args()
+    SRC, OUT, DEST, SRC_ID_BASE, ROW_ID_BASE = a.src.resolve(), a.out.resolve(), a.dest.resolve(), a.src_id_base, a.row_id_base
+    POOL = OUT / 'pool'
     print(json.dumps(prepare(a.limit) if a.command == 'prepare' else reduce(), indent=1, ensure_ascii=False, default=str))
     return 0
 

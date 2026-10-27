@@ -20,11 +20,19 @@ from r2ai.compose.archive import compression_profile  # noqa: E402
 from r2ai.eval.scorer import normalize_metric  # noqa: E402
 
 CEIL, ZP, CAN = 102_600_000, 'out/runs/reranker-trial/release/P1-vi+10.zip', 'data/canonical-20261018'
-args = sys.argv[1:]; max_per_doc = 1
-if args[:1] == ['--max-chunks-per-doc']:
-    max_per_doc = int(args[1]); args = args[2:]
-    if max_per_doc < 1:
-        sys.exit('--max-chunks-per-doc must be >= 1')
+args = sys.argv[1:]; max_per_doc = 1; QP, use_p1 = 'data/raw/query.parquet', True
+while args[:1] and args[0].startswith('--'):     # S40: --queries <parquet> (a new query set), --no-p1 (P1 is no verbatim source)
+    if args[0] == '--max-chunks-per-doc':
+        max_per_doc = int(args[1]); args = args[2:]
+        if max_per_doc < 1:
+            sys.exit('--max-chunks-per-doc must be >= 1')
+    elif args[0] == '--queries':
+        QP = args[1]; args = args[2:]
+    elif args[0] == '--no-p1':
+        use_p1 = False; args = args[1:]
+    else:
+        sys.exit(f'unknown option {args[0]}')
+QP = os.path.abspath(QP) if QP != 'data/raw/query.parquet' else QP
 zp, extra_dirs = args[0], args[1:]; err = Counter()
 z = zipfile.ZipFile(zp); names = z.namelist()
 err['zip_not_single_file'] += len(names) != 1
@@ -33,7 +41,8 @@ err['not_dict256'] += cp['dictionary_bytes'] != 256 << 20
 err['zip_over_ceiling'] += os.path.getsize(zp) >= CEIL
 head = z.open(names[0]).read(2); err['not_json_list'] += head != b'[\n'
 from r2ai.eval.validate import check_format  # noqa: E402  (native layout: '[' line, one object per line, ']' line)
-err['native_layout'] += len(check_format(z.read(names[0]).decode('utf-8'), 1200)) > 0
+n_queries = len(pd.read_parquet(QP, columns=['id']))
+err['native_layout'] += len(check_format(z.read(names[0]).decode('utf-8'), n_queries)) > 0
 
 
 def stream_rows():                                      # one row per line (compose format), parsed lazily
@@ -45,13 +54,13 @@ def stream_rows():                                      # one row per line (comp
 
 
 pairs = set()
-with zipfile.ZipFile(ZP).open('P1-vi+10.json') as f:
+with (zipfile.ZipFile(ZP).open('P1-vi+10.json') if use_p1 else open(os.devnull, 'rb')) as f:
     for line in f:
         line = line.strip().rstrip(b',')
         if line.startswith(b'{'):
             for c in json.loads(line)['relevant_chunks']:
                 pairs.add((c['doc_id'], hashlib.sha256(c['chunk_text'].encode()).digest()))
-q = pd.read_parquet('data/raw/query.parquet')
+q = pd.read_parquet(QP)
 corpus = set(pd.read_parquet('data/raw/links_corpus_vi_en_zh.parquet', columns=['id']).id.tolist())
 ct = pq.read_table(f'{CAN}/chunks_t256.parquet', columns=['doc_id', 'doc_ids'])
 d_all = ct['doc_id'].to_numpy(); _, first = np.unique(d_all, return_index=True)

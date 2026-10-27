@@ -14,6 +14,7 @@ Kho số liệu, hình và khung bài cho working notes (Road to AI Stage 3). Ch
 | `data/doc_count_curve.csv` | Doc F2 theo số doc/query |
 | `data/chunk_count_curve.csv` | Chunk F2 theo số chunk/query (n_c), precision biên |
 | `data/constants.csv` | hằng số pipeline chốt và nguồn hiệu chỉnh |
+| `data/noise_decisions.csv` | quyết định có \|Δ Final\| dưới ngưỡng ≈ 0,003 và lý do giữ / bỏ |
 | `figures/` | `lb_progress`, `fingerprint_auc`, `chunk_f2_by_size`, `doc_f2_by_count`, `ablation_free`, `pipeline` (PNG 200 dpi + PDF) |
 
 Dựng lại:

@@ -92,12 +92,13 @@ Mã `scripts/s41/fallback_public.py` (đi qua đúng các hàm của `newq build
 
 | nguồn hỏng | bản đo | doc (TB/query) | Doc F2 dự đoán | Δ so CH-rrf | LB (Vu) | hành động |
 |---|---|---:|---:|---:|---|---|
-| không (đối chứng) | CH-rrf | 220.436 (183,7) | 0,4253 | 0 | 0,4138 | bản chính |
-| C-max (hỏng / quá chậm) | **B0**: `build --no-cmax`, RRF cosine + 4B | 220.472 (183,7) | 0,4245 | −0,0008 | chờ | nộp B0 nếu C-max chưa xong ở T0 + 24 giờ |
+| không (đối chứng) | CH-rrf | 220.436 (183,7) | 0,4253 | 0 | 0,4138 (Doc 0,4413 P 0,2332 R 0,6575; Chunk 0,3863) | bản chính |
+| C-max (hỏng / quá chậm) | **B0**: `build --no-cmax`, RRF cosine + 4B | 220.472 (183,7) | 0,4245 | −0,0008 | **0,4101** (Doc 0,4354 P 0,2299 R 0,6513; Chunk 0,3847): −0,0037 | nộp B0 nếu C-max chưa xong ở T0 + 24 giờ |
 | 30% cặp 4B (phiên Kaggle dở / hết quota) | **IMP30**: xoá 30% (seed 2026), `build --impute-4b` | 289.469 (241,2) | 0,3984 | −0,027 | chờ | `build --impute-4b` |
-| toàn bộ 4B | **COS**: xoá 100%, `--impute-4b`, C-max giữ | 358.759 (299,0) | 0,3786 | −0,047 | chờ | xem ghi chú COS |
+| toàn bộ 4B | **COS**: xoá 100%, `--impute-4b`, C-max giữ | 358.759 (299,0) | 0,3786 | −0,047 | **0,3607** (Doc 0,3708 P 0,1621 R 0,7073; Chunk 0,3507): −0,0531 | `build --cos-only` (mục 6.2) |
 
 Ghi chú:
+* **LB (Vu 27/10):** mô hình đánh giá thấp mức mất: B0 Doc −0,0059 (dự đoán −0,0008), COS Doc −0,0705 (dự đoán −0,047). COS gần như không cắt: 299,0 doc/query (P10 = P50 = 300, chỉ 19 query dưới 300, min 101), P 0,16 / R 0,71; R của COS gần bằng recall trần của pool cosine top-300.
 * **B0:** khác CH-rrf 15.784 doc (7%), Doc F2 dự đoán gần như không đổi. LB public cũ khi bỏ C-max ở cấu hình còn Jina (free-v2 0,4101 → FREE-noCmax 0,4077): mất 0,0024 Final, Doc −0,0032.
 * **IMP30:** ánh xạ cosine → p_cal fit trên 70% cặp còn điểm (c 12,861, d −9,754). Cặp được suy điểm xếp cuối nguồn 4B, nhưng p_cal suy ra vẫn đủ cao để EF2 giữ nhiều doc hơn (241 doc/query): recall dự đoán tăng (0,589), precision giảm (0,199).
 * **COS:** `newq build --impute-4b` vẫn **từ chối** khi còn dưới 1.000 cặp có 4B (không fit được ánh xạ). Nhánh này đi bằng `newq build --cos-only` (Vu duyệt 27/10): không đọc điểm 4B nào, mọi cặp lấy p_cal từ ánh xạ ghim trong config riêng `configs/s41-private-fallback-cos.json` (xem bên dưới). Nguồn 4B trong RRF thành hằng, nên RRF chỉ còn cosine + C-max; EF2 giữ gần cả pool (299 doc/query, chạm trần 300).

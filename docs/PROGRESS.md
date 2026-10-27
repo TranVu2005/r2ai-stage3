@@ -1,8 +1,9 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-27 08:10 (UTC+7)
-- Model thực hiện: Claude Opus 5.5 (S41)
-- Commit HEAD đã kiểm trước cập nhật này: `f9c56ca`, nhánh `feat/s41` (tách từ `feat/s40-private` `8201378`)
+- Cập nhật: 2026-10-27 14:00 (UTC+7)
+- Model thực hiện: Claude Opus 5.5 (S42, working notes)
+- Commit HEAD đã kiểm trước cập nhật này: `ba9850c`, nhánh `docs/working-notes` (tách từ `feat/s41` `ba9850c`)
+- **S42 27/10 (docs/working-notes/):** khung working notes + kho số liệu (CSV LB đầy đủ, ablation, độ phủ theo host đo trên dữ liệu cuối: vi 97,70% / zh 94,80% / en 99,73% good, fingerprint, đường cong chunk/doc) + 6 hình matplotlib; chưa viết văn, chờ Vu trả lời ngôn ngữ/template/tác giả/hạn (`docs/working-notes/open-questions.md`). Chỉ đọc, không GPU, không nộp.
 - **S41 27/10 sáng (docs/s41.md):** trên nền FREE-noJina (doc giữ nguyên), validator ok, chưa nộp: CH-rrf 100.651.136 B `b12b8591…08c8` (T 1536), CH-cmax 102.599.825 B `7feb5ff5…bd58` (T 1605), CH-ef2 100.924.856 B `3c636312…05b0` (T 1536), CH-sel2 99.021.212 B `ebaa2013…9bca` (θ P4B 0,7786, 11.456 doc chia 2 nửa); FREE-noJina-D400 (hiệu chỉnh cũ, 216 doc/query) 99.554.424 B `1b5b9795…4fc4`. Dừng chuỗi cut theo LB (cut150 0,4104, cut130 0,4040 < 0,4111).
 - **S41 27/10 (docs/s41.md):** chuỗi số doc/query trên FREE-noJina với (a, b, s) 18 số, λ toàn cục: FREE-cut150 100.778.859 B `18336407…48b9`, FREE-cut130 90.324.391 B `c4f76e07…e9cc` (compose đủ), FREE-cut110-sub 76.500.136 B `519296c6…cf9d`, FREE-cut90-sub 63.409.062 B `05980432…b1d2` (lọc từ JSON cut150, chỉ để đo Doc); validator ok cả bốn, chưa nộp. Doc F2 dự đoán (ngoại suy) 0,4750 / 0,4918 / 0,4989 / 0,4882. Mở rộng alias: không có đòn bẩy (thiếu 1 ID).
 - **S40 27/10:** fit lại (a, b, s) trên đủ 18 số LB Doc P/R/F2: 1,585 / −2,647 / 1,654 (RMSE 0,0042); recal2 chọn 110,4 doc/query, ngoài [160, 200], không dựng ZIP; recal 26/10 không nộp. `newq build --impute-4b`: cặp thiếu 4B lấy p_cal từ ánh xạ cosine toàn cục, xếp cuối nguồn 4B; diễn tập 30% thiếu vẫn ra ZIP hợp lệ, Doc F2 0,3886 so với 0,4188 khi đủ. D400 chờ Kaggle.
@@ -634,6 +635,7 @@ Cập nhật 2026-10-23 13:10 (UTC+7), Claude Sonnet 5.5, HEAD kiểm trước c
 
 | Thời gian (UTC+7) | Ai | Thay đổi |
 |---|---|---|
+| 2026-10-27 14:00 | Claude Opus 5.5 | S42: `docs/working-notes/` (outline, open-questions, 7 CSV, 6 hình, `scripts/build_coverage.py`, `scripts/make_figures.py`); chưa viết văn, chưa nộp. |
 | 2026-10-27 01:10 | Claude Opus 5.5 | S40: C-max D400 xong (71.270 cặp); refit p_cal 18 số LB (recal2 110,4 doc/query, không ZIP); `newq --impute-4b` + test, diễn tập drop 30% (ZIP `9cd66e3c…61a1`, validator ok); kế hoạch: điểm dừng hết quota dùng `--impute-4b`. |
 | 2026-10-26 23:25 | Claude Opus 5.5 | S40: canon kiểm (1.738 / 208.876 chunk khác text, P/R trùng hợp lý); kế hoạch private chỉ Kaggle (`release plan` 16,0 giờ); D400 xuất gói 4B 70.116 cặp + C-max 71.270 cặp (`scripts/s40/d400_export.py`, `run_d400_cmax.ps1`, `d300_cmax.py` nhận tham số); fit lại p_cal (`scripts/s40/refit_pcal.py`), `apply` nhận `a` / `b` / `s_free`; FREE-noJina-recal dựng xong, chưa nộp. Máy khởi động lại khoảng 22:28 làm chết compose recal và C-max D400, đã chạy lại (C-max tiếp từ phần 12/103). |
 | 2026-10-26 13:15 | Claude Opus 5.5 | S40: LB (Vu) noJina 0,4111 / noCmax 0,4077 / nowin 0,4070 / FREE-split T1536 0,4103 → pipeline private chốt cosine + 4B + C-max, không Jina, full body + w768; `newq` mặc định không Jina, ghim SHA đầu vào (`configs/s40-newq-pins.json`, `ledger.json`); C-max tất định (lệch free-v2 do ghép batch bf16); diễn tập đạt theo F2 kỳ vọng (chênh −0,0004); FREE-noJina-canon đang dựng; kế hoạch private viết lại. |

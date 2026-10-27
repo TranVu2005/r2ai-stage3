@@ -2,6 +2,7 @@
 
     python -m r2ai.s41.kfit fit   --out out/runs/s41/kfit          # features, 5-fold CV (ridge, small GBM), out-of-fold K_hat
     python -m r2ai.s41.kfit build --out out/runs/s41/kfit          # FREE-Kfit docsel + carriers (refused when the best CV R2 < 0.2)
+    python -m r2ai.s41.kfit report --out out/runs/s41/kfit         # per-fold R2 / Spearman, held-out permutation importance
 
 Target: K_q = len(relevant_docs) of P1-vi+10 for the 1,200 public queries (reads public files ON PURPOSE; the private run would use the
 fitted model on its own free frame). Features come only from the free frame a new query set also has (the FREE-noJina pool top-300 in
@@ -174,6 +175,34 @@ def fit(out: Path) -> dict[str, Any]:
     return res
 
 
+def report(out: Path) -> dict[str, Any]:
+    """Per-fold R2 / Spearman of the out-of-fold K_hat (same folds as ``fit``) and the feature importance measured on the held-out fold
+    (permutation, 5 repeats, mean over folds), for both models."""
+    from scipy.stats import spearmanr
+    from sklearn.inspection import permutation_importance
+    from sklearn.metrics import r2_score
+    from sklearn.model_selection import KFold
+
+    feat = pd.read_parquet(out / "features.parquet")
+    with open(out / "model.pkl", "rb") as f:
+        cols = pickle.load(f)["columns"]
+    x, y = feat[cols].to_numpy(float), feat.k_q.to_numpy(float)
+    res: dict[str, Any] = {}
+    for name, make in models().items():
+        folds, imp = [], np.zeros(len(cols))
+        for train, test in KFold(5, shuffle=True, random_state=SEED).split(x):
+            m = make().fit(x[train], y[train])
+            pred = m.predict(x[test])
+            folds.append({"r2": float(r2_score(y[test], pred)), "spearman": float(spearmanr(y[test], pred).statistic)})
+            imp += permutation_importance(m, x[test], y[test], n_repeats=5, random_state=SEED).importances_mean / 5
+        top = sorted(zip(cols, imp), key=lambda kv: -kv[1])[:10]
+        res[name] = {"folds": folds, "r2_mean": float(np.mean([f["r2"] for f in folds])), "spearman_mean": float(np.mean([f["spearman"] for f in folds])),
+                     "oof": scores(y, feat[f"oof_{name}"].to_numpy(float)),
+                     "importance_top10": [{"feature": c, "r2_drop": float(v), "corr_k_q": float(np.corrcoef(feat[c], y)[0, 1])} for c, v in top]}
+    newq.atomic_json(out / "report.json", res)
+    return res
+
+
 def solve_c(k_hat: dict[int, float], cap: dict[int, int], total: int) -> tuple[float, dict[int, int]]:
     """c whose clip(round(c k_hat), 1, cap) sums closest to ``total`` (the sum grows with c; bisection)."""
     keep = lambda c: {q: int(min(cap[q], max(1, round(c * v)))) for q, v in k_hat.items()}     # noqa: E731
@@ -218,13 +247,13 @@ def build(out: Path, name: str, force: bool) -> dict[str, Any]:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("step", choices=("fit", "build"))
+    parser.add_argument("step", choices=("fit", "build", "report"))
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--name", default=NAME)
     parser.add_argument("--force", action="store_true", help="build even when the CV R2 < 0.2 (not without Vu)")
     args = parser.parse_args(argv)
     out = args.out.resolve()
-    res = fit(out) if args.step == "fit" else build(out, args.name, args.force)
+    res = fit(out) if args.step == "fit" else report(out) if args.step == "report" else build(out, args.name, args.force)
     print(json.dumps(res, indent=1, ensure_ascii=False, default=str))
     return 0
 

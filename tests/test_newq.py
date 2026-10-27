@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -114,3 +115,20 @@ def test_build_cos_only_excludes_impute_and_drop(tmp_path):
         newq.build(tmp_path, None, True, False, False, 1, impute_4b=True, cos_only=True)
     with pytest.raises(SystemExit):
         newq.build(tmp_path, None, True, False, False, 1, drop_4b=0.3, cos_only=True)
+
+
+def test_cos_k_config_and_keep():
+    cos, k150 = newq.load_config(newq.COS_CONFIG), newq.load_config(Path(str(newq.COS_K_CONFIG).format(k=150)))
+    assert k150["cos_k"] == 150 and k150["impute_4b"] == cos["impute_4b"] and all(k150[k] == cos[k] for k in newq.SELECTION_KEYS)
+    with pytest.raises(SystemExit):
+        newq.cos_k_keep(k150, 100)
+
+    class Frame:
+        qids = [1, 2]
+        order = {1: list(range(300)), 2: list(range(90))}
+    assert newq.cos_k_keep(k150, 150)({"frame": Frame()}) == {1: 150, 2: 90}
+
+
+def test_build_cos_k_excludes_impute(tmp_path):
+    with pytest.raises(SystemExit):
+        newq.build(tmp_path, None, True, False, False, 1, impute_4b=True, cos_k=150)

@@ -106,7 +106,7 @@ Ghi chú:
   | bản | ZIP | B | SHA256 | T | chunk (cửa sổ) | validator |
   |---|---|---:|---|---:|---|---|
   | B0 | `out/runs/s41/fallback/B0/compose/FB-B0-full+w768-t1536.zip` | 98.383.174 | `d2f234e992e18a202f7323d78142f96283f17bae167a3460488598a0fedd0d29` | 1536 | 207.881 (32.992) | ok, 0 carrier bị bỏ |
-  | IMP30 | compose 19:00 | | | | | |
-  | COS | compose 19:00 | | | | | |
+  | IMP30 | `out/runs/s41/fallback/IMP30/compose/FB-IMP30-full+w768-t1536.zip` | 97.989.849 | `ba25768d8d4b588dbf21490b022cf8bb676bdbc2b0d8d7b7a869886498259ea0` | 1536 | 207.825 (33.222) | ok, 0 carrier bị bỏ |
+  | COS | `out/runs/s41/fallback/COS/compose/FB-COS-full+w768-t1536.zip` | 99.424.114 | `1c5600bbd54b80fc2095927d583cc37635b0920940503b172feda0b270790fc1` | 1536 | 207.939 (33.457) | ok, 0 carrier bị bỏ |
 
-  IMP30 và COS: `VARIANTS="IMP30 COS" bash scripts/s41/run_fallback.sh` (mỗi bản khoảng 45 phút; B0 mất 44,8 phút).
+  Driver `scripts/s41/run_fallback.sh` (tuần tự, log `out/runs/s41/fallback/fallback.log`): B0 44,8 phút, IMP30 43,5 phút, COS 44,0 phút.

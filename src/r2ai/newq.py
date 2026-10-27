@@ -784,12 +784,17 @@ def choose_carriers(sel: pd.DataFrame, rule: dict[str, Any], queries: int) -> tu
 
 
 def apply_selection(pools: dict[int, list[dict[str, Any]]], jina: dict, cmax: dict, cfg: dict[str, Any], rrf_keys: Sequence[str],
-                    missing_last: bool, name: str, apply_dir: Path) -> dict[str, Any]:
+                    missing_last: bool, name: str, apply_dir: Path, keep_fn=None) -> dict[str, Any]:
     """``select`` + carriers, then ``perq-``, ``carriers-``, ``pcal-``, ``docsel-``, ``keep-<name>`` in ``apply_dir`` (the part of ``build``
-    before compose; ``scripts/s41/regress_public.py`` runs it on the 1,200 public queries)."""
+    before compose; ``scripts/s41/regress_public.py`` runs it on the 1,200 public queries). ``keep_fn(select result) -> {query: k}``
+    replaces the EF2 cut (S41 probe ``r2ai.s41.kfit``; the docs are still the top ``k`` of the RRF order)."""
+    from r2ai.s36 import cal
     from r2ai.s36.build import docsel_writer
 
     res = select(pools, jina, cmax, cfg, rrf_keys, missing_last)
+    if keep_fn is not None:
+        res["keep"] = keep_fn(res)
+        res["chosen"] = cal.chosen_rows(res["frame"], res["keep"])
     frame, calibrated, keep, chosen = res["frame"], res["calibrated"], res["keep"], res["chosen"]
     perq = pd.DataFrame([{"query_id": q, "k": int(keep[q]), "tp": float(calibrated.p[q][: keep[q]].sum()), "g": float(calibrated.g[q])} for q in frame.qids])
     perq["f2"] = 5 * perq.tp / (4 * perq.g + perq.k)

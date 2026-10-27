@@ -1,0 +1,19 @@
+name,value,meaning,fitted_on,source
+a,0.5298075151496865,slope of p_cal = sigmoid(a logit(P4B) + b),3 aggregate public Doc P (J4-K40 0.376; K4-thr-C 0.2346; J3-thrC 0.2357),configs/s41-private-final.json; docs/s36-fuse4.md:133
+b,-1.40969757276664,intercept of p_cal,same as a,configs/s41-private-final.json
+s_free,1.7405181516323944,global scale of expected gold count G_q in the free frame,1 aggregate public Doc F2 (FUSE4-free 0.4104),configs/s41-private-final.json; docs/s36-fuse4.md:133
+g_depth,211,cosine depth for G_q = s_free (sum p_cal top-211 + tail),design choice (pool13 era),configs/s41-private-final.json
+depth (D),300,candidate pool per query (cosine top-300 of corpus),LB ablation (D400 worse),configs/s41-private-final.json; docs/s41.md
+keep,400,cosine top-400 kept before merging 120ask,design,configs/s41-private-final.json
+rrf_k,60,RRF constant 1/(k + rank),standard,configs/s41-private-final.json
+t_c,0.2030746281894702,P4B threshold of the free frame (handoff),inherited from 120A-free-v2,configs/s41-private-final.json
+rho,0.7937,CR-fair share: carriers per query = ceil(rho |D_q|),solved for 175.548 carriers total,docs/s41.md
+carrier target,146.29 per query (175.548 total),total chunk-carrying docs,inherited (EF2-cut-p4b t1907 budget),configs/s41-private-final.json
+T,1536,body length above which a 768-token window is added (FULL_MIN_T floor),searched under ZIP ceiling,src/r2ai/s38/compose.py:86
+window W,768,window length in tokens (BGE-M3 tokenizer),LB chunk-size probes,docs/s38-chunk-metric-v2.md
+ZIP limit,102600000,BTC_CEILING 104857600 - RESERVE 2257600 bytes,design,src/r2ai/s38/compose.py:82-83
+THIN_JUNK_SHARE,0.5,carrier is thin if >= 50% of chunk is base64 lines or {placeholders},offline gap check,src/r2ai/s38/compose.py:80
+F2 marginal rule,F/(1+beta^2) = F2/5,add a doc only if its precision > current F2 / 5,derivation,docs/s41.md; submissions/LOG.md
+a (recalibrated; not used in private),1.5850,refit on 18 Doc P/R/F2 numbers,6 runs; extrapolated wrongly (cut150/130),docs/s40-private.md:7b
+b (recalibrated; not used in private),-2.6471,,,docs/s40-private.md:7b
+s (recalibrated; not used in private),1.6543,,,docs/s40-private.md:7b

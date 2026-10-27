@@ -1,0 +1,10 @@
+frame,run,doc_per_query,doc_f2,doc_p,doc_r,derived,note,source
+free (D300),FREE-cut130,130.0,0.4311,0.2838,0.5598,,lambda cut; recalibrated a b s,docs/s41.md
+free (D300),FREE-cut150,150.0,0.4373,0.2627,0.5995,,lambda cut,docs/s41.md
+free (D300),FREE-noJina,183.7,0.4413,0.2332,0.6575,,EF2 cut old calibration,docs/s41.md
+free (D400),FREE-noJina-D400,216.0,0.4400,,,,depth 400 changes pool too,docs/s41.md
+P-A4 (doc-level),P-A4-K90,162.6,0.3811,,,,K = 0.9 K_q,reports/s26-retriever-fingerprint.md:5f
+P-A4 (doc-level),P-A4,180.7,0.3805,,,doc_f2=2*final-0.3689,K = K_q,reports/s26-retriever-fingerprint.md:5f
+P-A4 (doc-level),P-A4-K110,198.8,0.3787,,,doc_f2=2*final-0.3689,K = 1.1 K_q,reports/s26-retriever-fingerprint.md:5f
+fixed K,J4-K40,40,,0.376,,,top-40 RRF(cosine; 4B),docs/s36-fuse4.md:11
+organiser,BTC-baseline,38,0.5587,0.8805,0.5146,,about 30 (s33) or 38 (PROGRESS) doc/query,docs/PROGRESS.md:302; reports/s33-btc-baseline.md

@@ -1,0 +1,61 @@
+date,metric,run,final,doc_f2,doc_p,doc_r,chunk_f2,chunk_p,chunk_r,doc_per_query,derived,group,in_vu_table,description,source
+2026-10-13,v1,K80-v2,0.2334,0.2446,,,0.2222,,,,,history,yes,K80 LZMA corpus v2: 163.613 doc / 95.999 chunk vi,docs/PROGRESS.md:422
+2026-10-18,v1,V1-v+10,0.2683,0.2730,0.1516,0.4071,0.2636,,,,doc_f2=2*final-chunk_f2,history,yes,vi quota +10%,docs/PROGRESS.md:378
+2026-10-18,v1,P1,0.2822,0.2870,0.1582,0.4318,0.2773,0.1936,0.3644,150.1,,history,yes,P1 pipeline (BGE-M3 hybrid + rerank),docs/PROGRESS.md:15
+2026-10-18,v1,P1-vi+10,0.2834,0.2895,0.1521,0.4499,0.2773,0.1936,0.3644,180.7,doc_f2=2*final-chunk_f2,history,yes,P1 + vi quota +10% (P1-vi+20 also 0.2834),docs/PROGRESS.md:378; reports/s26-gold-structure.md:5
+2026-10-19,v1,P1-docrank,0.2937,0.2895,0.1521,0.4499,0.2978,0.2100,0.3883,180.7,doc = P1-vi+10,history,yes,P1-vi+10 docs; chunks reassigned by BGE-M3 doc-level cosine,reports/s26-retriever-fingerprint.md:5c
+2026-10-19,v1,P-A3-nc,0.3205,0.3332,,,0.3078,,,180.7,,history,yes,top-K_q by BGE-M3 doc-level (doc_text 512) on P1 pool,reports/s26-retriever-fingerprint.md:5c
+2026-10-19,v1,P-A3r-nc,0.3191,,,,,,,180.7,,history,no,RRF(P1 order; doc-level order),reports/s26-retriever-fingerprint.md:5c
+2026-10-20,v1,P-A4,0.3747,0.3805,,,0.3689,,,180.7,doc_f2=2*final-chunk_f2 (chunk = K90),doc_count,no,top-K_q doc-level on full 887k corpus,reports/s26-retriever-fingerprint.md:5f
+2026-10-20,v1,P-A4-K90,0.3750,0.3811,,,0.3689,0.2746,0.4649,162.6,,history,yes,P-A4 with K = 0.9 K_q (whole corpus),reports/s26-retriever-fingerprint.md:5f
+2026-10-20,v1,P-A4-K110,0.3738,0.3787,,,0.3689,,,198.8,doc_f2=2*final-chunk_f2 (chunk = K90),doc_count,no,K = 1.1 K_q,reports/s26-retriever-fingerprint.md:5f
+2026-10-20,v1,P-A4-nc120,0.3797,,,,0.3788,0.2523,0.5041,180.7,,chunk_count,no,n_c x1.2 (126.1 chunk/query),reports/s26-retriever-fingerprint.md:5h
+2026-10-20,v1,K90-nc140,0.3817,0.3811,,,0.3823,0.2331,0.5320,162.6,doc_f2=2*final-chunk_f2,history,yes,n_c x1.4 (146.3 chunk/query),reports/s26-retriever-fingerprint.md:5i
+2026-10-20,v1,K90-nc160,0.3819,,,,0.3819,0.2222,0.5452,162.6,,chunk_count,no,n_c x1.6 (158.8 chunk/query; body cut N=5652 chars),reports/s26-retriever-fingerprint.md:5i
+2026-10-21,v1,QRRF-nc140-ph,0.3940,,,,,,,,,history,yes,RRF(cosine; Qwen3-Reranker-0.6B) on pool13 + Pharmacity,docs/s31-strong-judge.md:41
+2026-10-21,v1,QRRF-pool16,0.3931,,,,,,,,,history,no,wider pool (1.6x),docs/s31-strong-judge.md:41
+2026-10-21,v1,QRRF-wq0.65,0.3933,,,,,,,,,history,no,weighted RRF,docs/s31-strong-judge.md:41
+2026-10-21,v1,J4-rrf-ph979,0.3997,0.3989,,,0.4005,,,,,history,yes,RRF(cosine; Qwen3-Reranker-4B),docs/PROGRESS.md:310
+2026-10-21,v1,J4-rrf3-ph979,0.3994,,,,,,,,,history,no,RRF(cosine; 4B; 0.6B),docs/PROGRESS.md:310
+2026-10-21,v1,K4-thr,0.4122,,,,,,,,,history,no,K_q' by 4B threshold,docs/PROGRESS.md:668
+2026-10-22,v1,K4-thr-C,0.4183,0.4139,0.2346,,0.4227,,,162.6,,history,yes,cut by probability; chunks P4B >= t_c (175.148 chunk),docs/s31-strong-judge.md:305; docs/s36-fuse4.md:11
+2026-10-22,v1,K4-free-p13,0.4096,0.4033,,,,,,,,history,no,adaptive depth capped at pool 211,docs/s31-strong-judge.md:305
+2026-10-23,v1,J3-thrC,0.4190,0.4161,0.2357,,0.4219,,,162.6,chunk_f2=2*final-doc_f2,history,yes,K4-thr-C + Jina v3.5 in RRF; date of LB not recorded in docs,docs/s38-chunk-metric-v2.md:13; docs/s36-fuse4.md:11
+2026-10-22,v1,J4-K40,,,0.376,,,,,40,,probe,yes,top-40 RRF(cosine; 4B) fixed K,docs/s36-fuse4.md:11
+2026-10-22,v1,JINA-K40,,,0.340,,,,,40,,probe,yes,top-40 by Jina v3.5 (Vu table; not found in docs),Vu table only
+2026-10-22,v1,BGR-K40-doc,,,0.343,,,,,40,,probe,yes,top-40 by bge-reranker-v2-m3 on doc text (Vu table; not found in docs),Vu table only
+2026-10-19,v1,EN-only-Q,0,,0,,,,,20,,probe,yes,20 PubMed en docs/query chosen by Qwen3-Reranker-0.6B,reports/s26-retriever-fingerprint.md:5
+2026-10-15,v1,E1,0.2648,0.2675,0.1553,0.3886,0.2620,0.1851,0.3402,,,probe,no,C1 + 1.837 en docs (bge-reranker logit >= 0.96): Doc R unchanged,reports/s26-gold-structure.md:3
+2026-10-22,v1,BTC-baseline,0.3764,0.5587,0.8805,0.5146,0.1941,,,38,final=(doc_f2+chunk_f2)/2,probe,yes,organiser baseline (BM25 + BGE-M3 + RRF + bge-reranker-v2-m3); chunk F2 only in Vu table,docs/PROGRESS.md:302; reports/s33-btc-baseline.md
+2026-10-23,v2,K4-thr-C-extD (full body),,,,,0.3594,0.225,0.469,,,chunk_size,yes,K4-thr-C chunks re-scored with metric v2 (old 0.4227),docs/s38-chunk-metric-v2.md:9
+2026-10-23,v2,CH-win768,,,,,0.3433,,,162.6,,chunk_size,yes,J3-thrC docs; 768-token window around best t256 chunk,docs/s38-chunk-metric-v2.md (LB lượt 1)
+2026-10-23,v2,CH-win384,,,,,0.1805,,,162.6,,chunk_size,yes,384-token window,docs/s38-chunk-metric-v2.md (LB lượt 1)
+2026-10-23,v2,CH-sec-1,,,,,0.0904,,,162.6,,chunk_size,yes,one structural section chunk (~190 tokens),docs/s38-chunk-metric-v2.md (LB lượt 1)
+2026-10-24,v2,CH-clean,,,,,0.3580,,,162.6,,chunk_size,yes,full body minus host boilerplate tail (Vu table; LB not found in docs),Vu table only
+2026-10-24,v2,CH-cap2048,,,,,0.3606,,,162.6,,chunk_size,yes,body > 2048 tokens cut to 2048 window (Vu table; LB not found in docs),Vu table only
+2026-10-24,v2,CH-full+w768-t1849,,,,,0.3636,,,162.6,,chunk_size,yes,full body + 768 window for bodies > 1849 tokens,docs/PROGRESS.md:282; docs/s38-chunk-metric-v2.md:124
+2026-10-23,v2,FUSE4-free (docread),,0.4104,0.2191,0.6091,,,,190.9,,doc_only,no,free frame 4 RRF sources; anchor of s_free,docs/s36-fuse4.md:243; docs/s40-private.md:7b
+2026-10-23,v2,FUSE4-thrC (docread),,0.4178,,,,,,162.6,,doc_only,no,thrC frame 4 RRF sources,docs/s36-fuse4.md:243
+2026-10-23,v2,EF2-cut-p4b (docread),,0.4209,,,,,,161.6,,doc_only,no,EF2 cut on P4B (model predicted 0.4206),docs/s36-fuse4.md:243
+2026-10-24,v2,EF2-cut-p4b-full+w768-t1907,0.3914,0.4209,,,0.3619,0.2213,0.4769,161.6,,history,yes,EF2-cut-p4b docs + full body + w768 (T 1907),docs/s36-fuse4.md:147
+2026-10-24,v2,EF2-free,0.3834,0.4184,0.226,0.6076,0.3484,0.2236,0.4554,,,history,yes,free frame (pool top-211 adaptive) + EF2 cut,docs/s36-fuse4.md:147
+2026-10-24,v2,CR-fair,0.3861,0.4184,,,0.3537,,,,doc = EF2-free,history,yes,carriers ceil(rho |D_q|) in P4B order (rho 0.7876),docs/s36-fuse4.md:184
+2026-10-24,v2,CR-swap,0.3839,0.4184,,,0.3493,,,,doc = EF2-free,history,yes,carriers swapped for extra windows,docs/s36-fuse4.md:184
+2026-10-25,v2,p4b-CRfair175,0.3918,0.4209,,,0.3628,,,161.6,,history,yes,EF2-cut-p4b + CR-fair (rho 0.9022) 175.549 carriers,docs/s36-fuse4.md:297
+2026-10-25,v2,120A-free-v0,0.4033,0.4344,0.2330,0.6387,0.3721,,,,,history,yes,EF2-free + 120ask (S37) + CR-fair 175.548,docs/s36-fuse4.md:186; docs/s40-private.md:7b
+2026-10-25,v2,120A-p4b-v0,0.4111,0.4394,,,0.3828,,,,,history,yes,p4b frame (pool top-n_q) + 120ask v0,docs/s36-fuse4.md:314
+2026-10-26,v2,120A-p4b-v3,0.4176,,,,,,,160.6,final = 0.4101 + 0.0075,history,yes,p4b frame + full 120ask + full Jina; Doc/Chunk not in docs,docs/s36-handoff-s30.md:3
+2026-10-26,v2,120A-free-v2,0.4101,0.4402,0.2335,0.6556,0.3800,,,183.8,,history,yes,free frame D=300 + 4 RRF sources,README_RELEASE.md; docs/s40-private.md:7b
+2026-10-26,v2,FREE-noJina,0.4111,0.4413,0.2332,0.6575,0.3808,0.2263,0.5278,183.7,,free_frame,yes,free-v2 without Jina (RRF cosine; 4B; C-max),docs/s41.md (LB 27/10)
+2026-10-26,v2,FREE-noCmax,0.4077,0.4370,0.2326,0.6505,0.3784,,,183.4,chunk_f2=2*final-doc_f2,free_frame,yes,free-v2 without C-max,docs/s40-private.md:7b; docs/s41.md (ablation)
+2026-10-26,v2,FREE-nowin,0.4070,0.4402,,,0.3738,,,183.8,chunk_f2=2*final-doc_f2,free_frame,yes,full body only (no 768 window),docs/s41.md (ablation)
+2026-10-26,v2,FREE-split-T1536,0.4103,0.4402,,,0.3804,,,183.8,,free_frame,yes,bodies > 1536 tokens split into <= 1536 pieces (R +0.018; P -0.012),docs/s40-private.md:4
+2026-10-26,v2,FREE-noJina-canon,0.4111,0.4413,0.2332,0.6575,0.3808,0.2263,0.5278,183.7,identical to FREE-noJina,free_frame,yes,canonical text instead of P1 chunk text,docs/s40-private.md:6
+2026-10-27,v2,FREE-cut150,0.4104,0.4373,0.2627,0.5995,0.3834,0.2303,0.5250,150.0,,free_frame,yes,EF2 x global lambda (recalibrated a b s) 150 doc/query,docs/s41.md (LB 27/10)
+2026-10-27,v2,FREE-cut130,0.4040,0.4311,0.2838,0.5598,0.3770,0.2447,0.4934,130.0,,free_frame,yes,130 doc/query,docs/s41.md (LB 27/10)
+2026-10-27,v2,FREE-noJina-D400,0.4037,0.4400,,,0.3674,,,216.0,chunk_f2=2*final-doc_f2,free_frame,yes,pool depth 400 (old calibration),docs/s41.md (LB 27/10 chiều)
+2026-10-27,v2,CH-cmax,0.4024,0.4413,,,0.3635,,,183.7,chunk_f2=2*final-doc_f2,free_frame,yes,CR-fair carriers ordered by C-max (T 1605),docs/s41.md (LB 27/10 chiều)
+2026-10-27,v2,CH-sel2,0.4113,0.4413,,,0.3813,,,183.7,chunk_f2=2*final-doc_f2,free_frame,yes,11.456 carriers P4B >= 0.7786 split in two halves,docs/s41.md (LB 27/10 chiều)
+2026-10-27,v2,CH-ef2,0.4136,0.4413,,,0.3859,,,183.7,chunk_f2=2*final-doc_f2,free_frame,yes,RRF order; carriers per query maximise expected F2,docs/s41.md (LB 27/10 chiều)
+2026-10-27,v2,CH-rrf,0.4138,0.4413,0.2332,0.6575,0.3863,,,183.7,doc = FREE-noJina,free_frame,yes,FREE-noJina docs + CR-fair carriers in RRF order (private config),docs/s41.md; configs/s41-private-final.json
+2026-10-27,v2,FREE-Kfit,0.3994,0.4253,,,0.3735,,,183.7,doc_f2 = 0.4413 - 0.016 (Vu; rounded); chunk_f2=2*final-doc_f2,free_frame,yes,doc count per query = learned K_q (GBM on free-frame features; same total docs as CH-rrf),Vu 27/10; feat/s41:docs/s41.md (FREE-Kfit)

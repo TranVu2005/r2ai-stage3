@@ -1,0 +1,19 @@
+date,decision,control,variant,delta_final,delta_doc_f2,delta_chunk_f2,in_noise_band,kept,reason,source
+2026-10-19,doc-level order vs RRF with P1 order,P-A3-nc 0.3205,P-A3r-nc 0.3191,-0.0014,,,yes,P-A3-nc (pure doc-level),simpler; consistent with fingerprint (doc-level AUC 0.924),reports/s26-retriever-fingerprint.md:5c
+2026-10-20,doc count K,P-A4-K90 0.3750,P-A4 (K_q) 0.3747,-0.0003,-0.0006,0,yes,K90,highest of three; K110 0.3738 (-0.0012) same direction,reports/s26-retriever-fingerprint.md:5f
+2026-10-20,chunk count n_c,K90-nc140 0.3817,K90-nc160 0.3819,+0.0002,0,-0.0004,yes,nc140,marginal precision 7.7% at breakeven 7.6%; nc160 needs body cut and ZIP near ceiling,reports/s26-retriever-fingerprint.md:5i
+2026-10-21,0.6B pool width,QRRF-nc140-ph 0.3940,QRRF-pool16 0.3931,-0.0009,,,yes,pool13,cheaper (no tail scoring),docs/s31-strong-judge.md:41
+2026-10-21,0.6B weighted RRF,QRRF-nc140-ph 0.3940,QRRF-wq0.65 0.3933,-0.0007,,,yes,unweighted RRF,no extra parameter,docs/s31-strong-judge.md:41
+2026-10-21,0.6B as third RRF source,J4-rrf-ph979 0.3997,J4-rrf3-ph979 0.3994,-0.0003,,,yes,drop doc-level 0.6B; no 8B run,cost; later re-entered as chunk-level C-max (FREE-noCmax -0.0024),docs/PROGRESS.md:310
+2026-10-24,carrier rule CR-fair,EF2-free 0.3834,CR-fair 0.3861,+0.0027,0,+0.0053,yes,CR-fair (default from here on),no extra cost; chunk side +0.0053,docs/s36-fuse4.md:184
+2026-10-24,carrier swap for windows,CR-fair 0.3861,CR-swap 0.3839,-0.0022,0,-0.0044,yes,CR-fair,simpler,docs/s36-fuse4.md:184
+2026-10-25,CR-fair on p4b frame,EF2-cut-p4b t1907 0.3914,p4b-CRfair175 0.3918,+0.0004,0,+0.0009,yes,either,no measurable change,docs/s36-fuse4.md:297
+2026-10-26,drop Jina,120A-free-v2 0.4101,FREE-noJina 0.4111,+0.0010,+0.0011,+0.0008,yes,drop Jina,cost (GPU 2.63 query/min measured; 1.200 queries about 7.6 h; repeated OOM on 6 GB) and non-determinism (listwise: a score depends on the 9 block mates and the seed; largest source of rehearsal mismatch 729/887 docs),docs/s40-private.md:3; docs/PROGRESS.md (S37 Jina bù)
+2026-10-26,drop C-max,120A-free-v2 0.4101,FREE-noCmax 0.4077,-0.0024,-0.0032,-0.0016,yes,keep C-max,Doc F2 -0.0032 (above band on the doc side); deterministic with fixed batching; 10 h GPU fits the private window,docs/s40-private.md:3; docs/s41.md
+2026-10-26,drop 768 window,120A-free-v2 0.4101,FREE-nowin 0.4070,-0.0031,+0.0000,-0.0062,edge,keep window,at the band edge; Chunk -0.0062,docs/s41.md
+2026-10-26,split long bodies,120A-free-v2 0.4101,FREE-split T1536,+0.0002,+0.0000,+0.0004,yes,not adopted,no gain; more chunks,docs/s40-private.md:4
+2026-10-26,canonical text instead of P1,FREE-noJina 0.4111,FREE-noJina-canon 0.4111,0,0,0,yes,canonical,required for new queries (P1 text does not exist for them),docs/s40-private.md:6
+2026-10-27,fewer docs (lambda),FREE-noJina 0.4111,FREE-cut150 0.4104,-0.0007,-0.0040,+0.0026,yes,old calibration (184 doc/query),cut130 (-0.0071) confirms the direction,docs/s41.md
+2026-10-27,selective split,FREE-noJina 0.4111,CH-sel2 0.4113,+0.0002,0,+0.0005,yes,not adopted,no gain,docs/s41.md
+2026-10-27,carrier order RRF,FREE-noJina 0.4111,CH-rrf 0.4138,+0.0027,0,+0.0055,yes,CH-rrf (private config),no extra cost; same docs; chosen although inside the band,docs/s41.md
+2026-10-27,carrier count EF2,CH-rrf 0.4138,CH-ef2 0.4136,-0.0002,0,-0.0004,yes,CH-rrf,simpler (one global rho),docs/s41.md

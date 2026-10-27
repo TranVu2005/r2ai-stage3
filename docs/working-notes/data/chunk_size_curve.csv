@@ -1,0 +1,8 @@
+variant,docs,rule,mean_metric_tokens,mean_raw_tokens,median_raw_tokens,chunk_f2,chunk_p,chunk_r,note,source
+CH-sec-1,J3-thrC,one structural section chunk,190.5,192.0,207,0.0904,,,,docs/s38-chunk-metric-v2.md
+CH-win384,J3-thrC,384-token window around best t256 chunk,334.2,337.1,359,0.1805,,,,docs/s38-chunk-metric-v2.md
+CH-win768,J3-thrC,768-token window around best t256 chunk,615.0,620.8,735,0.3433,,,,docs/s38-chunk-metric-v2.md
+CH-cap2048,J3-thrC,body > 2048 tokens cut to 2048 window,,1019,999,0.3606,,,LB only in Vu table,docs/s38-chunk-metric-v2.md (sizes); Vu table (LB)
+CH-clean,J3-thrC,full body minus boilerplate tail,,,,0.3580,,,LB only in Vu table; 25.391 carriers trimmed,docs/s38-chunk-metric-v2.md (sizes); Vu table (LB)
+full body (K4-thr-C-extD),K4-thr-C,full body,1045.5,1056,999,0.3594,0.225,0.469,docs = K4-thr-C not J3-thrC (9.35 doc/query differ),docs/s38-chunk-metric-v2.md:9
+CH-full+w768-t1849,J3-thrC,full body + 768 window if body > 1849 (190.174 chunk),,,,0.3636,,,,docs/PROGRESS.md:282

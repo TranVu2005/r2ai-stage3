@@ -1,0 +1,31 @@
+family,variant,unit,doc_tokens,query,auc_best,auc_minrank,kept_at_minrank1,r_prec,note,source
+sparse,BGE-M3 sparse max-chunk,chunk,256,vi,0.559,0.555,0.102,,,reports/s26-retriever-fingerprint.md:3
+lexical,BM25 jieba title+body,doc,,zh (translated),0.617,0.695,0.203,,,reports/s26-retriever-fingerprint.md:3
+dense-other,multilingual-e5-small title repeated + doc 512,doc,512,vi,0.674,0.690,0.266,,,reports/s26-retriever-fingerprint.md:3
+hybrid,z 0.7 dense + 0.3 sparse,chunk,256,vi,0.618,0.701,0.178,,,reports/s26-retriever-fingerprint.md:3
+sparse,BGE-M3 sparse max-chunk,chunk,256,zh (translated),0.679,0.704,0.205,,,reports/s26-retriever-fingerprint.md:3
+dense,BGE-M3 dense max-chunk,chunk,256,zh (translated),0.736,0.775,0.330,,,reports/s26-retriever-fingerprint.md:3
+dense,BGE-M3 dense title only,title,,vi,0.757,0.782,0.460,0.351,,reports/s26-retriever-fingerprint.md:3
+dense,BGE-M3 dense first chunk,chunk,256,vi,0.757,0.783,0.461,,,reports/s26-retriever-fingerprint.md:3
+dense,BGE-M3 dense title repeated + doc 512,doc,512,zh (translated),0.769,0.815,0.371,,,reports/s26-retriever-fingerprint.md:3
+dense,BGE-M3 dense max-chunk t256,chunk,256,vi,0.796,0.833,0.433,,,reports/s26-retriever-fingerprint.md:3
+dense,BGE-M3 dense mean-chunk,chunk,256,vi,0.795,0.835,0.521,,,reports/s26-retriever-fingerprint.md:3
+dense,BGE-M3 dense mean top-2 chunk,chunk,256,vi,0.798,0.853,0.462,,,reports/s26-retriever-fingerprint.md:3
+dense-length,BGE-M3 dense title repeated + doc 128,doc,128,vi,0.801,0.878,0.480,0.416,,reports/s26-retriever-fingerprint.md:3
+dense-length,BGE-M3 dense title repeated + doc 256,doc,256,vi,0.818,0.904,0.531,0.451,,reports/s26-retriever-fingerprint.md:3
+dense-length,BGE-M3 dense title repeated + doc 512,doc,512,vi,0.825,0.913,0.528,0.462,,reports/s26-retriever-fingerprint.md:3
+dense-length,BGE-M3 dense title repeated + doc 1024,doc,1024,vi,0.823,0.906,0.516,0.450,,reports/s26-retriever-fingerprint.md:3
+dense-length,BGE-M3 dense title repeated + doc 2048,doc,2048,vi,0.822,0.904,0.514,0.450,,reports/s26-retriever-fingerprint.md:3
+best,BGE-M3 dense doc_text 512,doc,512,vi,0.833,0.924,0.548,0.493,best variant,reports/s26-retriever-fingerprint.md:3
+dense-other,Qwen3-Embedding-4B (NF4) doc_text 512 (10k subsample),doc,512,vi,0.756,0.757,0.545,,BGE-M3 on same subsample: 0.828 / 0.915,reports/s26-retriever-fingerprint.md:3
+extractor,current extractor (domain selectors + generic; title + body),doc,512,vi,0.8325,0.9240,0.548,0.493,,reports/s26-retriever-fingerprint.md:5g
+extractor,trafilatura default + title,doc,512,vi,0.8297,0.9146,0.543,0.470,,reports/s26-retriever-fingerprint.md:5g
+extractor,newspaper4k + title,doc,512,vi,0.8230,0.8938,0.502,0.435,,reports/s26-retriever-fingerprint.md:5g
+extractor,trafilatura default,doc,512,vi,0.8131,0.8805,0.516,0.426,,reports/s26-retriever-fingerprint.md:5g
+extractor,BeautifulSoup get_text whole page,doc,512,vi,0.8177,0.8789,0.532,0.434,,reports/s26-retriever-fingerprint.md:5g
+extractor,newspaper4k,doc,512,vi,0.8051,0.8739,0.473,0.409,,reports/s26-retriever-fingerprint.md:5g
+extractor,html2text,doc,512,vi,0.7869,0.8672,0.537,0.441,,reports/s26-retriever-fingerprint.md:5g
+extractor,BeautifulSoup get_text body only,doc,512,vi,0.7828,0.8668,0.511,0.413,,reports/s26-retriever-fingerprint.md:5g
+extractor,trafilatura favor_recall,doc,512,vi,0.8054,0.8621,0.468,0.393,,reports/s26-retriever-fingerprint.md:5g
+extractor,readability-lxml,doc,512,vi,0.7911,0.8568,0.457,0.402,,reports/s26-retriever-fingerprint.md:5g
+extractor,jusText,doc,512,vi,0.6910,0.7394,0.498,0.422,,reports/s26-retriever-fingerprint.md:5g

@@ -98,7 +98,7 @@ Mã `scripts/s41/fallback_public.py` (đi qua đúng các hàm của `newq build
 | toàn bộ 4B | **COS**: xoá 100%, `--impute-4b`, C-max giữ | 358.759 (299,0) | 0,3786 | −0,047 | chờ | xem ghi chú COS |
 
 Ghi chú:
-* **B0:** khác CH-rrf 15.784 doc (7%), Doc F2 dự đoán gần như không đổi. LB public cũ của cấu hình có Jina (FREE-noCmax) mất 0,0034 Final, chủ yếu ở Doc.
+* **B0:** khác CH-rrf 15.784 doc (7%), Doc F2 dự đoán gần như không đổi. LB public cũ khi bỏ C-max ở cấu hình còn Jina (free-v2 0,4101 → FREE-noCmax 0,4077): mất 0,0024 Final, Doc −0,0032.
 * **IMP30:** ánh xạ cosine → p_cal fit trên 70% cặp còn điểm (c 12,861, d −9,754). Cặp được suy điểm xếp cuối nguồn 4B, nhưng p_cal suy ra vẫn đủ cao để EF2 giữ nhiều doc hơn (241 doc/query): recall dự đoán tăng (0,589), precision giảm (0,199).
 * **COS:** `newq build --impute-4b` hiện **từ chối** khi còn dưới 1.000 cặp có 4B (không fit được ánh xạ). Bản đo dùng ánh xạ fit trên toàn bộ 4B public (c 12,890, d −9,773). Muốn dùng được ở private cần ghim hai hằng số này vào config. Nguồn 4B trong RRF thành hằng, nên RRF chỉ còn cosine + C-max; EF2 giữ gần cả pool (299 doc/query, chạm trần 300).
 * ZIP và SHA: compose B0 bắt đầu 27/10 16:22; IMP30 và COS compose 19:00 (`VARIANTS="IMP30 COS" bash scripts/s41/run_fallback.sh`).

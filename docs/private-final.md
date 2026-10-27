@@ -101,4 +101,12 @@ Ghi chú:
 * **B0:** khác CH-rrf 15.784 doc (7%), Doc F2 dự đoán gần như không đổi. LB public cũ khi bỏ C-max ở cấu hình còn Jina (free-v2 0,4101 → FREE-noCmax 0,4077): mất 0,0024 Final, Doc −0,0032.
 * **IMP30:** ánh xạ cosine → p_cal fit trên 70% cặp còn điểm (c 12,861, d −9,754). Cặp được suy điểm xếp cuối nguồn 4B, nhưng p_cal suy ra vẫn đủ cao để EF2 giữ nhiều doc hơn (241 doc/query): recall dự đoán tăng (0,589), precision giảm (0,199).
 * **COS:** `newq build --impute-4b` hiện **từ chối** khi còn dưới 1.000 cặp có 4B (không fit được ánh xạ). Bản đo dùng ánh xạ fit trên toàn bộ 4B public (c 12,890, d −9,773). Muốn dùng được ở private cần ghim hai hằng số này vào config. Nguồn 4B trong RRF thành hằng, nên RRF chỉ còn cosine + C-max; EF2 giữ gần cả pool (299 doc/query, chạm trần 300).
-* ZIP và SHA: compose B0 bắt đầu 27/10 16:22; IMP30 và COS compose 19:00 (`VARIANTS="IMP30 COS" bash scripts/s41/run_fallback.sh`).
+* ZIP (chưa nộp):
+
+  | bản | ZIP | B | SHA256 | T | chunk (cửa sổ) | validator |
+  |---|---|---:|---|---:|---|---|
+  | B0 | `out/runs/s41/fallback/B0/compose/FB-B0-full+w768-t1536.zip` | 98.383.174 | `d2f234e992e18a202f7323d78142f96283f17bae167a3460488598a0fedd0d29` | 1536 | 207.881 (32.992) | ok, 0 carrier bị bỏ |
+  | IMP30 | compose 19:00 | | | | | |
+  | COS | compose 19:00 | | | | | |
+
+  IMP30 và COS: `VARIANTS="IMP30 COS" bash scripts/s41/run_fallback.sh` (mỗi bản khoảng 45 phút; B0 mất 44,8 phút).

@@ -1,19 +1,20 @@
 """A NEW query set on the free-v2 frame (S40, 26/10): the steps of ``120A-free-v2`` from the query texts alone.
 
-    python -m r2ai.newq prepare --queries q.parquet --run <dir> [--config configs/s40-newq-free-v2.json] [--device cuda]
+    python -m r2ai.newq prepare --queries q.parquet --run <dir> [--config configs/s41-private-final.json] [--device cuda]
     python -m r2ai.newq export-scoring --run <dir> [--parts-4b K]
     python -m r2ai.newq import-scores --run <dir> --source 4b --tag <tag> --scores scores-extra.parquet --report collect-extra-report.json
     python -m r2ai.newq import-scores --run <dir> --source cmax      (after scripts/s37/run_cmax.ps1 -Run <dir>/cmax)
     python -m r2ai.newq import-scores --run <dir> --source jina      (after scripts/s37/run_jina.ps1 -Run <dir>/jina)
     python -m r2ai.newq build --run <dir> [--name N] [--jina] [--no-cmax] [--rounds R]
     python -m r2ai.newq status --run <dir>
-    python -m r2ai.newq pins [--write]        # SHA256 of every corpus / scorer input against configs/s40-newq-pins.json
+    python -m r2ai.newq pins [--write]        # SHA256 of every corpus / scorer input against configs/s41-newq-pins.json
 
-Pipeline chốt cho private (Vu, 26/10, LB public: FREE-noJina 0,4111 > free-v2 0,4101): RRF over cosine / 4B / C-max, NO Jina. ``build`` and
+Pipeline chốt cho private (Vu 27/10, frozen; LB public CH-rrf 0,4138): RRF over cosine / 4B / C-max, NO Jina, CH-rrf carriers
+(``configs/s41-private-final.json``: CR-fair count, docs taken in RRF order). ``build`` and
 ``export-scoring`` leave Jina out unless ``--jina`` / ``--sources ...,jina`` asks for it.
 
 Input pinning (Vu, 26/10): every command first checks the SHA256 of every corpus / scorer file it may read against
-``configs/s40-newq-pins.json`` and of every run file it reads against ``<run>/ledger.json`` (written by the step that produced the file).
+``configs/s41-newq-pins.json`` and of every run file it reads against ``<run>/ledger.json`` (written by the step that produced the file).
 A missing file or a different SHA256 stops the command; nothing is searched elsewhere.
 
 Nothing here reads a file keyed by the 1,200 public query ids (S29 query vectors, pool.npz, pool13 / K_q, S31-S37 pair registries and scores,
@@ -32,7 +33,7 @@ Steps (each writes below ``--run``; a finished step is skipped when rerun, so a 
 3. ``import-scores`` checks and stores each source (4B per Kaggle part; C-max = max over the pair's chunk rows; Jina scores-all).
 4. ``build``        free frame: pool = top-``depth``, RRF k=60 over cosine / 4B / Jina / C-max (``--no-jina`` / ``--no-cmax`` leave the source out of
                     the RRF), p_cal = sigmoid(a logit(P4B) + b), G_q = s_free (sum p_cal over the cosine top-211 + tail), EF2 cut per query,
-                    CR-fair carriers (target = ``target_per_query`` x queries), docsel, then S38 compose ``full+w768`` (``--fit-carriers``,
+                    CR-fair carriers (target = ``target_per_query`` x queries; config ``carriers.order``: ``rank`` = CH-rrf, ``p4b`` = S36), docsel, then S38 compose ``full+w768`` (``--fit-carriers``,
                     T searched) with ``--query-set`` and the S26 validator on the new query ids.
 """
 from __future__ import annotations
@@ -52,7 +53,7 @@ import pyarrow.parquet as pq
 from r2ai import paths
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CONFIG = ROOT / "configs" / "s40-newq-free-v2.json"
+DEFAULT_CONFIG = ROOT / "configs" / "s41-private-final.json"   # S41 private config (CH-rrf carriers); s40-newq-free-v2.json = FREE-noJina
 PAIR_ID_BASE = 70_000_000         # pair ids of a new query set (S31 0..433,731 / 20,000,000+; S37 1,000,000+; S36 5,000,000+ / 6,000,000+; d300 C-max 60,000,000+)
 CMAX_ROW_BASE = 80_000_000        # C-max chunk rows
 SHARD_4B = 94_000                 # 4B shard pool-<94000 + part>.parquet
@@ -101,6 +102,9 @@ def load_config(path: Path | None) -> dict[str, Any]:
     for key in ("depth", "keep", "a", "b", "s_free", "g_depth", "t_c", "carriers"):
         if key not in cfg:
             raise SystemExit(f"config {path or DEFAULT_CONFIG}: missing {key}")
+    for rel, want in cfg.get("pins_sha256", {}).items():         # S41: the config pins the input-pin file itself
+        if not (ROOT / rel).exists() or sha256(ROOT / rel) != want:
+            raise SystemExit(f"config {path or DEFAULT_CONFIG}: {rel} missing or SHA256 differs from {want}")
     return cfg
 
 
@@ -111,7 +115,20 @@ def run_config(run: Path) -> dict[str, Any]:
 
 # ---------------------------------------------------------------------------------------------------------- input pinning
 
-PINS = ROOT / "configs" / "s40-newq-pins.json"
+PINS = ROOT / "configs" / "s41-newq-pins.json"   # S41: repo files keyed "repo:<path>" (any checkout); s40-newq-pins.json keyed one worktree
+
+
+def pin_key(path: Path) -> str:
+    """Absolute posix path; a file of this checkout is ``repo:<path relative to ROOT>``, so the pins hold in every worktree."""
+    path = path.resolve()
+    try:
+        return "repo:" + path.relative_to(ROOT).as_posix()
+    except ValueError:
+        return str(path).replace("\\", "/")
+
+
+def pin_path(key: str) -> Path:
+    return ROOT / key[5:] if key.startswith("repo:") else Path(key)
 
 
 def pin_targets() -> list[Path]:
@@ -131,8 +148,8 @@ def pin_targets() -> list[Path]:
 
 
 def write_pins() -> dict[str, Any]:
-    pins = {str(f.resolve()).replace("\\", "/"): sha256(f) for f in pin_targets()}
-    PINS.write_text(json.dumps({"note": "S40 r2ai.newq input pins (python -m r2ai.newq pins --write)", "files": pins}, indent=1) + "\n", encoding="utf-8")
+    pins = {pin_key(f): sha256(f) for f in pin_targets()}
+    PINS.write_text(json.dumps({"note": "S41 r2ai.newq input pins (python -m r2ai.newq pins --write)", "files": pins}, indent=1) + "\n", encoding="utf-8")
     return {"files": len(pins), "path": str(PINS)}
 
 
@@ -142,9 +159,9 @@ def check_pins(log=print) -> dict[str, Any]:
         raise SystemExit(f"{PINS} missing: run `python -m r2ai.newq pins --write` once, review and commit it")
     pins = json.loads(PINS.read_text(encoding="utf-8"))["files"]
     t0 = time.monotonic()
-    bad = [f"missing {f}" for f in pins if not Path(f).exists()]
-    bad += [f"SHA256 differs {f}" for f, h in pins.items() if Path(f).exists() and sha256(f) != h]
-    now = {str(f.resolve()).replace("\\", "/") for f in pin_targets()}
+    bad = [f"missing {f}" for f in pins if not pin_path(f).exists()]
+    bad += [f"SHA256 differs {f}" for f, h in pins.items() if pin_path(f).exists() and sha256(pin_path(f)) != h]
+    now = {pin_key(f) for f in pin_targets()}
     bad += [f"not pinned {f}" for f in sorted(now - set(pins))]
     if bad:
         raise SystemExit("input pins: " + "; ".join(bad[:10]) + (f" (+{len(bad) - 10})" if len(bad) > 10 else ""))
@@ -751,6 +768,52 @@ def select(pools: dict[int, list[dict[str, Any]]], jina: dict, cmax: dict, cfg: 
     return {"frame": frame, "calibrated": calibrated, "keep": keep, "chosen": cal.chosen_rows(frame, keep)}
 
 
+def choose_carriers(sel: pd.DataFrame, rule: dict[str, Any], queries: int) -> tuple[pd.DataFrame, dict[str, Any], int | None]:
+    """Carriers of a docsel (``query_id, doc_id, rank, p4b``). ``rule["order"]``: ``rank`` (S41 CH-rrf, the private default: CR-fair in the
+    docsel RRF order, ``r2ai.s41.carriers``) or ``p4b`` (S36 CR-fair, what FREE-noJina used; also when ``order`` is absent)."""
+    from r2ai.s36 import carriers as carrier_rules
+    from r2ai.s41 import carriers as s41_carriers
+
+    target = int(round(float(rule["target_per_query"]) * queries)) if "target_per_query" in rule else rule.get("target")
+    order = rule.get("order", "p4b")
+    if order == "p4b":
+        carriers, info = carrier_rules.select_carriers(sel, rule.get("rule", "fair"), target, rule.get("drop"), rule.get("rho"))
+    else:
+        carriers, info = s41_carriers.select(sel, rule.get("rule", "fair"), order, target)
+    return carriers, {**info, "order": order}, target
+
+
+def apply_selection(pools: dict[int, list[dict[str, Any]]], jina: dict, cmax: dict, cfg: dict[str, Any], rrf_keys: Sequence[str],
+                    missing_last: bool, name: str, apply_dir: Path, keep_fn=None) -> dict[str, Any]:
+    """``select`` + carriers, then ``perq-``, ``carriers-``, ``pcal-``, ``docsel-``, ``keep-<name>`` in ``apply_dir`` (the part of ``build``
+    before compose; ``scripts/s41/regress_public.py`` runs it on the 1,200 public queries). ``keep_fn(select result) -> {query: k}``
+    replaces the EF2 cut (S41 probe ``r2ai.s41.kfit``; the docs are still the top ``k`` of the RRF order)."""
+    from r2ai.s36 import cal
+    from r2ai.s36.build import docsel_writer
+
+    res = select(pools, jina, cmax, cfg, rrf_keys, missing_last)
+    if keep_fn is not None:
+        res["keep"] = keep_fn(res)
+        res["chosen"] = cal.chosen_rows(res["frame"], res["keep"])
+    frame, calibrated, keep, chosen = res["frame"], res["calibrated"], res["keep"], res["chosen"]
+    perq = pd.DataFrame([{"query_id": q, "k": int(keep[q]), "tp": float(calibrated.p[q][: keep[q]].sum()), "g": float(calibrated.g[q])} for q in frame.qids])
+    perq["f2"] = 5 * perq.tp / (4 * perq.g + perq.k)
+    atomic_parquet(perq, apply_dir / f"perq-{name}.parquet")
+    t_c = float(cfg["t_c"])
+    sel = pd.DataFrame([(q, int(r["doc_id"]), k, float(r["judge_score"])) for q, rows in chosen.items() for k, r in enumerate(rows, 1)],
+                       columns=["query_id", "doc_id", "rank", "p4b"])
+    sel["chunk"] = sel.p4b >= t_c
+    carriers, carrier_info, target = choose_carriers(sel, cfg["carriers"], len(frame.qids))
+    atomic_parquet(carriers, apply_dir / f"carriers-{name}.parquet")
+    chunk_ids = {int(q): g.doc_id.astype(int).tolist() for q, g in carriers.groupby("query_id")}
+    pcal = pd.DataFrame([{"query_id": q, "doc_id": int(r["doc_id"]), "p_fused": float(f), "p_cal": float(p)}
+                         for q in frame.qids for r, f, p in zip(frame.order[q], calibrated.fused[q], calibrated.p[q])])
+    atomic_parquet(pcal, apply_dir / f"pcal-{name}.parquet")
+    docsel_writer(apply_dir, "", t_c, {name: pcal})(name, chosen, chunk_ids, {"t_c": t_c})
+    atomic_json(apply_dir / f"keep-{name}.json", {str(q): int(k) for q, k in keep.items()})
+    return {**res, "carriers": carriers, "carrier_info": carrier_info, "target": target}
+
+
 def build(run: Path, name: str | None, no_jina: bool, no_cmax: bool, missing_last: bool, rounds: int, compose: bool = True,
           impute_4b: bool = False, drop_4b: float = 0.0, drop_seed: int = 40) -> dict[str, Any]:
     import subprocess
@@ -758,7 +821,6 @@ def build(run: Path, name: str | None, no_jina: bool, no_cmax: bool, missing_las
 
     from r2ai.s36 import cal, fuse
     from r2ai.s36 import carriers as carrier_rules
-    from r2ai.s36.build import docsel_writer
 
     log = log_to(run)
     check_pins(log)
@@ -792,25 +854,9 @@ def build(run: Path, name: str | None, no_jina: bool, no_cmax: bool, missing_las
         c = pd.read_parquet(run / "cmax.parquet")
         cmax = dict(zip(zip(c.query_id.astype(int), c.doc_id.astype(int)), c.cmax.astype(float)))
     rrf_keys = [k for k in fuse.FOUR_KEYS if not (no_jina and k == "jina_rank") and not (no_cmax and k == "cmax_rank")]
-    res = select(pools, jina, cmax, cfg, rrf_keys, missing_last)
-    frame, calibrated, keep, chosen = res["frame"], res["calibrated"], res["keep"], res["chosen"]
-    perq = pd.DataFrame([{"query_id": q, "k": int(keep[q]), "tp": float(calibrated.p[q][: keep[q]].sum()), "g": float(calibrated.g[q])} for q in frame.qids])
-    perq["f2"] = 5 * perq.tp / (4 * perq.g + perq.k)
-    atomic_parquet(perq, apply_dir / f"perq-{name}.parquet")
-    t_c = float(cfg["t_c"])
-    sel = pd.DataFrame([(q, int(r["doc_id"]), k, float(r["judge_score"])) for q, rows in chosen.items() for k, r in enumerate(rows, 1)],
-                       columns=["query_id", "doc_id", "rank", "p4b"])
-    sel["chunk"] = sel.p4b >= t_c
-    rule = cfg["carriers"]
-    target = int(round(float(rule["target_per_query"]) * len(frame.qids))) if "target_per_query" in rule else rule.get("target")
-    carriers, carrier_info = carrier_rules.select_carriers(sel, rule.get("rule", "fair"), target, rule.get("drop"), rule.get("rho"))
-    atomic_parquet(carriers, apply_dir / f"carriers-{name}.parquet")
-    chunk_ids = {int(q): g.doc_id.astype(int).tolist() for q, g in carriers.groupby("query_id")}
-    pcal = pd.DataFrame([{"query_id": q, "doc_id": int(r["doc_id"]), "p_fused": float(f), "p_cal": float(p)}
-                         for q in frame.qids for r, f, p in zip(frame.order[q], calibrated.fused[q], calibrated.p[q])])
-    atomic_parquet(pcal, apply_dir / f"pcal-{name}.parquet")
-    docsel_writer(apply_dir, "", t_c, {name: pcal})(name, chosen, chunk_ids, {"t_c": t_c})
-    atomic_json(apply_dir / f"keep-{name}.json", {str(q): int(k) for q, k in keep.items()})
+    applied = apply_selection(pools, jina, cmax, cfg, rrf_keys, missing_last, name, apply_dir)
+    frame, calibrated, keep, chosen = applied["frame"], applied["calibrated"], applied["keep"], applied["chosen"]
+    carriers, carrier_info, target = applied["carriers"], applied["carrier_info"], applied["target"]
     imputed = pd.DataFrame([{"query_id": q, "doc_id": int(r["doc_id"]), "pair_id": int(r["pair_id"]), "cosine_score": float(r["cosine_score"]),
                              "p4b_imputed": float(r["judge_score"])} for q, rows in pools.items() for r in rows if r["p4b_imputed"]],
                            columns=["query_id", "doc_id", "pair_id", "cosine_score", "p4b_imputed"])

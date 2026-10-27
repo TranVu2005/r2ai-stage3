@@ -64,3 +64,26 @@ def test_pools_from_imputes_missing_4b_last_in_4b_source():
     from r2ai.s36 import cal
     p_cal = cal.sigmoid(a * cal.logit(np.array([rows[11]["judge_score"]])) + b)[0]
     assert abs(p_cal - cal.sigmoid(10.0 * 0.8 - 8.0)) < 1e-9
+
+
+def test_choose_carriers_rank_order_is_ch_rrf():
+    sel = pd.DataFrame({"query_id": [1, 1, 1, 1, 2, 2], "doc_id": [10, 11, 12, 13, 20, 21], "rank": [1, 2, 3, 4, 1, 2],
+                        "p4b": [0.1, 0.9, 0.8, 0.7, 0.2, 0.6]})
+    sel["chunk"] = sel.p4b >= 0.5
+    car, info, target = newq.choose_carriers(sel, {"rule": "fair", "order": "rank", "target_per_query": 1.5}, 2)
+    assert target == 3 and info["order"] == "rank"
+    assert sorted(zip(car.query_id, car.doc_id)) == [(1, 10), (1, 11), (2, 20)]        # top ceil(rho |D_q|) in RRF rank, not P4B
+    car_p, info_p, _ = newq.choose_carriers(sel, {"rule": "fair", "target_per_query": 1.5}, 2)
+    assert info_p["order"] == "p4b" and sorted(zip(car_p.query_id, car_p.doc_id)) == [(1, 11), (1, 12), (2, 21)]
+
+
+def test_default_config_is_frozen_private():
+    cfg = newq.load_config(None)
+    assert cfg["carriers"] == {"rule": "fair", "order": "rank", "target_per_query": 146.29}
+    assert cfg["depth"] == 300 and abs(cfg["a"] - 0.5298075151496865) < 1e-15
+
+
+def test_pin_key_repo_relative(tmp_path):
+    assert newq.pin_key(newq.ROOT / "src" / "r2ai" / "newq.py") == "repo:src/r2ai/newq.py"
+    assert newq.pin_path("repo:src/r2ai/newq.py") == newq.ROOT / "src" / "r2ai" / "newq.py"
+    assert not newq.pin_key(tmp_path / "x").startswith("repo:")

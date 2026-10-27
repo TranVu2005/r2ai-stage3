@@ -1,0 +1,33 @@
+{
+  "frame": "S41 private final (Vu 27/10, frozen): FREE-noJina docs + CH-rrf carriers. D 300, RRF cosine / 4B / C-max, no Jina, old calibration, full+w768, canonical text. Public LB 0.4138 (ZIP b12b8591...08c8).",
+  "depth": 300,
+  "keep": 400,
+  "a": 0.5298075151496865,
+  "b": -1.40969757276664,
+  "s_free": 1.7405181516323944,
+  "g_depth": 211,
+  "t_c": 0.2030746281894702,
+  "rrf_k": 60,
+  "carriers": {
+    "rule": "fair",
+    "order": "rank",
+    "target_per_query": 146.29
+  },
+  "pins_sha256": {
+    "configs/s41-newq-pins.json": "c60237e457bbc3d69d7d14aaf2f26bbb16b17738d1f40f5adc9054e5e2ae27f9"
+  },
+  "reference": {
+    "public_zip": "out/runs/s41/ch/compose/CH-rrf-full+w768-t1536.zip",
+    "public_zip_sha256": "b12b85912ba03ec45062fb817b806583c0182633a89feaa2ae4f1372767908c8",
+    "public_docsel_sha256": "cea56122cab3d7921cc162ced30affa80c8b964cd6bf05970cbafe8e013fe309",
+    "public_carriers_sha256": "f2d737c09b6d535b28f346fb8f560031722a09c985c9d76fb3cc9da67f7b3380",
+    "public_lb": {"final": 0.4138, "chunk_f2": 0.3863}
+  },
+  "sources": {
+    "a_b": "out/runs/s36-fuse4/cal/cal.json variants.p4b.fit (old calibration)",
+    "s_free": "out/runs/s36-fuse4/cal/ef2-free.json",
+    "t_c": "configs/s36-handoff-120A-free-v2.json",
+    "target_per_query": "175,548 carriers / 1,200 queries of FREE-noJina",
+    "carriers": "r2ai.s41.carriers --rule fair --order rank (CH-rrf): CR-fair count ceil(rho |D_q|), docs taken in docsel RRF order"
+  }
+}

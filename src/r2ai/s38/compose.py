@@ -646,8 +646,9 @@ def without(frame: pd.DataFrame, dropped: set[tuple[int, int]]) -> pd.DataFrame:
     return frame[~keys.isin(list(dropped))]
 
 
-def run_validator(out: Path, label: str, rule: str, target: Path, doc_ids) -> dict[str, Any]:
-    """S26 validator on ``target`` (report in ``<label>.validate.json``); the 120ask segments of the registry docs among ``doc_ids`` are extra sources."""
+def run_validator(out: Path, label: str, rule: str, target: Path, doc_ids, more_extra: Sequence[Path] = ()) -> dict[str, Any]:
+    """S26 validator on ``target`` (report in ``<label>.validate.json``); the 120ask segments of the registry docs among ``doc_ids`` are extra sources,
+    and ``more_extra`` (S43 en hedge: lot roots of the same layout) after them."""
     cmd = [sys.executable, "-u", str(paths.ROOT / VALIDATOR)]
     if rule == "full+w768":
         cmd += ["--max-chunks-per-doc", "2"]
@@ -659,12 +660,14 @@ def run_validator(out: Path, label: str, rule: str, target: Path, doc_ids) -> di
     extra = reg.validator_extra(out / f"{label}.validator-extra", reg.registry_index(), doc_ids)
     if extra is not None:
         cmd.append(str(extra))
+    cmd += [str(x) for x in more_extra]
     res_v = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     (out / f"{label}.validate.json").write_text(res_v.stdout, encoding="utf-8")
     try:
         v = json.loads(res_v.stdout)
         return {"ok": v["ok"], "errors": {k: n for k, n in v["errors"].items() if n}, "chunk_check": v["chunk_check"],
-                "extra_sources": sorted(p.parent.parent.name for p in extra.glob("lots/*/chunks/docs.parquet")) if extra else []}
+                "extra_sources": sorted(p.parent.parent.name for x in ([extra] if extra else []) + list(more_extra)
+                                        for p in Path(x).glob("lots/*/chunks/docs.parquet"))}
     except (ValueError, KeyError):
         return {"ok": False, "stderr_tail": res_v.stderr[-2000:]}
 

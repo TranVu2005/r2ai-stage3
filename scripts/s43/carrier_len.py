@@ -63,6 +63,15 @@ def main() -> int:
     s = (1 / (60 + pool.cosine_rank) + 1 / (60 + pool.cmax_rank) - 1e-12 * pool.pos).where(pool.chosen, -np.inf)
     nc = (s.groupby(pool.query_id).rank(ascending=False, method="first") <= pool.query_id.map(ncar)).to_numpy()
     res["swaps"]["sim cos+cmax vs CH-rrf"] = {"in": profile(pool[nc & ~pool.carrier.to_numpy()]), "out": profile(pool[pool.carrier.to_numpy() & ~nc])}
+    # whole carrier sets of the simulated orders (same per-query count as CH-rrf): mean cosine rank against the sum of p_cal they keep
+    res["sim_sets"] = {}
+    for name, w_cos, w_4b in (("cos+cmax", 1, 0), ("2cos+cmax", 2, 0), ("2cos+4b+cmax (P1)", 2, 1), ("cos only", 1, None)):
+        sc = w_cos / (60 + pool.cosine_rank) + (0 if w_4b is None else w_4b / (60 + pool.judge_rank) + 1 / (60 + pool.cmax_rank))
+        m = ((sc - 1e-12 * pool.pos).where(pool.chosen, -np.inf).groupby(pool.query_id).rank(ascending=False, method="first")
+             <= pool.query_id.map(ncar)).to_numpy()
+        res["sim_sets"][name] = {**profile(pool[m]), "pcal_per_query": round(float(pool.p_cal[m].sum() / 1200), 3),
+                                 "swapped_per_query": round(float((m & ~pool.carrier.to_numpy()).sum() / 1200), 2)}
+    res["sim_sets"]["CH-rrf"] = {**profile(pool[pool.carrier]), "pcal_per_query": round(float(pool.p_cal[pool.carrier].sum() / 1200), 3)}
     (args.probes / "carrier_len.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
     print(json.dumps(res, indent=1))
     return 0

@@ -5,7 +5,7 @@
     python -m r2ai.newq import-scores --run <dir> --source 4b --tag <tag> --scores scores-extra.parquet --report collect-extra-report.json
     python -m r2ai.newq import-scores --run <dir> --source cmax      (after scripts/s37/run_cmax.ps1 -Run <dir>/cmax)
     python -m r2ai.newq import-scores --run <dir> --source jina      (after scripts/s37/run_jina.ps1 -Run <dir>/jina)
-    python -m r2ai.newq build --run <dir> [--name N] [--jina] [--no-cmax] [--rounds R]
+    python -m r2ai.newq build --run <dir> [--name N] [--jina] [--no-cmax] [--impute-4b | --cos-only] [--rounds R]
     python -m r2ai.newq status --run <dir>
     python -m r2ai.newq pins [--write]        # SHA256 of every corpus / scorer input against configs/s41-newq-pins.json
 
@@ -54,6 +54,8 @@ from r2ai import paths
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = ROOT / "configs" / "s41-private-final.json"   # S41 private config (CH-rrf carriers); s40-newq-free-v2.json = FREE-noJina
+COS_CONFIG = ROOT / "configs" / "s41-private-fallback-cos.json"   # build --cos-only: DEFAULT_CONFIG + the pinned cosine -> p_cal map
+SELECTION_KEYS = ("depth", "keep", "a", "b", "s_free", "g_depth", "t_c", "rrf_k", "carriers")
 PAIR_ID_BASE = 70_000_000         # pair ids of a new query set (S31 0..433,731 / 20,000,000+; S37 1,000,000+; S36 5,000,000+ / 6,000,000+; d300 C-max 60,000,000+)
 CMAX_ROW_BASE = 80_000_000        # C-max chunk rows
 SHARD_4B = 94_000                 # 4B shard pool-<94000 + part>.parquet
@@ -98,7 +100,16 @@ def log_to(run: Path):
 
 
 def load_config(path: Path | None) -> dict[str, Any]:
+    """A config file, or (S41 fallback) one that ``inherits`` another, pinned by SHA256, and may only add ``impute_4b`` and a ``note``."""
     cfg = json.loads((path or DEFAULT_CONFIG).read_text(encoding="utf-8"))
+    if "inherits" in cfg:
+        extra = set(cfg) - {"inherits", "inherits_sha256", "impute_4b", "note"}
+        if extra:
+            raise SystemExit(f"config {path}: an inheriting config may only add impute_4b / note, not {sorted(extra)}")
+        base = ROOT / cfg["inherits"]
+        if not base.exists() or sha256(base) != cfg.get("inherits_sha256"):
+            raise SystemExit(f"config {path}: {cfg['inherits']} missing or SHA256 differs from {cfg.get('inherits_sha256')}")
+        cfg = {**load_config(base), **cfg}
     for key in ("depth", "keep", "a", "b", "s_free", "g_depth", "t_c", "carriers"):
         if key not in cfg:
             raise SystemExit(f"config {path or DEFAULT_CONFIG}: missing {key}")
@@ -724,6 +735,15 @@ def cosine_pcal_map(top: pd.DataFrame, scores_4b: dict[int, float], a: float, b:
             "pcal_mean": float(p.mean()), "pred_mean": float(cal.sigmoid(c * x + d).mean())}
 
 
+def cos_only_map(cfg: dict[str, Any]) -> dict[str, Any]:
+    """``build --cos-only`` (Vu 27/10): the cosine -> p_cal map pinned in the config's ``impute_4b`` (mode ``cos_only``; fitted once on the
+    full public 4B), with the config's ``a`` / ``b``. Only this path reads a pinned c / d: ``--impute-4b`` fits its own map (>= 1,000 pairs)."""
+    imp = cfg.get("impute_4b") or {}
+    if imp.get("mode") != "cos_only" or not all(isinstance(imp.get(k), (int, float)) for k in ("c", "d")):
+        raise SystemExit("config: --cos-only needs impute_4b = {mode: cos_only, c, d}")
+    return {"c": float(imp["c"]), "d": float(imp["d"]), "a": float(cfg["a"]), "b": float(cfg["b"]), "mode": "cos_only", "source": imp.get("source")}
+
+
 def pools_from(top: pd.DataFrame, scores_4b: dict[int, float], impute: dict[str, float] | None = None) -> dict[int, list[dict[str, Any]]]:
     """Pools in cosine order with the 4B score and rank. ``impute`` (``cosine_pcal_map`` plus the config's ``a`` / ``b``): a pair without
     4B gets the P4B whose p_cal is the mapped one (``sigmoid((logit(p_hat) - b) / a)``, so p_cal, G_q, the EF2 cut and the carrier order use
@@ -815,26 +835,34 @@ def apply_selection(pools: dict[int, list[dict[str, Any]]], jina: dict, cmax: di
 
 
 def build(run: Path, name: str | None, no_jina: bool, no_cmax: bool, missing_last: bool, rounds: int, compose: bool = True,
-          impute_4b: bool = False, drop_4b: float = 0.0, drop_seed: int = 40) -> dict[str, Any]:
+          impute_4b: bool = False, drop_4b: float = 0.0, drop_seed: int = 40, cos_only: bool = False, cos_config: Path | None = None) -> dict[str, Any]:
     import subprocess
     import sys
 
     from r2ai.s36 import cal, fuse
     from r2ai.s36 import carriers as carrier_rules
 
+    if cos_only and (impute_4b or drop_4b):
+        raise SystemExit("--cos-only uses no 4B score at all: not with --impute-4b / --test-drop-4b")
     log = log_to(run)
     check_pins(log)
     cfg = run_config(run)
+    fallback = None
+    if cos_only:                                   # the run's own config must be the one the fallback config inherits
+        fallback = load_config(cos_config or COS_CONFIG)
+        differ = [k for k in SELECTION_KEYS if fallback.get(k) != cfg.get(k)]
+        if differ:
+            raise SystemExit(f"--cos-only: {cos_config or COS_CONFIG} differs from the run config on {differ}")
     require(run, ["queries.parquet", "query_vectors.npz", "top.parquet"] + ([] if no_jina else ["jina.parquet"]) + ([] if no_cmax else ["cmax.parquet", "cmax_chunks.parquet"]))
     name = name or (f"{run.name}-free" + ("" if no_jina else "-jina") + ("-noCmax" if no_cmax else "")
-                    + (f"-drop4b{round(drop_4b * 100)}" if drop_4b else "") + ("-impute4b" if impute_4b else ""))
+                    + (f"-drop4b{round(drop_4b * 100)}" if drop_4b else "") + ("-impute4b" if impute_4b else "") + ("-cosonly" if cos_only else ""))
     work = run / "build" / name
     apply_dir, compose_dir = work / "apply", work / "compose"
     paths.assert_writable(work)
     apply_dir.mkdir(parents=True, exist_ok=True)
     t0 = time.monotonic()
     top = pd.read_parquet(run / "top.parquet")
-    scores_4b = load_4b(run)
+    scores_4b = {} if cos_only else load_4b(run)
     dropped = 0
     if drop_4b:                                    # test only: forget the 4B score of a random share of the pool pairs
         ids = top.pair_id.astype(int).to_numpy()
@@ -845,6 +873,9 @@ def build(run: Path, name: str | None, no_jina: bool, no_cmax: bool, missing_las
     if impute_4b:
         impute = {**cosine_pcal_map(top, scores_4b, float(cfg["a"]), float(cfg["b"])), "a": float(cfg["a"]), "b": float(cfg["b"])}
         log(f"impute 4B: cosine -> p_cal map {json.dumps(impute)}")
+    if cos_only:
+        impute = cos_only_map(fallback)
+        log(f"cos-only: no 4B score read, every pair from the pinned map {json.dumps(impute)}")
     pools = pools_from(top, scores_4b, impute)
     jina, cmax = {}, {}
     if not no_jina:
@@ -868,7 +899,8 @@ def build(run: Path, name: str | None, no_jina: bool, no_cmax: bool, missing_las
         "missing_4b": {"test_dropped_pairs": dropped, "drop_seed": drop_seed if drop_4b else None, "imputed_pairs": int(len(imputed)),
                        "imputed_chosen": int(sum((q, d) in chosen_keys for q, d in zip(imputed.query_id, imputed.doc_id))),
                        "imputed_carriers": int(len(carriers.merge(imputed[["query_id", "doc_id"]], on=["query_id", "doc_id"]))),
-                       "map": impute},
+                       "map": impute, "cos_only": cos_only,
+                       "cos_config": {"path": str(cos_config or COS_CONFIG), "sha256": sha256(cos_config or COS_CONFIG)} if cos_only else None},
         "global": {k: cfg[k] for k in ("a", "b", "s_free", "g_depth", "t_c", "depth")}, "docs_per_query": cal.keep_stats(keep),
         "predicted": calibrated.expected(keep), "carriers": {**carrier_info, "target": target, **carrier_rules.describe(carriers, len(frame.qids))},
         "apply_seconds": round(time.monotonic() - t0, 1),
@@ -938,6 +970,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     b.add_argument("--no-cmax", action="store_true")
     b.add_argument("--missing-last", action="store_true", help="a pair without a Jina / C-max score takes the last rank (default: refuse)")
     b.add_argument("--impute-4b", action="store_true", help="a pair without 4B: p_cal from a global cosine map, last in the 4B source (default: refuse)")
+    b.add_argument("--cos-only", action="store_true", help="no 4B at all: every pair from the cosine map pinned in --cos-config (fallback COS)")
+    b.add_argument("--cos-config", type=Path, default=None, help=f"default {COS_CONFIG.relative_to(ROOT).as_posix()}")
     b.add_argument("--test-drop-4b", type=float, default=0.0, help="TEST ONLY: forget the 4B score of this share of the pool pairs")
     b.add_argument("--test-drop-seed", type=int, default=40)
     b.add_argument("--rounds", type=int, default=10)
@@ -976,7 +1010,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = export_4b_sample(run, args.suffix, args.pairs, args.seed)
     elif args.cmd == "build":
         result = build(run, args.name, not args.jina, args.no_cmax, args.missing_last, args.rounds, not args.no_compose,
-                       args.impute_4b, args.test_drop_4b, args.test_drop_seed)
+                       args.impute_4b, args.test_drop_4b, args.test_drop_seed, args.cos_only,
+                       paths.resolve_path(args.cos_config) if args.cos_config else None)
     else:
         result = status(run)
     print(json.dumps(result, indent=1, ensure_ascii=False, default=str))

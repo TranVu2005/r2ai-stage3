@@ -1,0 +1,11 @@
+{
+  "note": "S41 private fallback COS (Vu 27/10): the frozen configs/s41-private-final.json plus the pinned cosine -> p_cal map, read only by `newq build --cos-only` (no 4B score at all). Public probe: Doc F2 predicted 0.3786, ZIP 1c5600bb...0fc1.",
+  "inherits": "configs/s41-private-final.json",
+  "inherits_sha256": "619221139c45d9310413dab2e595cb9736c47f02986e4589329fecab01ca4759",
+  "impute_4b": {
+    "mode": "cos_only",
+    "c": 12.890141042157486,
+    "d": -9.772626922053805,
+    "source": "out/runs/s41/fallback/COS/fallback.json impute_map (SHA256 5fba1514aebf15d7a931b1e936964676fbd7c36ec82fd4e8b217e1b0c03c84bb): newq.cosine_pcal_map over the 360,000 public pool pairs with 4B (a / b of s41-private-final), scripts/s41/fallback_public.py at commit 6ac453b; rmse 0.1513"
+  }
+}

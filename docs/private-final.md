@@ -96,6 +96,7 @@ Mã `scripts/s41/fallback_public.py` (đi qua đúng các hàm của `newq build
 | C-max (hỏng / quá chậm) | **B0**: `build --no-cmax`, RRF cosine + 4B | 220.472 (183,7) | 0,4245 | −0,0008 | **0,4101** (Doc 0,4354 P 0,2299 R 0,6513; Chunk 0,3847): −0,0037 | nộp B0 nếu C-max chưa xong ở T0 + 24 giờ |
 | 30% cặp 4B (phiên Kaggle dở / hết quota) | **IMP30**: xoá 30% (seed 2026), `build --impute-4b` | 289.469 (241,2) | 0,3984 | −0,027 | chờ | `build --impute-4b` |
 | toàn bộ 4B | **COS**: xoá 100%, `--impute-4b`, C-max giữ | 358.759 (299,0) | 0,3786 | −0,047 | **0,3607** (Doc 0,3708 P 0,1621 R 0,7073; Chunk 0,3507): −0,0531 | `build --cos-only` (mục 6.2) |
+| toàn bộ 4B (thử) | **COS-K150**: như COS nhưng thay EF2 bằng 150 doc đầu theo thứ tự RRF (cosine + C-max) | 180.000 (150,0) | 0,3489 (mô hình p_cal, không dùng để chọn K) | −0,076 | chờ | `build --cos-k 150` (mục 6.3; chưa có trong tag) |
 
 Ghi chú:
 * **LB (Vu 27/10):** mô hình đánh giá thấp mức mất: B0 Doc −0,0059 (dự đoán −0,0008), COS Doc −0,0705 (dự đoán −0,047). COS gần như không cắt: 299,0 doc/query (P10 = P50 = 300, chỉ 19 query dưới 300, min 101), P 0,16 / R 0,71; R của COS gần bằng recall trần của pool cosine top-300.
@@ -109,8 +110,9 @@ Ghi chú:
   | B0 | `out/runs/s41/fallback/B0/compose/FB-B0-full+w768-t1536.zip` | 98.383.174 | `d2f234e992e18a202f7323d78142f96283f17bae167a3460488598a0fedd0d29` | 1536 | 207.881 (32.992) | ok, 0 carrier bị bỏ |
   | IMP30 | `out/runs/s41/fallback/IMP30/compose/FB-IMP30-full+w768-t1536.zip` | 97.989.849 | `ba25768d8d4b588dbf21490b022cf8bb676bdbc2b0d8d7b7a869886498259ea0` | 1536 | 207.825 (33.222) | ok, 0 carrier bị bỏ |
   | COS | `out/runs/s41/fallback/COS/compose/FB-COS-full+w768-t1536.zip` | 99.424.114 | `1c5600bbd54b80fc2095927d583cc37635b0920940503b172feda0b270790fc1` | 1536 | 207.939 (33.457) | ok, 0 carrier bị bỏ |
+  | COS-K150 | `out/runs/s41/fallback/COSK150/compose/FB-COSK150-full+w768-t1536.zip` | 98.548.799 | `fd33125209bc508eadc459fa569a23780b3d58e8f5dc833f9b04758a3d93c2fb` | 1536 | 207.290 (33.403) | ok, 0 carrier bị bỏ |
 
-  Driver `scripts/s41/run_fallback.sh` (tuần tự, log `out/runs/s41/fallback/fallback.log`): B0 44,8 phút, IMP30 43,5 phút, COS 44,0 phút.
+  Driver `scripts/s41/run_fallback.sh` (tuần tự, log `out/runs/s41/fallback/fallback.log`): B0 44,8 phút, IMP30 43,5 phút, COS 44,0 phút, COS-K150 28,1 phút (28/10 03:40 đến 04:09).
 
 ### 6.1 Config COS và `--cos-only` (Vu 27/10)
 
@@ -146,3 +148,13 @@ Kiểm trước khi chọn: `python -m r2ai.newq status --run out/runs/private` 
 * C-max cũng thiếu: thêm `--no-cmax` vào lệnh IMP30 / COS. Tổ hợp này chưa đo trên public.
 * Thứ tự ưu tiên khi có nhiều lựa chọn: CH-rrf > B0 > IMP30 > COS (Doc F2 dự đoán 0,4253 / 0,4245 / 0,3984 / 0,3786).
 * Một phần 4B về muộn: nhập rồi dựng lại nhánh tốt hơn; bản đã nộp giữ nguyên.
+
+### 6.3 COS-K: K cố định thay EF2 khi không có 4B (Vu 28/10, chưa duyệt vào tag)
+
+COS gần như không cắt (299 doc/query, P 0,16 / R 0,71), vì p_cal suy từ cosine không đủ dốc để EF2 bỏ doc. COS-K giữ đúng `K` doc đầu mỗi query theo thứ tự RRF của COS (nguồn 4B hằng, nên là cosine + C-max), carrier CR-fair như cũ.
+
+* Mã chỉ có trên `feat/s41` (commit `f5a06f5`), **không có trong tag `v-private-2026-10-28b`**. Dùng cho private cần Vu duyệt theo LB, rồi merge và tag mới (`…-28c`).
+* `configs/s41-private-fallback-cos-k150.json` kế thừa `configs/s41-private-fallback-cos.json` (ghim SHA256 `81ba043f…e22e9`) và chỉ thêm `cos_k = 150`. `build --cos-k K` đọc `configs/s41-private-fallback-cos-k{K}.json`, dừng nếu `cos_k` trong config khác K, và không đi cùng `--impute-4b` / `--test-drop-4b`. Lệnh: `python -m r2ai.newq build --run out/runs/private --cos-k 150`, tên build `private-free-cosk150`.
+* Chọn K = 150 (Vu 28/10, thứ tự RRF cosine + C-max) bằng neo LB, không dùng p_cal: TP(K) = TP(299) · (K/299)^β, với β ≥ 0,33 suy từ neo CH-rrf / B0 / COS. Doc F2 so với COS: β 0,33 → +8,3%, β 0,40 → +3,2%, β 0,50 → −3,7%. K = 150 bền nhất trên dải β này. LB của COS-K150 cho thêm một neo trên thứ tự cosine để ước β.
+* Public (`scripts/s41/fallback_public.py`, bản `COSK150`): 180.000 doc (150 mọi query), khác CH-rrf 24.733 doc mới / 65.169 doc bỏ; 175.200 carrier (141.022 trùng CH-rrf). ZIP ở bảng mục 6. Doc F2 mô hình p_cal 0,3489 (mô hình này coi EF2 là tối ưu nên phạt mọi cách cắt khác; chỉ ghi lại, không dùng để chọn).
+* Diễn tập rh100 `--cos-k 150` (run `out/runs/s41/rh100-cos`): 15.000 doc (150/query), ZIP 10.491.554 B `448cc699d00f8ea529ed1d9c0de6a56d59a7256f0b37716cc0fb3fc9472ac41f`, T 1536, 16.966 chunk, 0 carrier bị bỏ, validator ok; compose 393 s, tổng 424 s.

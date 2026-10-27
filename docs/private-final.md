@@ -13,14 +13,14 @@ Thay mục 5 của `docs/s40-private.md` (các phần còn lại của tài li�
 | mốc public | LB 0,4138 (Doc 0,4413, Chunk 0,3863), ZIP `b12b85912ba03ec45062fb817b806583c0182633a89feaa2ae4f1372767908c8` |
 | config | `configs/s41-private-final.json` (mặc định của `python -m r2ai.newq`) |
 | ghim đầu vào | `configs/s41-newq-pins.json` (79 tệp, cùng SHA256 với `s40-newq-pins.json`; tệp trong repo ghi dạng `repo:<đường dẫn>` nên đúng ở mọi checkout); config ghim SHA256 của chính tệp ghim |
-| mã | tag `v-private-2026-10-28` trên `main` (chạy từ một worktree tách ở tag đó, không checkout trên repo chung) |
+| mã | **tag `v-private-2026-10-28b`** trên `main` (Vu 27/10: CH-rrf chốt + nhánh dự phòng COS / B0 / IMP30; chạy từ một worktree tách ở tag đó, không checkout trên repo chung). Tag cũ `v-private-2026-10-28` giữ nguyên (cùng CH-rrf, chưa có `--cos-only`). Tag đã tạo không sửa; thay đổi được duyệt sau này lấy tag mới (`…-28c`) |
 
 ## 2. Kiểm tra trước khi đóng băng
 
 * **Hồi quy public** (`scripts/s41/regress_public.py`): `newq.apply_selection` với config chốt trên đúng pool / 4B / C-max của FREE-noJina (1.200 query public) cho docsel trùng FREE-noJina ở mọi cột trừ Jina và cờ carrier, và tập carrier trùng CH-rrf (175.548, ρ 0,7937, 0 lệch). Compose: xem `docs/s41.md` mục hồi quy.
 * **Hồi quy public:** compose ra JSON trùng từng byte JSON trong ZIP CH-rrf (`eeb51b06…3da2`); ZIP lệch 8 B chỉ vì tên tệp JSON bên trong.
 * **Diễn tập 100 query** (`scripts/s41/run_rehearsal.sh`, run `out/runs/s41/rh100-final`): prepare 50 s, export 205 s, import 2 s, build (compose gồm) 295 s; `--impute-4b` 253 s; thiếu 30% 4B + impute 257 s; ba ZIP validator ok. Chi tiết `docs/s41.md`.
-* **FREE-Kfit** (số doc/query theo K_q học từ P1): LB 0,3994, thua CH-rrf 0,0144, bác (`docs/s41.md`). CH-rrf và tag `v-private-2026-10-28` là bản cuối; đóng băng.
+* **FREE-Kfit** (số doc/query theo K_q học từ P1): LB 0,3994, thua CH-rrf 0,0144, bác (`docs/s41.md`). CH-rrf và tag `v-private-2026-10-28` là bản cuối; đóng băng. Sau đó thêm nhánh dự phòng COS (mục 6.1), tag `v-private-2026-10-28b`, cấu hình chính không đổi.
 
 ## 3. Thời gian (N = 1.200, D = 300)
 
@@ -46,7 +46,7 @@ T0 = lúc Vu có tệp query. Run `out/runs/private` (tên cố định; chưa t
 
 **Trước T0 (31/10)**
 
-- [ ] Worktree tách ở tag `v-private-2026-10-28`, `.env` chép từ repo chung (RUNS_DIR đúng).
+- [ ] Worktree tách ở tag `v-private-2026-10-28b`, `.env` chép từ repo chung (RUNS_DIR đúng).
 - [ ] `python -m r2ai.newq pins` báo `input pins ok: 79 files`.
 - [ ] GPU máy rảnh (không job nào khác), ổ đĩa còn ít nhất 30 GB.
 - [ ] Vu đã điền (A) đến (D); quota Kaggle ≥ 15 giờ.
@@ -113,7 +113,7 @@ Ghi chú:
 
 ### 6.1 Config COS và `--cos-only` (Vu 27/10)
 
-Mã `--cos-only` và config COS hiện chỉ có trên `feat/s41` (từ `bd9b4aa`), **chưa** có trong tag `v-private-2026-10-28`. Chưa tag mới, chờ Vu duyệt kết quả hồi quy.
+Mã `--cos-only` và config COS có từ tag `v-private-2026-10-28b` (Vu duyệt 27/10; tag cũ `v-private-2026-10-28` không có).
 
 * `configs/s41-private-fallback-cos.json` (SHA256 `81ba043f299f674002da532c9b6c2ab3fef4000cc4e935883c57d087beca22e9`) kế thừa `configs/s41-private-final.json` (ghim SHA256 `61922113…4ca4759`) và chỉ thêm `impute_4b = {mode: cos_only, c 12,890141042157486, d −9,772626922053805, source}`. `load_config` từ chối config kế thừa có khoá nào khác ngoài `impute_4b` / `note`, hoặc khi SHA256 tệp gốc lệch. `configs/s41-private-final.json` không đổi.
 * `build --cos-only` chỉ đọc c / d từ config này (mặc định, hoặc `--cos-config`). Nó dừng nếu các khoá chọn doc (depth, keep, a, b, s_free, g_depth, t_c, rrf_k, carriers) khác config của run, và không đi cùng `--impute-4b` / `--test-drop-4b`. `--impute-4b` thường vẫn fit ánh xạ riêng và vẫn cần ≥ 1.000 cặp có 4B.
@@ -129,7 +129,9 @@ Mã `--cos-only` và config COS hiện chỉ có trên `feat/s41` (từ `bd9b4aa
 
 Hồi quy a và b đi qua `newq.apply_selection` trên pool public dựng lại như `r2ai.s36.s37.apply` (như hồi quy mục 2), không qua `newq prepare`, vì public không có run newq. Tên build đặt trùng bản tham chiếu (`CH-rrf`, `FB-COS`) để tên JSON trong ZIP trùng.
 
-### 6.2 Lệnh từng nhánh và điều kiện chuyển (run `out/runs/private`)
+### 6.2 Lệnh từng nhánh và điều kiện chuyển (run `out/runs/private`, mã tag `v-private-2026-10-28b`)
+
+Mọi lệnh dưới đây chạy trong worktree tách ở tag `v-private-2026-10-28b` (tag cũ không có `--cos-only`).
 
 Kiểm trước khi chọn: `python -m r2ai.newq status --run out/runs/private` (phần 4B đã nhập, có `cmax.parquet` không). Mỗi nhánh ghi vào thư mục build riêng, nên dựng được nhiều nhánh rồi chọn bản nộp. ZIP + SHA256 nằm ở `out/runs/private/build/<tên>/build.json` khoá `zip`.
 

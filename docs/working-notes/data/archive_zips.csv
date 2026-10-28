@@ -1,0 +1,7 @@
+run,lb_final,role,path,bytes,sha256
+CH-rrf,0.4138,bản chốt private (lượt 1),out/runs/s41/ch/compose/CH-rrf-full+w768-t1536.zip,100651136,b12b85912ba03ec45062fb817b806583c0182633a89feaa2ae4f1372767908c8
+B0,0.4101,dự phòng 1 (--no-cmax),out/runs/s41/fallback/B0/compose/FB-B0-full+w768-t1536.zip,98383174,d2f234e992e18a202f7323d78142f96283f17bae167a3460488598a0fedd0d29
+COS-K150,0.3742,dự phòng 2 (--cos-k 150),out/runs/s41/fallback/COSK150/compose/FB-COSK150-full+w768-t1536.zip,98548799,fd33125209bc508eadc459fa569a23780b3d58e8f5dc833f9b04758a3d93c2fb
+EN-hedge3-c5226,0.4104,phòng hộ lượt 5 (--en-hedge 3),out/runs/s43/probes/EN-hedge3-c5226/EN-hedge3-c5226-full+w768-t1536.zip,102124766,ce0fabc01cd017ff2372351355711a31affa0152940f77c4f945acebc6188742
+P1-carrier-w2,0.4141,"LB public cao nhất (S43, không dùng cho private)",out/runs/s43/probes/P1-carrier-w2/compose/P1-carrier-w2-full+w768-t1536.zip,99920352,8dc735e71c749ac6983a432f4a8e917119e0af50e02e62023193f7f761ee9c2b
+120A-p4b-v3,,bàn giao S36 (release build),out/runs/release/120A-p4b-v3/compose/120A-p4b-v3-full+w768-t1536.zip,99417831,34d235f6f37704d11b803e83e9eddeabbf4c6100a38497c2728b56cb614937e2

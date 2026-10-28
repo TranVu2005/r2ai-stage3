@@ -15,6 +15,8 @@ Kho số liệu, hình và khung bài cho working notes (Road to AI Stage 3). Ch
 | `data/chunk_count_curve.csv` | Chunk F2 theo số chunk/query (n_c), precision biên |
 | `data/constants.csv` | hằng số pipeline chốt và nguồn hiệu chỉnh |
 | `data/noise_decisions.csv` | quyết định có \|Δ Final\| dưới ngưỡng ≈ 0,003 và lý do giữ / bỏ |
+| `data/zips_sha256.csv` | S44 28/10: mọi ZIP dưới `out/` lúc kiểm kê (2.067 tệp, 1.136 SHA khác nhau): đường dẫn, byte, mtime, SHA256 |
+| `data/archive_zips.csv` | S44: ZIP đề xuất lưu ngoài máy (vai trò, LB, byte, SHA256) |
 | `figures/` | `lb_progress`, `fingerprint_auc`, `chunk_f2_by_size`, `doc_f2_by_count`, `ablation_free`, `pipeline` (PNG 200 dpi + PDF) |
 
 Dựng lại:

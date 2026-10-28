@@ -59,3 +59,9 @@ date,metric,run,final,doc_f2,doc_p,doc_r,chunk_f2,chunk_p,chunk_r,doc_per_query,
 2026-10-27,v2,CH-ef2,0.4136,0.4413,,,0.3859,,,183.7,chunk_f2=2*final-doc_f2,free_frame,yes,RRF order; carriers per query maximise expected F2,docs/s41.md (LB 27/10 chiều)
 2026-10-27,v2,CH-rrf,0.4138,0.4413,0.2332,0.6575,0.3863,,,183.7,doc = FREE-noJina,free_frame,yes,FREE-noJina docs + CR-fair carriers in RRF order (private config),docs/s41.md; configs/s41-private-final.json
 2026-10-27,v2,FREE-Kfit,0.3994,0.4253,,,0.3735,,,183.7,doc_f2 = 0.4413 - 0.016 (Vu; rounded); chunk_f2=2*final-doc_f2,free_frame,yes,doc count per query = learned K_q (GBM on free-frame features; same total docs as CH-rrf),Vu 27/10; feat/s41:docs/s41.md (FREE-Kfit)
+2026-10-27,v2,B0,0.4101,0.4354,0.2299,0.6513,0.3847,,,183.7,,fallback,,CH-rrf without C-max (build --no-cmax); private fallback 1,docs/private-final.md mục 6
+2026-10-27,v2,COS,0.3607,0.3708,0.1621,0.7073,0.3507,,,299.0,,fallback,,no 4B: pinned cosine -> p_cal map (build --cos-only); replaced by COS-K150,docs/private-final.md mục 6
+2026-10-28,v2,COS-K150,0.3742,,,,,,,150.0,,fallback,,no 4B: top 150 docs in RRF order (build --cos-k 150); private fallback 2,docs/private-final.md mục 6.3
+2026-10-27,v2,P1-carrier-w2,0.4141,0.4413,,,0.3868,0.2306,0.5351,183.7,,free_frame,,CH-rrf docs; carrier order RRF with cosine weight 2,docs/s43.md (tổng kết; nhánh exp/s43)
+2026-10-28,v2,P3-doc-w1.5,0.4117,,0.2283,0.6610,,,,,,free_frame,,doc RRF cosine weight 1.5 + EF2 recomputed,docs/s43.md (tổng kết; nhánh exp/s43)
+2026-10-28,v2,EN-hedge3-c5226,0.4104,,,,,,,186.7,,free_frame,,CH-rrf + up to 3 en docs/query with cosine >= 0.5226 appended (public has no en gold); private copy 5,docs/s43.md (tổng kết; nhánh exp/s43)

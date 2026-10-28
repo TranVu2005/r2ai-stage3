@@ -7,6 +7,8 @@ CH-rrf, through the same newq functions as ``newq build`` (``pools_from``, ``cos
            ``--impute-4b``
     COS    every 4B score gone, ``--impute-4b``; C-max kept. ``cosine_pcal_map`` needs >= 1,000 scored pairs, so the cosine -> p_cal map is
            the one fitted on the full public 4B (two constants; on private they would have to be pinned in the config)
+    COSK150 the ``newq build --cos-k 150`` path (Vu 27/10): no 4B, the map pinned in configs/s41-private-fallback-cos-k150.json, the top 150
+           docs per query in RRF order (cosine + C-max) instead of the EF2 cut
 
     python scripts/s41/fallback_public.py --variant B0 --out out/runs/s41/fallback [--compose]
 
@@ -29,7 +31,8 @@ sys.path.insert(0, str(ROOT / "scripts" / "s41"))
 from r2ai import newq, paths  # noqa: E402
 import regress_public as reg  # noqa: E402
 
-VARIANTS = {"FULL": (1.0, True, 0.0), "B0": (0.0, False, 0.0), "IMP30": (0.0, True, 0.3), "COS": (0.0, True, 1.0)}   # (unused, C-max, drop share)
+VARIANTS = {"FULL": (1.0, True, 0.0), "B0": (0.0, False, 0.0), "IMP30": (0.0, True, 0.3), "COS": (0.0, True, 1.0), "COSK150": (0.0, True, 1.0)}   # (unused, C-max, drop share)
+COS_K = {"COSK150": 150}                     # variant -> K of build --cos-k
 SEED = 2026
 
 
@@ -70,13 +73,17 @@ def main() -> int:
         gone = set(np.random.default_rng(SEED).choice(ids, size=int(round(drop * len(ids))), replace=False).tolist())
         kept = {k: v for k, v in scores.items() if k not in gone}
         res["dropped_pairs"] = len(gone)
-    impute = None
-    if drop:
+    impute, keep_fn = None, None
+    if args.variant in COS_K:                      # exactly what build --cos-k does
+        cfg_k = newq.load_config(Path(str(newq.COS_K_CONFIG).format(k=COS_K[args.variant])))
+        impute, keep_fn = newq.cos_only_map(cfg_k), newq.cos_k_keep(cfg_k, COS_K[args.variant])
+        res["impute_map"] = impute
+    elif drop:
         impute = full_map if len(kept) < 1000 else {**newq.cosine_pcal_map(top, kept, a, b), "a": a, "b": b}
         res["impute_map"] = {**impute, "source": "full public 4B (no scored pair left)" if len(kept) < 1000 else "the kept 4B pairs"}
     keys = ("cosine_rank", "judge_rank", "cmax_rank") if use_cmax else ("cosine_rank", "judge_rank")
     t0 = time.monotonic()
-    got = newq.apply_selection(newq.pools_from(top, kept, impute), {}, cmax if use_cmax else {}, cfg, keys, True, name, apply_dir)
+    got = newq.apply_selection(newq.pools_from(top, kept, impute), {}, cmax if use_cmax else {}, cfg, keys, True, name, apply_dir, keep_fn)
     res["apply_seconds"] = round(time.monotonic() - t0, 1)
     full = newq.select(newq.pools_from(top, scores), {}, cmax, cfg, ("cosine_rank", "judge_rank", "cmax_rank"), True)
     chosen = {q: [int(r["doc_id"]) for r in rows] for q, rows in got["chosen"].items()}

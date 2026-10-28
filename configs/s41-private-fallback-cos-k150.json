@@ -1,0 +1,6 @@
+{
+  "note": "S41 private fallback COS-K150 (Vu 27/10): the COS branch (configs/s41-private-fallback-cos.json) with the EF2 cut replaced by the top 150 docs per query in RRF order (cosine + C-max; 4B constant), read only by `newq build --cos-k 150`. K chosen offline from the LB Doc P / R anchors (COS, CH-rrf, B0, cut150, cut130), not from p_cal.",
+  "inherits": "configs/s41-private-fallback-cos.json",
+  "inherits_sha256": "81ba043f299f674002da532c9b6c2ab3fef4000cc4e935883c57d087beca22e9",
+  "cos_k": 150
+}

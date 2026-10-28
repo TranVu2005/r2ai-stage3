@@ -846,7 +846,7 @@ def apply_selection(pools: dict[int, list[dict[str, Any]]], jina: dict, cmax: di
 
 def build(run: Path, name: str | None, no_jina: bool, no_cmax: bool, missing_last: bool, rounds: int, compose: bool = True,
           impute_4b: bool = False, drop_4b: float = 0.0, drop_seed: int = 40, cos_only: bool = False, cos_config: Path | None = None,
-          cos_k: int | None = None) -> dict[str, Any]:
+          cos_k: int | None = None, en_hedge: int = 0, en_min_cos: float | None = None) -> dict[str, Any]:
     import subprocess
     import sys
 
@@ -942,6 +942,16 @@ def build(run: Path, name: str | None, no_jina: bool, no_cmax: bool, missing_las
         best = min(ok, key=lambda r: r["threshold"])
         report["zip"] = {k: best.get(k) for k in ("zip", "zip_bytes", "zip_sha256", "threshold", "dropped_carriers", "docs", "chunks", "second_chunks")}
         report["zip"]["validator"] = best["validator"]
+        if en_hedge:                                # S43 probe: en docs after the vi/zh docs (r2ai.s43.enhedge), off by default
+            from r2ai.s38 import registry as reg
+            from r2ai.s43 import enhedge
+
+            reg.use_query_set(run)
+            q_ids, q_dense = query_vectors(run)
+            thr = en_min_cos if en_min_cos is not None else enhedge.all_pairs_percentiles(q_dense, (99,))["p99"]
+            hedge = enhedge.choose(enhedge.lane_pairs(q_ids, q_dense, en_hedge), en_hedge, thr)
+            report["en_hedge"] = {"n": en_hedge, "min_cos": thr, **enhedge.run(Path(best["zip"]), hedge, compose_dir,
+                                                                                f"{best['name']}-en{en_hedge}", best["zip_sha256"])}
     atomic_json(work / "build.json", report)
     log(f"compose {name}: rc={rc}, zip={report.get('zip', {}).get('zip')}")
     return report
@@ -991,6 +1001,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     b.add_argument("--test-drop-seed", type=int, default=40)
     b.add_argument("--rounds", type=int, default=10)
     b.add_argument("--no-compose", action="store_true", help="docsel / carriers only")
+    b.add_argument("--en-hedge", type=int, default=0, help="S43 probe: up to N en docs per query appended after the ZIP docs (0 = frozen private config)")
+    b.add_argument("--en-min-cos", type=float, default=None, help="S43 --en-hedge: min en cosine (default: P99 over all (query, en doc) pairs)")
     s = sub.add_parser("status")
     s.add_argument("--run", type=Path, required=True)
     sp = sub.add_parser("export-4b-sample", help="RunPod rehearsal / gate subset (never imported)")
@@ -1026,7 +1038,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.cmd == "build":
         result = build(run, args.name, not args.jina, args.no_cmax, args.missing_last, args.rounds, not args.no_compose,
                        args.impute_4b, args.test_drop_4b, args.test_drop_seed, args.cos_only,
-                       paths.resolve_path(args.cos_config) if args.cos_config else None, args.cos_k)
+                       paths.resolve_path(args.cos_config) if args.cos_config else None, args.cos_k, args.en_hedge, args.en_min_cos)
     else:
         result = status(run)
     print(json.dumps(result, indent=1, ensure_ascii=False, default=str))

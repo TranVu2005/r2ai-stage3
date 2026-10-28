@@ -7,7 +7,10 @@ the S38 compose of that docsel + carriers (same command as scripts/s41/run_ch.sh
 ``pools_from`` with no 4B score) on the same public pools / C-max must give the docsel / carriers of the fallback probe FB-COS
 (scripts/s41/fallback_public.py) and, composed, its ZIP byte for byte (SHA256 1c5600bb...).
 
-    python scripts/s41/regress_public.py --out out/runs/s41/regress [--variant CH-rrf|COS] [--compose]
+``--variant COSK150`` (Vu 28/10, replaces COS in the fallback chain): the ``newq build --cos-k 150`` path (``cos_only_map`` of
+configs/s41-private-fallback-cos-k150.json, ``cos_k_keep``) must give FB-COSK150 (docsel SHA256 equal, ZIP fd331252...).
+
+    python scripts/s41/regress_public.py --out out/runs/s41/regress [--variant CH-rrf|COS|COSK150] [--compose]
 
 Writes ``<out>/apply/`` (newq outputs), ``<out>/compose/`` and ``<out>/regress.json`` (every check, pass / fail)."""
 import argparse
@@ -36,7 +39,13 @@ REFS = {
             "a0df57cfd44c0a2004b47c8258b1ee74da5a80ea13c7d044d3948681b09f0660",
             RUNS / "s41" / "fallback" / "COS" / "apply" / "carriers-FB-COS.parquet", "9d095c902b08594d47e4893b053dbb6bd120d561da1b61407aa42104536904a1",
             "1c5600bbd54b80fc2095927d583cc37635b0920940503b172feda0b270790fc1"),
+    "COSK150": ("FB-COSK150", RUNS / "s41" / "fallback" / "COSK150" / "apply" / "docsel-FB-COSK150.parquet",
+                "e7a5891780f6332a64b417545fa4f0e40a0b7b4aa52f0b9a224873c02afca69c",
+                RUNS / "s41" / "fallback" / "COSK150" / "apply" / "carriers-FB-COSK150.parquet",
+                "30fc4bd2e623d7b478d0d2a910feb408e75d0fb9609a6d2e4bb770bc1eee22d1",
+                "fd33125209bc508eadc459fa569a23780b3d58e8f5dc833f9b04758a3d93c2fb"),
 }
+COS_K = {"COSK150": 150}
 REF_DOCSEL, REF_CARRIERS, REF_ZIP_SHA = REFS["CH-rrf"][1], REFS["CH-rrf"][3], REFS["CH-rrf"][5]   # read by fallback_public.py
 COLUMNS = ["query_id", "doc_id", "rank", "rrf_score", "cosine", "p4b", "cmax", "cosine_rank", "judge_rank", "cmax_rank", "p4b_ge_tc", "t_c",
            "p_fused", "p_cal"]          # every docsel column except the Jina ones (Jina is not an RRF source here) and the carrier flag
@@ -74,7 +83,8 @@ def main() -> int:
     paths.assert_writable(out)
     apply_dir.mkdir(parents=True, exist_ok=True)
     name, ref_docsel, docsel_sha, ref_carriers, carriers_sha, ref_zip_sha = REFS[args.variant]
-    cfg_path = newq.COS_CONFIG if args.variant == "COS" else newq.DEFAULT_CONFIG
+    cfg_path = (Path(str(newq.COS_K_CONFIG).format(k=COS_K[args.variant])) if args.variant in COS_K
+                else newq.COS_CONFIG if args.variant == "COS" else newq.DEFAULT_CONFIG)
     res: dict = {"variant": args.variant, "config": str(cfg_path), "config_sha256": newq.sha256(cfg_path)}
     for p, want in ((ref_docsel, docsel_sha), (ref_carriers, carriers_sha)):
         if newq.sha256(p) != want:
@@ -83,14 +93,17 @@ def main() -> int:
     spec = {**s37.default_inputs(), **json.loads((ROOT / "configs" / "s40-abl-free-v2-noJina.json").read_text(encoding="utf-8"))}
     t0 = time.monotonic()
     pools, cmax = public_sources(spec)
-    if args.variant == "COS":                   # what build --cos-only does: no 4B score, every pair from the pinned map
+    keep_fn = None
+    if args.variant != "CH-rrf":                # what build --cos-only / --cos-k does: no 4B score, every pair from the pinned map
         from fallback_public import top_frame
         impute = newq.cos_only_map(cfg)
         res["map"] = impute
         pools = newq.pools_from(top_frame(pools)[0], {}, impute)
+        if args.variant in COS_K:
+            keep_fn = newq.cos_k_keep(cfg, COS_K[args.variant])
     res["load_seconds"] = round(time.monotonic() - t0, 1)
     t0 = time.monotonic()
-    got = newq.apply_selection(pools, {}, cmax, cfg, ("cosine_rank", "judge_rank", "cmax_rank"), True, name, apply_dir)
+    got = newq.apply_selection(pools, {}, cmax, cfg, ("cosine_rank", "judge_rank", "cmax_rank"), True, name, apply_dir, keep_fn)
     res["apply_seconds"] = round(time.monotonic() - t0, 1)
     res["carrier_info"] = got["carrier_info"]
     new = pd.read_parquet(apply_dir / f"docsel-{name}.parquet")
@@ -99,7 +112,7 @@ def main() -> int:
     res["docsel"] = {"rows_new": len(a), "rows_ref": len(b), "equal_except_jina_and_chunk": bool(a.equals(b))}
     if not res["docsel"]["equal_except_jina_and_chunk"] and len(a) == len(b):
         res["docsel"]["columns_differing"] = [c for c in COLUMNS if not a[c].equals(b[c])]
-    if args.variant == "COS":
+    if args.variant != "CH-rrf":
         res["docsel"]["sha256_equal"] = newq.sha256(apply_dir / f"docsel-{name}.parquet") == docsel_sha
     car_new = pd.read_parquet(apply_dir / f"carriers-{name}.parquet")
     car_ref = pd.read_parquet(ref_carriers)

@@ -92,12 +92,25 @@ Không đề xuất, vì có thể thuộc dự án khác (có từ trước 10/
 
 **Giải phóng dự kiến ở D:** khoảng 160 GiB ngay sau khi xoá nhóm XOÁ (156,9 + 3,3); thêm 65 GiB nếu nhóm LƯU-TRỮ chuyển ra ngoài. Ổ còn trống từ 39 GB lên khoảng 210 GB, hoặc khoảng 280 GB.
 
-## 5. Thủ tục sau khi Vu duyệt (chưa làm)
+## 5. Thực hiện sau khi Vu duyệt (28/10 18:05–18:50)
 
-1. Trước khi chuyển, xác nhận mọi tác vụ lịch `r2ai-*` / `R2AI-*` đang Disabled (28/10 18:00: cả 4 Disabled) và không có tiến trình python nào của repo.
-2. Đóng gói LƯU-TRỮ vào `D:/_r2ai_archive/` kèm manifest SHA256. Vu chép gói ra nơi lưu trữ và kiểm SHA.
-3. Chuyển nhóm XOÁ vào `D:/_r2ai_to_delete/` (rename cùng ổ, giữ cấu trúc, manifest; dùng `hold.py` với `S44_HOLD`). Không dùng `rm` trực tiếp.
-4. Chạy lại `run_check.sh` (rh100 từ tag 28c) cùng lúc chuyển tạm nhóm LƯU-TRỮ. Đạt thì báo Vu tự xoá `D:/_r2ai_to_delete/`.
+1. Kiểm trước: không tiến trình python nào chạy; cả 4 tác vụ lịch `r2ai-*` / `R2AI-*` đều Disabled.
+2. **LƯU-TRỮ → `D:/_r2ai_archive/` (63,8 GiB)** (`scripts/s44/archive.py`):
+   * `zips/` chứa bản chép 6 ZIP, SHA256 đã kiểm trùng `archive_zips.csv`;
+   * `judge-public.tar`: 613.713.920 B, `24be5dc0d7e842ebd24b1c57553d2376f737f5fe27145e5e0878d5f75b78af61`, 912 tệp;
+   * `out-runs-meta.tar.xz`: 64.551.664 B, `a36063bde8a8e2d4486b81028e8513ca9abf70dcaff90a68b82c44d3e9422887`, 26.139 tệp;
+   * `manifest.json` ghi SHA256 từng tệp trong mỗi gói;
+   * `data/`: 22 mục của `data/` (index, docs_*, chunks*, cc_aws, pubmed_en, s22_*, cache, corpus_v2_ids.parquet), chuyển bằng rename (`moves.jsonl`); SHA256 từng tệp ở `data-sha256.csv`.
+3. **XOÁ → `D:/_r2ai_to_delete/` (162,7 GiB)**:
+   * 337 đường dẫn dưới `out/` (`hold.py`, `S44_HOLD`, `manifest.jsonl`); 3 tệp git đang theo dõi để nguyên, `git status` không đổi;
+   * `_other/`: `r2ai-stage3-doccut/out`, cache HF `models--jinaai--jina-reranker-v3.5` từ C: (chép, so khớp tên + kích thước từng tệp, rồi gỡ bản ở C:), `s44-verify-1` (`_other/moves.jsonl`).
+4. **Kiểm lại rh100 từ tag 28c** (`out/runs/s44-verify-2`, `docs/s44-rh100-compare.json`). Lúc này dưới `data/` và `out/` chỉ còn GIỮ-PRIVATE, raw và 3 tệp tracked.
+   * Trùng từng byte bản ghi: CH-rrf `57dca179…57b5`, COS-K150 `23d1d3ae…115e`, COS-K150 + EN-hedge `f13ee54c…8108`; ledger trùng.
+   * B0 `5afd66da…5f72` và EN-hedge trên CH-rrf `724054c6…80c9` trùng lần 1. **Đạt.**
+5. Việc của Vu:
+   * Chép `D:/_r2ai_archive/` ra ổ ngoài hoặc cloud và kiểm SHA theo `manifest.json` / `data-sha256.csv`, rồi xoá bản trên máy.
+   * Tự xoá `D:/_r2ai_to_delete/` (Explorer hoặc `rmdir /s /q D:\_r2ai_to_delete`; bên trong không còn junction: 2 junction rơi của pytest trỏ vào đường dẫn cũ không còn tồn tại, đã gỡ bằng `rmdir` không `/s`).
+   * Muốn hoàn tác một phần: `S44_HOLD=D:/_r2ai_to_delete python -I -X utf8 scripts/s44/hold.py restore`, và chuyển ngược theo `moves.jsonl`.
 
 ## 6. Cảnh báo junction
 

@@ -132,3 +132,24 @@ def test_cos_k_config_and_keep():
 def test_build_cos_k_excludes_impute(tmp_path):
     with pytest.raises(SystemExit):
         newq.build(tmp_path, None, True, False, False, 1, impute_4b=True, cos_k=150)
+
+
+def test_pool_frame_cosine_weight_reorders_and_default_is_unweighted():
+    rows = [{"doc_id": d, "cosine_rank": c, "judge_rank": j} for d, c, j in ((10, 1, 3), (11, 3, 1), (12, 2, 2))]
+    base = newq.PoolFrame(("cosine_rank", "judge_rank"), {1: [dict(r) for r in rows]}, {}, {}, allow_missing=True)
+    same = newq.PoolFrame(("cosine_rank", "judge_rank"), {1: [dict(r) for r in rows]}, {}, {}, allow_missing=True, w_cos=1.0)
+    assert [r["doc_id"] for r in base.order[1]] == [r["doc_id"] for r in same.order[1]] == [10, 11, 12]   # tie 10/11 by cosine rank
+    heavy = newq.PoolFrame(("cosine_rank", "judge_rank"), {1: [dict(r) for r in rows]}, {}, {}, allow_missing=True, w_cos=100.0)
+    assert [r["doc_id"] for r in heavy.order[1]] == [10, 12, 11]
+
+
+def test_choose_carriers_cosine_weight():
+    sel = pd.DataFrame({"query_id": [1, 1, 1, 1], "doc_id": [10, 11, 12, 13], "rank": [1, 2, 3, 4], "p4b": [0.9, 0.9, 0.9, 0.9],
+                        "cosine_rank": [50, 40, 2, 1], "judge_rank": [1, 2, 30, 40]})
+    rule = {"rule": "fair", "order": "rank", "target_per_query": 2}
+    car, info, _ = newq.choose_carriers(sel, rule, 1, w_cos=None, rrf_keys=("cosine_rank", "judge_rank"))
+    assert info["order"] == "rank" and sorted(car.doc_id) == [10, 11]
+    car, info, _ = newq.choose_carriers(sel, rule, 1, w_cos=3.0, rrf_keys=("cosine_rank", "judge_rank"))
+    assert info["order"] == "wrrf" and info["w_cos"] == 3.0 and sorted(car.doc_id) == [12, 13]
+    with pytest.raises(ValueError):
+        newq.choose_carriers(sel, {"rule": "fair", "target_per_query": 2}, 1, w_cos=3.0, rrf_keys=("cosine_rank", "judge_rank"))

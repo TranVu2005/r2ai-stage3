@@ -95,7 +95,7 @@ Không đề xuất, vì có thể thuộc dự án khác (có từ trước 10/
 ## 5. Thực hiện sau khi Vu duyệt (28/10 18:05–18:50)
 
 1. Kiểm trước: không tiến trình python nào chạy; cả 4 tác vụ lịch `r2ai-*` / `R2AI-*` đều Disabled.
-2. **LƯU-TRỮ → `D:/_r2ai_archive/` (63,8 GiB)** (`scripts/s44/archive.py`):
+2. **LƯU-TRỮ → `D:/_r2ai_archive/` (65,3 GiB: data 143.562 tệp 64,66 GiB + gói 0,67 GiB)** (`scripts/s44/archive.py`):
    * `zips/` chứa bản chép 6 ZIP, SHA256 đã kiểm trùng `archive_zips.csv`;
    * `judge-public.tar`: 613.713.920 B, `24be5dc0d7e842ebd24b1c57553d2376f737f5fe27145e5e0878d5f75b78af61`, 912 tệp;
    * `out-runs-meta.tar.xz`: 64.551.664 B, `a36063bde8a8e2d4486b81028e8513ca9abf70dcaff90a68b82c44d3e9422887`, 26.139 tệp;

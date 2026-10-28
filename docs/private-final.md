@@ -13,7 +13,7 @@ Thay mục 5 của `docs/s40-private.md` (các phần còn lại của tài li�
 | mốc public | LB 0,4138 (Doc 0,4413, Chunk 0,3863), ZIP `b12b85912ba03ec45062fb817b806583c0182633a89feaa2ae4f1372767908c8` |
 | config | `configs/s41-private-final.json` (mặc định của `python -m r2ai.newq`) |
 | ghim đầu vào | `configs/s41-newq-pins.json` (79 tệp, cùng SHA256 với `s40-newq-pins.json`; tệp trong repo ghi dạng `repo:<đường dẫn>` nên đúng ở mọi checkout); config ghim SHA256 của chính tệp ghim |
-| mã | **tag `v-private-2026-10-28b`** trên `main` (Vu 27/10: CH-rrf chốt + nhánh dự phòng COS / B0 / IMP30; chạy từ một worktree tách ở tag đó, không checkout trên repo chung). Tag cũ `v-private-2026-10-28` giữ nguyên (cùng CH-rrf, chưa có `--cos-only`). Tag đã tạo không sửa; thay đổi được duyệt sau này lấy tag mới (`…-28c`) |
+| mã | **tag `v-private-2026-10-28c`** trên `main` (Vu 28/10: CH-rrf chốt; chuỗi dự phòng CH-rrf → B0 → COS-K150; bản 5 phòng hộ EN-hedge N = 3; chạy từ một worktree tách ở tag đó, không checkout trên repo chung). Tag cũ `v-private-2026-10-28` (chưa có `--cos-only`) và `v-private-2026-10-28b` (chưa có `--cos-k`, `--en-hedge`) giữ nguyên, cùng CH-rrf. Tag đã tạo không sửa |
 
 ## 2. Kiểm tra trước khi đóng băng
 
@@ -46,8 +46,9 @@ T0 = lúc Vu có tệp query. Run `out/runs/private` (tên cố định; chưa t
 
 **Trước T0 (31/10)**
 
-- [ ] Worktree tách ở tag `v-private-2026-10-28b`, `.env` chép từ repo chung (RUNS_DIR đúng).
+- [ ] Worktree tách ở tag `v-private-2026-10-28c`, `.env` chép từ repo chung (RUNS_DIR đúng).
 - [ ] `python -m r2ai.newq pins` báo `input pins ok: 79 files`.
+- [ ] Làn en cho EN-hedge (ngoài 79 tệp ghim, kiểm tay bằng `sha256sum`): `data/s37_en/seg37900-en-pubmed/vectors.npz` `9edfe699a76f0030443b7d9662fae54769a37008243af4ed57bd764511a17bb0`, `docs.parquet` `c0e93e14e0893595911ed32f41ac9f5869705fea7d086a49f17a630053ce41c2`. Lệch thì không dựng EN-hedge, báo Vu.
 - [ ] GPU máy rảnh (không job nào khác), ổ đĩa còn ít nhất 30 GB.
 - [ ] Vu đã điền (A) đến (D); quota Kaggle ≥ 15 giờ.
 
@@ -82,9 +83,9 @@ T0 = lúc Vu có tệp query. Run `out/runs/private` (tên cố định; chưa t
 * Phiên Kaggle chết: chạy lại notebook của phần đó (bỏ qua part đã xong).
 * Hết quota hoặc đến 04/11 vẫn thiếu 4B: `build --impute-4b` (cặp thiếu 4B lấy p_cal từ ánh xạ cosine, xếp cuối nguồn 4B). Diễn tập thiếu 30%: Doc F2 mô hình khoảng 0,389 so với 0,419 khi đủ.
 * C-max hỏng hoặc quá chậm: `build --no-cmax`, nộp nếu đến T0 + 24 giờ C-max chưa xong.
-* 4B thiếu mà không dùng `--impute-4b`: `build` từ chối. Không có phần 4B nào: `build --cos-only` (mục 6.2).
+* 4B thiếu mà không dùng `--impute-4b`: `build` từ chối. Không có phần 4B nào: `build --cos-k 150` (COS-K150, mục 6.2; thay `--cos-only`).
 
-**5 lượt private:** (1) bản chính ngay khi có; (2) giữ cho bản sửa lỗi; (3) đến (5) để dành (chờ (B), (C)).
+**5 lượt private:** (1) bản chính ngay khi có; (2) giữ cho bản sửa lỗi; (3), (4) để dành (chờ (B), (C)); (5) phòng hộ EN-hedge N = 3 (mục 6.4), dùng theo quy tắc chấm của BTC.
 
 ## 6. Nếu một nguồn hỏng: mất bao nhiêu, làm gì (đo trên 1.200 query public, Vu 27/10)
 
@@ -95,10 +96,11 @@ Mã `scripts/s41/fallback_public.py` (đi qua đúng các hàm của `newq build
 | không (đối chứng) | CH-rrf | 220.436 (183,7) | 0,4253 | 0 | 0,4138 (Doc 0,4413 P 0,2332 R 0,6575; Chunk 0,3863) | bản chính |
 | C-max (hỏng / quá chậm) | **B0**: `build --no-cmax`, RRF cosine + 4B | 220.472 (183,7) | 0,4245 | −0,0008 | **0,4101** (Doc 0,4354 P 0,2299 R 0,6513; Chunk 0,3847): −0,0037 | nộp B0 nếu C-max chưa xong ở T0 + 24 giờ |
 | 30% cặp 4B (phiên Kaggle dở / hết quota) | **IMP30**: xoá 30% (seed 2026), `build --impute-4b` | 289.469 (241,2) | 0,3984 | −0,027 | chờ | `build --impute-4b` |
-| toàn bộ 4B | **COS**: xoá 100%, `--impute-4b`, C-max giữ | 358.759 (299,0) | 0,3786 | −0,047 | **0,3607** (Doc 0,3708 P 0,1621 R 0,7073; Chunk 0,3507): −0,0531 | `build --cos-only` (mục 6.2) |
-| toàn bộ 4B (thử) | **COS-K150**: như COS nhưng thay EF2 bằng 150 doc đầu theo thứ tự RRF (cosine + C-max) | 180.000 (150,0) | 0,3489 (mô hình p_cal, không dùng để chọn K) | −0,076 | chờ | `build --cos-k 150` (mục 6.3; chưa có trong tag) |
+| toàn bộ 4B (cũ, đã thay) | **COS**: xoá 100%, `--impute-4b`, C-max giữ | 358.759 (299,0) | 0,3786 | −0,047 | **0,3607** (Doc 0,3708 P 0,1621 R 0,7073; Chunk 0,3507): −0,0531 | thay bằng COS-K150 |
+| toàn bộ 4B | **COS-K150**: như COS nhưng thay EF2 bằng 150 doc đầu theo thứ tự RRF (cosine + C-max) | 180.000 (150,0) | 0,3489 (mô hình p_cal, không dùng để chọn K) | −0,076 | **0,3742** (+0,0135 so COS): −0,0396 | `build --cos-k 150` (mục 6.2, 6.3) |
 
 Ghi chú:
+* **Chuỗi dự phòng (Vu 28/10): CH-rrf → B0 → COS-K150.** COS-K150 thay COS (LB 0,3742 so 0,3607). IMP30 chưa có LB, nằm ngoài chuỗi.
 * **LB (Vu 27/10):** mô hình đánh giá thấp mức mất: B0 Doc −0,0059 (dự đoán −0,0008), COS Doc −0,0705 (dự đoán −0,047). COS gần như không cắt: 299,0 doc/query (P10 = P50 = 300, chỉ 19 query dưới 300, min 101), P 0,16 / R 0,71; R của COS gần bằng recall trần của pool cosine top-300.
 * **B0:** khác CH-rrf 15.784 doc (7%), Doc F2 dự đoán gần như không đổi. LB public cũ khi bỏ C-max ở cấu hình còn Jina (free-v2 0,4101 → FREE-noCmax 0,4077): mất 0,0024 Final, Doc −0,0032.
 * **IMP30:** ánh xạ cosine → p_cal fit trên 70% cặp còn điểm (c 12,861, d −9,754). Cặp được suy điểm xếp cuối nguồn 4B, nhưng p_cal suy ra vẫn đủ cao để EF2 giữ nhiều doc hơn (241 doc/query): recall dự đoán tăng (0,589), precision giảm (0,199).
@@ -116,7 +118,7 @@ Ghi chú:
 
 ### 6.1 Config COS và `--cos-only` (Vu 27/10)
 
-Mã `--cos-only` và config COS có từ tag `v-private-2026-10-28b` (Vu duyệt 27/10; tag cũ `v-private-2026-10-28` không có).
+Mã `--cos-only` và config COS có từ tag `v-private-2026-10-28b` (Vu duyệt 27/10; tag cũ `v-private-2026-10-28` không có). Từ 28/10 nhánh không 4B đi bằng COS-K150 (mục 6.3), cùng ánh xạ ghim này.
 
 * `configs/s41-private-fallback-cos.json` (SHA256 `81ba043f299f674002da532c9b6c2ab3fef4000cc4e935883c57d087beca22e9`) kế thừa `configs/s41-private-final.json` (ghim SHA256 `61922113…4ca4759`) và chỉ thêm `impute_4b = {mode: cos_only, c 12,890141042157486, d −9,772626922053805, source}`. `load_config` từ chối config kế thừa có khoá nào khác ngoài `impute_4b` / `note`, hoặc khi SHA256 tệp gốc lệch. `configs/s41-private-final.json` không đổi.
 * `build --cos-only` chỉ đọc c / d từ config này (mặc định, hoặc `--cos-config`). Nó dừng nếu các khoá chọn doc (depth, keep, a, b, s_free, g_depth, t_c, rrf_k, carriers) khác config của run, và không đi cùng `--impute-4b` / `--test-drop-4b`. `--impute-4b` thường vẫn fit ánh xạ riêng và vẫn cần ≥ 1.000 cặp có 4B.
@@ -132,9 +134,9 @@ Mã `--cos-only` và config COS có từ tag `v-private-2026-10-28b` (Vu duyệt
 
 Hồi quy a và b đi qua `newq.apply_selection` trên pool public dựng lại như `r2ai.s36.s37.apply` (như hồi quy mục 2), không qua `newq prepare`, vì public không có run newq. Tên build đặt trùng bản tham chiếu (`CH-rrf`, `FB-COS`) để tên JSON trong ZIP trùng.
 
-### 6.2 Lệnh từng nhánh và điều kiện chuyển (run `out/runs/private`, mã tag `v-private-2026-10-28b`)
+### 6.2 Lệnh từng nhánh và điều kiện chuyển (run `out/runs/private`, mã tag `v-private-2026-10-28c`)
 
-Mọi lệnh dưới đây chạy trong worktree tách ở tag `v-private-2026-10-28b` (tag cũ không có `--cos-only`).
+Mọi lệnh dưới đây chạy trong worktree tách ở tag `v-private-2026-10-28c` (tag `…-28b` không có `--cos-k`, `--en-hedge`; tag `…-28` không có `--cos-only`).
 
 Kiểm trước khi chọn: `python -m r2ai.newq status --run out/runs/private` (phần 4B đã nhập, có `cmax.parquet` không). Mỗi nhánh ghi vào thư mục build riêng, nên dựng được nhiều nhánh rồi chọn bản nộp. ZIP + SHA256 nằm ở `out/runs/private/build/<tên>/build.json` khoá `zip`.
 
@@ -143,18 +145,40 @@ Kiểm trước khi chọn: `python -m r2ai.newq status --run out/runs/private` 
 | CH-rrf (chính) | đủ mọi phần 4B và đã nhập C-max | `python -m r2ai.newq build --run out/runs/private` | `private-free` |
 | B0 | đủ 4B; C-max hỏng hoặc chưa xong ở T0 + 24 giờ | `python -m r2ai.newq build --run out/runs/private --no-cmax` | `private-free-noCmax` |
 | IMP30 | thiếu một phần 4B (phiên Kaggle chết, hết quota) mà đến 04/11 vẫn không chạy bù được; còn ≥ 1.000 cặp có 4B | `python -m r2ai.newq build --run out/runs/private --impute-4b` | `private-free-impute4b` |
-| COS | không phần 4B nào nhập được (dưới 1.000 cặp có 4B: `--impute-4b` từ chối) | `python -m r2ai.newq build --run out/runs/private --cos-only` | `private-free-cosonly` |
+| COS-K150 | không phần 4B nào nhập được (dưới 1.000 cặp có 4B: `--impute-4b` từ chối) | `python -m r2ai.newq build --run out/runs/private --cos-k 150` | `private-free-cosk150` |
+| (cũ) COS | đã thay bằng COS-K150; giữ để đối chiếu | `python -m r2ai.newq build --run out/runs/private --cos-only` | `private-free-cosonly` |
+| EN-hedge (bản 5) | phòng hộ, không thay bản chính: bản đã dựng của nhánh đang dùng + tối đa 3 doc en/query (mục 6.4) | thêm `--en-hedge 3 --name <tên build>-en3` vào lệnh của nhánh đó, ví dụ `python -m r2ai.newq build --run out/runs/private --en-hedge 3 --name private-free-en3` (đặt `--name` riêng để không ghi đè thư mục build của bản chính) | `private-free-en3`; ZIP `…-full+w768-t<T>-en3.zip` trong `compose/`, `build.json` khoá `en_hedge` |
 
-* C-max cũng thiếu: thêm `--no-cmax` vào lệnh IMP30 / COS. Tổ hợp này chưa đo trên public.
-* Thứ tự ưu tiên khi có nhiều lựa chọn: CH-rrf > B0 > IMP30 > COS (Doc F2 dự đoán 0,4253 / 0,4245 / 0,3984 / 0,3786).
+* C-max cũng thiếu: thêm `--no-cmax` vào lệnh IMP30 / COS-K150. Tổ hợp này chưa đo trên public.
+* Chuỗi chuyển (Vu 28/10): CH-rrf → B0 → COS-K150 (LB public 0,4138 / 0,4101 / 0,3742). IMP30 (thiếu một phần 4B) chưa có LB và không nằm trong chuỗi; dùng hay không do Vu quyết khi xảy ra.
 * Một phần 4B về muộn: nhập rồi dựng lại nhánh tốt hơn; bản đã nộp giữ nguyên.
 
-### 6.3 COS-K: K cố định thay EF2 khi không có 4B (Vu 28/10, chưa duyệt vào tag)
+### 6.3 COS-K: K cố định thay EF2 khi không có 4B (Vu 28/10, tag `v-private-2026-10-28c`)
 
 COS gần như không cắt (299 doc/query, P 0,16 / R 0,71), vì p_cal suy từ cosine không đủ dốc để EF2 bỏ doc. COS-K giữ đúng `K` doc đầu mỗi query theo thứ tự RRF của COS (nguồn 4B hằng, nên là cosine + C-max), carrier CR-fair như cũ.
 
-* Mã chỉ có trên `feat/s41` (commit `f5a06f5`), **không có trong tag `v-private-2026-10-28b`**. Dùng cho private cần Vu duyệt theo LB, rồi merge và tag mới (`…-28c`).
+* LB (Vu 28/10): **0,3742**, hơn COS 0,0135; thay COS trong chuỗi dự phòng. Mã từ `feat/s41` (`f5a06f5`), có từ tag `v-private-2026-10-28c` (tag `…-28b` không có).
 * `configs/s41-private-fallback-cos-k150.json` kế thừa `configs/s41-private-fallback-cos.json` (ghim SHA256 `81ba043f…e22e9`) và chỉ thêm `cos_k = 150`. `build --cos-k K` đọc `configs/s41-private-fallback-cos-k{K}.json`, dừng nếu `cos_k` trong config khác K, và không đi cùng `--impute-4b` / `--test-drop-4b`. Lệnh: `python -m r2ai.newq build --run out/runs/private --cos-k 150`, tên build `private-free-cosk150`.
 * Chọn K = 150 (Vu 28/10, thứ tự RRF cosine + C-max) bằng neo LB, không dùng p_cal: TP(K) = TP(299) · (K/299)^β, với β ≥ 0,33 suy từ neo CH-rrf / B0 / COS. Doc F2 so với COS: β 0,33 → +8,3%, β 0,40 → +3,2%, β 0,50 → −3,7%. K = 150 bền nhất trên dải β này. LB của COS-K150 cho thêm một neo trên thứ tự cosine để ước β.
 * Public (`scripts/s41/fallback_public.py`, bản `COSK150`): 180.000 doc (150 mọi query), khác CH-rrf 24.733 doc mới / 65.169 doc bỏ; 175.200 carrier (141.022 trùng CH-rrf). ZIP ở bảng mục 6. Doc F2 mô hình p_cal 0,3489 (mô hình này coi EF2 là tối ưu nên phạt mọi cách cắt khác; chỉ ghi lại, không dùng để chọn).
 * Diễn tập rh100 `--cos-k 150` (run `out/runs/s41/rh100-cos`): 15.000 doc (150/query), ZIP 10.491.554 B `448cc699d00f8ea529ed1d9c0de6a56d59a7256f0b37716cc0fb3fc9472ac41f`, T 1536, 16.966 chunk, 0 carrier bị bỏ, validator ok; compose 393 s, tổng 424 s.
+
+### 6.4 EN-hedge: bản 5 phòng hộ (Vu 28/10, tag `v-private-2026-10-28c`)
+
+* **Là gì:** ZIP đã dựng của nhánh đang dùng, giữ nguyên phần vi/zh (cùng thứ tự), nối vào CUỐI `relevant_docs` tối đa N = 3 doc en mỗi query: doc của làn en (`data/s37_en/seg37900-en-pubmed`, 239.771 doc) có cosine BGE-M3 cao nhất, chỉ nhận doc có cosine ≥ X. Mỗi doc en có một chunk full body, nối cuối `relevant_chunks`. Mã `r2ai.s43.enhedge` (từ `exp/s43`), cờ `newq build --en-hedge N [--en-min-cos X]`, mặc định 0 (bản chính không đổi). X mặc định là P99 cosine trên mọi cặp (query, doc en) của bộ query đang chạy; public ra 0,5226.
+* **Dùng thế nào:** lượt 5 (phòng hộ), theo quy tắc chấm của BTC. Public không có gold en, nên LB public chỉ đo giá phải trả (dự đoán Final khoảng −0,003). Bản này có lời ở private chỉ khi precision en vượt khoảng 0,08.
+* **Public (S43, giao Vu 27/10):** `out/runs/s43/probes/EN-hedge3-c5226/EN-hedge3-c5226-full+w768-t1536.zip`, 102.124.766 B (trần 102.600.000), SHA256 `ce0fabc01cd017ff2372351355711a31affa0152940f77c4f945acebc6188742`, validator ok. 3.594 doc en (2,995/query, 1.199 query), phần vi/zh trùng CH-rrf 1.200 / 1.200 query. Lượt nộp public lỗi phía máy chấm (`/app/output/scores.txt` không tồn tại, `docs/PROGRESS.md` 28/10 01:40), nên chưa có số LB.
+* **Kích thước:** EN-hedge thêm khoảng 1,5 MB vào ZIP. CH-rrf public 100,65 MB thành 102,12 MB, chỉ cách trần 0,48 MB. `enhedge.run` ghi `under_ceiling` vào `build.json`; nếu ZIP vượt trần thì không nộp, báo Vu.
+* **Đầu vào ngoài ghim:** làn en không có trong 79 tệp của `configs/s41-newq-pins.json`; kiểm tay SHA256 hai tệp ở checklist mục 5 trước khi dựng.
+* Diễn tập trên rh100 (28/10, run `out/runs/s41/rh100-cosk150`): `build --cos-k 150 --en-hedge 3 --name rh100-cosk150-free-cosk150-en3` chạy hết trong 223 s. X = 0,5217 (P99 tính trên 100 query), 300 doc en (3/query, 100 query), phần trước giữ nguyên. ZIP 10.617.191 B `f13ee54c924905d6981a208f668397095a2992f918d78096834fbc71077f8108`, dưới trần, validator ok (nguồn thêm `seg37900-en-pubmed`).
+
+### 6.5 Hồi quy trước tag `v-private-2026-10-28c` (Vu 28/10)
+
+Trên `main` sau khi merge `feat/s41` (`--cos-k`) và `exp/s43` (`--en-hedge`, kéo theo `--w-cos-doc` / `--w-cos-carrier` mặc định 1). Driver `scripts/s41/run_28c_regress.sh`, log `out/runs/s41/regress-28c/regress-28c.log`, 28/10 07:43 đến 09:11. Test toàn bộ: 1.079 passed.
+
+| kiểm | kết quả |
+|---|---|
+| CH-rrf mặc định (`regress_public.py --variant CH-rrf --compose`) | docsel 220.436 dòng trùng, carrier trùng; ZIP 100.651.136 B `b12b85912ba03ec45062fb817b806583c0182633a89feaa2ae4f1372767908c8` **trùng từng byte**; compose 37,4 phút |
+| EN-hedge (`regress_enhedge.py`, nền là ZIP CH-rrf vừa dựng lại, N 3, X 0,5226) | 3.594 cặp en trùng `hedge.parquet` của S43, cả khi đọc tệp làn en lẫn khi tính lại từ vector (`lane_pairs`, đường `newq --en-hedge`); ZIP 102.124.766 B `ce0fabc01cd017ff2372351355711a31affa0152940f77c4f945acebc6188742` **trùng từng byte** bản S43 đã nộp; validator ok; 16,9 phút |
+| COS-K150 (`regress_public.py --variant COSK150 --compose`: `cos_only_map` + `cos_k_keep` của config K150) | docsel 180.000 dòng trùng (SHA256 tệp trùng), carrier trùng; ZIP 98.548.799 B `fd33125209bc508eadc459fa569a23780b3d58e8f5dc833f9b04758a3d93c2fb` **trùng từng byte**; compose 28,2 phút |
+| rh100 `--cos-k 150`, run mới `out/runs/s41/rh100-cosk150`, không nhập phần 4B nào | prepare 33 s, export 125 s, import C-max 0 s, `build --cos-k 150` (compose gồm) 165 s; 15.000 doc (150/query), 30.000 cặp suy điểm, T 1536, 16.966 chunk, 0 carrier bị bỏ, validator ok. ZIP 10.491.562 B `23d1d3ae62997627a8f29252f78da7ad2012e23c6ba512ded7874d7bdc1f115e`: JSON bên trong trùng từng byte bản rh100 trước (`448cc699…`), chỉ khác tên tệp JSON vì tên run khác |

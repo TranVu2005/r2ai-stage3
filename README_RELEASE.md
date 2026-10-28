@@ -77,6 +77,6 @@ Chạy lại `apply` từ cả hai config cố định và so SHA256 với manif
 
 ## 6. Bộ private
 
-**Private 01–04/11 (Vu 27/10): tag `v-private-2026-10-28b`** trên `main` (cấu hình chốt CH-rrf `configs/s41-private-final.json`, nhánh dự phòng COS `configs/s41-private-fallback-cos.json` qua `newq build --cos-only`, B0 `--no-cmax`, IMP30 `--impute-4b`). Chạy `python -m r2ai.newq` theo `docs/private-final.md` (checklist giờ G mục 5, lệnh từng nhánh mục 6.2) từ một worktree tách ở tag đó. Tag cũ `v-private-2026-10-28` giữ nguyên; tag đã tạo không sửa. Phần dưới đây là đường S35 cũ (`r2ai.release`).
+**Private 01–04/11 (Vu 28/10): tag `v-private-2026-10-28c`** trên `main` (cấu hình chốt CH-rrf `configs/s41-private-final.json`; chuỗi dự phòng CH-rrf → B0 `--no-cmax` → COS-K150 `--cos-k 150` (`configs/s41-private-fallback-cos-k150.json`); bản 5 phòng hộ EN-hedge `--en-hedge 3`). Chạy `python -m r2ai.newq` theo `docs/private-final.md` (checklist giờ G mục 5, lệnh từng nhánh mục 6.2) từ một worktree tách ở tag đó. Tag cũ `v-private-2026-10-28`, `v-private-2026-10-28b` giữ nguyên; tag đã tạo không sửa. Phần dưới đây là đường S35 cũ (`r2ai.release`).
 
 Dựng lại bằng đúng lệnh ở mục 3 nếu private dùng lại 1.200 query; nếu là bộ query mới thì xem `docs/release-private.md` và chạy `python -m r2ai.release plan --new-queries N` (chạy khô, không GPU).

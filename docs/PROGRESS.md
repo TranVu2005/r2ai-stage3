@@ -1,8 +1,9 @@
 # PROGRESS – R2AI Stage 3
 
-- Cập nhật: 2026-10-28 09:25 (UTC+7)
-- Model thực hiện: Claude Opus 5.5 (S41)
-- Commit HEAD đã kiểm trước cập nhật này: `6191086` trên `main` (nhánh làm việc `s41-merge-main`; merge `feat/s41` `bb2be1f`, `exp/s43` `2d3a92a`)
+- Cập nhật: 2026-10-28 18:05 (UTC+7)
+- Model thực hiện: Claude Opus 5.5 (S44)
+- Commit HEAD đã kiểm trước cập nhật này: `7e8894d` trên `main` (= tag `v-private-2026-10-28c`; nhánh làm việc `docs/s44-housekeeping`)
+- **S44 housekeeping 28/10 (`docs/s44-housekeeping.md`, `docs/private-runbook.md`):** origin đủ `main` `7e8894d`, ba tag private và năm nhánh cần giữ (không push gì); `main` local fast-forward `e179ffd` → `7e8894d`; bảng nhánh ở mục 6 "S44 bảng nhánh". Runbook private 1 trang từ tag 28c (IMP30 không dùng). Kiểm kê 270,4 GiB trong `data/` / `out/` / `state/`: GIỮ-PRIVATE 29,6 (+ BGE-M3 8,5 ở C:), GIỮ-NGUỒN (raw, state) 18,6, LƯU-TRỮ 65,2, XOÁ được 156,9 GiB. Bằng chứng tập GIỮ-PRIVATE đủ: chuyển tạm 346 đường dẫn khác ra ngoài, dựng lại rh100 từ tag 28c ra **trùng từng byte** CH-rrf `57dca179…57b5`, COS-K150 `23d1d3ae…115e`, COS-K150 + EN-hedge `f13ee54c…8108`, ledger trùng; đã hoàn nguyên. Chưa xoá hay di chuyển gì, chờ Vu duyệt.
 - **S41 tag 28c 28/10:** LB COS-K150 0,3742 (+0,0135 so COS), thay COS. `main` gộp `--cos-k` (`feat/s41`) và `--en-hedge` (`exp/s43`, mặc định 0; kéo theo `--w-cos-doc` / `--w-cos-carrier` mặc định 1). Test 1.079 passed. Hồi quy trùng từng byte: CH-rrf `b12b8591…08c8`, EN-hedge `ce0fabc0…8742` (bản S43 đã nộp, dựng lại trên ZIP CH-rrf mới), COS-K150 `fd331252…c2fb`; rh100 `--cos-k 150` chạy hết (build 165 s, validator ok), rh100 `--en-hedge 3` ok. Tag annotated `v-private-2026-10-28c`. Chuỗi dự phòng CH-rrf → B0 → COS-K150; bản 5 phòng hộ EN-hedge N = 3 (`docs/private-final.md` mục 6).
 - **S41 tag 28/10:** `feat/s41` merge vào `main` (no-ff, merge commit `527b6bdc958416b50dfc6e30c0c445c3773c6ebd`, không force). Trên main sau merge: test toàn bộ 1.073 passed; hồi quy a CH-rrf ZIP `b12b8591…08c8` trùng từng byte. Tag annotated `v-private-2026-10-28b` (object `260fad63`) trỏ `527b6bd`, dùng cho private; tag `v-private-2026-10-28` giữ nguyên. LB dự phòng (Vu): B0 0,4101, COS 0,3607 (gần như không cắt, 299 doc/query). COS-K150 (`newq build --cos-k 150`, config `s41-private-fallback-cos-k150.json`, chỉ trên `feat/s41`, chưa trong tag): public 150 doc/query, ZIP 98.548.799 B `fd331252…c2fb`, validator ok, chưa nộp (`docs/private-final.md` mục 6.3).
 - **S43 27/10 tối (docs/s43.md mục 5, 6):** LB P1-carrier-w2 Final 0,4141, Doc 0,4413 (khớp), Chunk 0,3868 (+0,0005), Vu nộp P2. **EN-hedge3-c5226 giao Vu** (CH-rrf + tối đa 3 doc en/query cosine ≥ 0,5226 = P99 mọi cặp, nối cuối): 102.124.766 B `ce0fabc0…8742`, validator ok, vi/zh trùng CH-rrf 1.200/1.200, 3.594 doc en (2,995/query, 1.199 query). `newq build --en-hedge N` (mặc định 0). Probe doc dựng xong 28/10 03:40 (validator ok, chưa nộp): P3-doc-w1.5 99.881.154 B `96c7d86d…e891`, P4-doc-w2 99.432.590 B `6513c531…0ffe`. Dừng cứng đề xuất private: 30/10 18:00 kèm hồi quy + rh100.
@@ -620,6 +621,36 @@ Cập nhật 2026-10-23 13:10 (UTC+7), Claude Sonnet 5.5, HEAD kiểm trước c
 - C-max d300 (25/10, theo yêu cầu S35): `scripts/s37/d300_cmax.py prepare|reduce`, `run_d300_cmax.ps1 -Stage prepare|score` chấm `out/runs/s36-fuse4/d300/cmax_pairs.parquet` (31.495 cặp, 597 query; số "34.023" lấy từ counts.json cũ, "30.676" của S35 không tìm thấy trong artifact, hai tập khóa trùng nên không có cặp bổ sung). Top-3 chunk t256 body/answer theo cosine với vector query S29 (select_like_s32 + gate 1.000 cặp S32: 0 lệch), doc 120ask mới lấy chunk từ `chunk_vectors.npz` của segment S37; doc không có chunk dùng `doc_text` (fallback). Pool 84.124 dòng (78.962 chunk + 2.950 fallback doc_text; 28.545 cặp có chunk). Chạy 21:17–22:06 (49 phút), 0 NaN, `cmax_scores-d300.parquet` SHA `832aec53…80ad8f9` (cột `query_id, doc_id, cmax, fallback`; C-max p10/p50/p90 0,0052/0,2227/0,9553). Prepare lần đầu hỏng 3 lỗi (doc không có trong canonical ×2, thiếu `pair_id`), health watcher bắt lỗi sau ~70 giây. Không chấm Jina cho phần d300 thêm.
 - Manifest bàn giao cuối (25/10 22:10): `out/runs/s37/handoff/manifest.json` SHA `995a77ed…1dff`, `final=true`; Jina jina-final2 1.002/1.002 query, C-max 100% cặp S37 + mục `scores.cmax_d300` (khóa (query_id, doc_id)), segment en, 4B 77,63% (thiếu 17.111 cặp b0008/b0009, đợi gói Kaggle chung với d300 của S35). Khi S35 báo 4B xong: `r2ai.s37.handoff merge4b` rồi `manifest`.
 
+### S44 bảng nhánh (28/10/2026, housekeeping)
+
+Kiểm 28/10 17:00 (UTC+7) sau `git fetch origin --tags`. `origin` có `main` `7e8894d`, tag `v-private-2026-10-28` (object `d6d0bd07`, commit `64f950a`), `…-28b` (`260fad63`, `527b6bd`), `…-28c` (`114854f6`, `7e8894d`), các nhánh `feat/s40-private`, `feat/s41`, `exp/s43`, `exp/s43-enhedge`, `feat/s22-reextract` trùng SHA local, nên không push gì. `main` local (worktree `D:/GitHub/r2ai-stage3-corpusv2`) đang ở `e179ffd`, được fast-forward lên `7e8894d` (56 commit, không force). Không xoá nhánh nào.
+
+Trạng thái: **merged** = tổ tiên của `main`; **đóng** = hướng đã kết thúc theo docs nhưng còn commit chưa vào `main`; **giữ** = còn commit chưa vào `main`, chưa có quyết định đóng. `origin`: `trùng` (cùng SHA), `local` (chưa có trên origin), `lệch`.
+
+| nhánh | SHA | ngày | origin | trạng thái | ghi chú |
+|---|---|---|---|---|---|
+| `main` | `7e8894d` | 28/10 | trùng | merged | = tag `v-private-2026-10-28c` |
+| `s41-merge-main` | `7e8894d` | 28/10 | local | merged | nhánh làm việc của merge 28c |
+| `feat/s40-private`, `feat/s41` | `8201378`, `c45c895` | 27–28/10 | trùng | merged | |
+| `exp/s43` | `c3c02d5` | 28/10 | trùng | đóng (+1) | commit tổng kết S43 (`docs/s43.md`: LB P3-doc-w1.5 0,4117, EN-hedge 0,4104) chưa vào `main` |
+| `exp/s43-enhedge` | `97ca6ce` | 28/10 | trùng | đóng (+1) | mã `--en-hedge` đã vào `main` qua merge S41; commit riêng là bản bàn giao |
+| `feat/s22-reextract` | `6e600bf` | 18/10 | trùng | đóng (+5) | Vu: không hợp nhất (31 khối xung đột zh_v2) |
+| `release/final` | `d0bda7d` | 26/10 | lệch (local +1) | đóng (+1) | thay bằng `main`; commit docs local chưa push |
+| `docs/working-notes` | `f352168` | 27/10 | trùng | giữ (+4) | working notes S42 |
+| `feat/s33-structure-signals` | `a3edad2` | 22/10 | trùng | giữ (+1) | chỉ docs |
+| `feat/s21-120ask`, `docs/s16-inventory`, `codex/s23-cc-news`, `codex/zh-short-threshold` | `47140cf`, `2eafdf8`, `858fe3b`, `662f285` | 17/10 | trùng | giữ (+3 đến +4) | crawl / báo cáo S16–S23 |
+| `feat/en-pubmed` | `d183681` | 15/10 | local | giữ (+14) | ingest en PubMed |
+| `feat/reranker-trial` | `32bb54c` | 17/10 | local | giữ (+9) | S15 |
+| `feat/cc-aws` | `c7c8a37` | 17/10 | local | giữ (+6) | S19 Common Crawl |
+| `feat/zh-v2` | `70ef570` | 15/10 | local | giữ (+4) | S11 |
+| `cc-longchau`, `docs/s18-content-audit`, `feat/s21-origin-main-stage`, `upload-probe` | `b70bd1f`, `e80ef09`, `3af405e`, `5b111f8` | 13–17/10 | local | giữ (+2) | |
+| `chunk-exp` | `12f032a` | 13/10 | local | giữ (+1) | |
+| 27 nhánh còn lại | | 11–26/10 | trùng hoặc local | merged | `codex/doc-cut-best-a1-115`, `diag-lang`, `doc-cut`, `docs-1011`, `feat/c3`, `feat/corpus-v2`, `feat/corpus-v2-vinmec`, `feat/integrate`, `feat/s24-recovery`, `feat/s25-canonical`, `feat/s26-gold-structure`, `feat/s27-pharmacity`, `feat/s29-qwen-judge`, `feat/s31-strong-judge`, `feat/s32-chunk-judge`, `feat/s33-btc-baseline`, `feat/s35-part-jina`, `feat/s36-fuse4`, `feat/s37-120ask-vps`, `feat/s38-chunk-metric-v2`, `feat/s38-compose-registry`, `feat/vi-gaps`, `feat/vi-quality`, `s6`, `tmp/s12-merge`, `vi-longchau`, `zh-full-ingest` |
+
+9 nhánh chưa merge chỉ có ở local (`feat/en-pubmed`, `feat/reranker-trial`, `feat/cc-aws`, `feat/zh-v2`, `cc-longchau`, `docs/s18-content-audit`, `feat/s21-origin-main-stage`, `upload-probe`, `chunk-exp`, và commit +1 của `release/final`): chưa push lên origin, chờ Vu quyết.
+
+Cảnh báo dọn ổ: 6 worktree anh em `D:/GitHub/r2ai-stage3-{vi,s6,chunk,cc,corpusv2,integrate}` có **junction** `data/`, `out/` (và `state/` ở 4 cái đầu) trỏ vào `D:/GitHub/r2ai-stage3/{data,out,state}`. Không xoá đệ quy các thư mục này; gỡ junction trước (`rmdir <junction>`, không `/s`) hoặc dùng `git worktree remove`.
+
 ## 7. Blockers
 
 1. **Recall còn thấp** (bản tốt nhất đã đo VS-append): Doc R 0,3716, Chunk R 0,2199 (chunk giống RD150). Độ phủ index NEW 623.805 doc / 4.394.718 URL corpus ≈ 14,2%; phần gold thiếu phần lớn nằm ngoài index (ước tính, không phải số đo).
@@ -845,3 +876,4 @@ Cập nhật 2026-10-23 13:10 (UTC+7), Claude Sonnet 5.5, HEAD kiểm trước c
 | 2026-10-28 00:40 | Claude Opus 5.5 | S41: merge `feat/s41` vào `main` (`527b6bd`), 1.073 test passed, hồi quy CH-rrf trùng từng byte, tag `v-private-2026-10-28b`; LB B0 / COS vào `docs/private-final.md`; `newq build --cos-k K` + config COS-K150 (chưa tag). |
 | 2026-10-28 04:20 | Claude Opus 5.5 | S41: ZIP public COS-K150 (`FB-COSK150-full+w768-t1536.zip`, 98.548.799 B, `fd33125209bc508eadc459fa569a23780b3d58e8f5dc833f9b04758a3d93c2fb`, T 1536, validator ok, 180.000 doc); `docs/private-final.md` mục 6 / 6.3 (lệnh `--cos-k 150`, rh100 ok). Chưa nộp, chưa tag. |
 | 2026-10-28 09:25 | Claude Opus 5.5 | S41: merge `feat/s41` (`--cos-k`) + `exp/s43` (`--en-hedge`) vào `main`, 1.079 test passed; hồi quy CH-rrf / EN-hedge / COS-K150 trùng từng byte, rh100 `--cos-k 150` và `--en-hedge 3` ok (`scripts/s41/run_28c_regress.sh`, `regress_enhedge.py`); `docs/private-final.md` mục 6 (chuỗi CH-rrf → B0 → COS-K150, 6.4 EN-hedge, 6.5 hồi quy); tag `v-private-2026-10-28c`. |
+| 2026-10-28 18:05 | Claude Opus 5.5 | S44: xác nhận origin (main, ba tag private, năm nhánh), fast-forward `main` local, bảng nhánh; `docs/private-runbook.md`; kiểm kê ổ + phân loại 4 nhóm (`docs/s44-housekeeping.md`, `docs/s44-disk-inventory.csv`, `scripts/s44/`); phép thử hold + rh100 từ tag 28c trùng từng byte ba ZIP đã ghi, hoàn nguyên 346 đường dẫn; ghi chú LB / SHA ZIP trên `docs/working-notes` (`02dc26a`). Chưa xoá gì. |

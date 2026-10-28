@@ -1,0 +1,337 @@
+group,path,bytes,gib,newest,note
+GIU-NGUON,state/zh_full,8582000456,7.993,2026-10-17,crawl.db / extract.db (AGENTS)
+GIU-NGUON,data/raw_vi,3679529131,3.427,2026-10-03,AGENTS: raw
+GIU-NGUON,data/raw_zh_full,3499913042,3.26,2026-10-13,AGENTS: raw
+GIU-NGUON,data/raw,1483879327,1.382,2026-10-15,AGENTS: raw giữ ổn định đến sau 11/11
+GIU-NGUON,data/raw_cc_longchau,950743889,0.885,2026-10-17,AGENTS: raw
+GIU-NGUON,state/zh_full_ingest,606359552,0.565,2026-10-17,crawl.db / extract.db (AGENTS)
+GIU-NGUON,state/crawl.db,376438784,0.351,2026-10-03,crawl.db / extract.db (AGENTS)
+GIU-NGUON,data/raw_zh_v2,256173587,0.239,2026-10-15,AGENTS: raw
+GIU-NGUON,state/extract.db,182398976,0.17,2026-10-04,crawl.db / extract.db (AGENTS)
+GIU-NGUON,data/raw_zh_sample,154258724,0.144,2026-10-05,AGENTS: raw
+GIU-NGUON,state/cc_longchau,52248624,0.049,2026-10-18,crawl.db / extract.db (AGENTS)
+GIU-NGUON,state/zh_v2_ingest,47431680,0.044,2026-10-16,crawl.db / extract.db (AGENTS)
+GIU-NGUON,state/zh_v2,27181056,0.025,2026-10-28,crawl.db / extract.db (AGENTS)
+GIU-NGUON,state/crawl_zh_sample.db,18165760,0.017,2026-10-05,crawl.db / extract.db (AGENTS)
+GIU-NGUON,state/zh_v2_direct,15990784,0.015,2026-10-21,crawl.db / extract.db (AGENTS)
+GIU-NGUON,state/zh_v2_ingest_redo,1853223,0.002,2026-10-16,crawl.db / extract.db (AGENTS)
+GIU-NGUON,state/zh_sample_extract,1622016,0.002,2026-10-05,crawl.db / extract.db (AGENTS)
+GIU-NGUON,state/zh_v2_ingest_redo2,102595,0.0,2026-10-16,crawl.db / extract.db (AGENTS)
+GIU-NGUON,state/cc_pilot,90112,0.0,2026-10-13,crawl.db / extract.db (AGENTS)
+GIU-NGUON,state/crawl.db-shm,32768,0.0,2026-10-19,crawl.db / extract.db (AGENTS)
+GIU-NGUON,state/crawl_zh_sample.db-shm,32768,0.0,2026-10-13,crawl.db / extract.db (AGENTS)
+GIU-NGUON,state/extract.db-shm,32768,0.0,2026-10-17,crawl.db / extract.db (AGENTS)
+GIU-NGUON,state/en_pubmed_fetch.lock,1,0.0,2026-10-14,crawl.db / extract.db (AGENTS)
+GIU-NGUON,state/crawl.db-wal,0,0.0,2026-10-04,crawl.db / extract.db (AGENTS)
+GIU-NGUON,state/crawl_zh_sample.db-wal,0,0.0,2026-10-05,crawl.db / extract.db (AGENTS)
+GIU-NGUON,state/extract.db-wal,0,0.0,2026-10-06,crawl.db / extract.db (AGENTS)
+GIU-PRIVATE,data/canonical-20261018,18070921532,16.83,2026-10-18,lệnh runbook / diễn tập rh100
+GIU-PRIVATE,data/hf_model_cache,9267047235,8.631,2026-10-16,lệnh runbook / diễn tập rh100
+GIU-PRIVATE,out/runs/s26-gold-structure/full (phần ghim),1823982964,1.699,2026-10-19,out/runs/s26-gold-structure/full/full_doc_dense.npz
+GIU-PRIVATE,data/s37_en,1192775815,1.111,2026-10-25,lệnh runbook / diễn tập rh100
+GIU-PRIVATE,data/s37_120ask,1071618329,0.998,2026-10-25,lệnh runbook / diễn tập rh100
+GIU-PRIVATE,out/runs/s40,338521071,0.315,2026-10-27,lệnh runbook / diễn tập rh100
+GIU-PRIVATE,out/runs/s32-chunk-judge/pool (phần ghim),15796836,0.015,2026-10-21,out/runs/s32-chunk-judge/pool/supplement_vectors.npz
+GIU-PRIVATE,out/runs/s27-pharmacity/handoff (phần ghim),12490662,0.012,2026-10-21,out/runs/s27-pharmacity/handoff/cc-s27-pharmacity
+GIU-PRIVATE,out/runs/s27-pharmacity/vectors (phần ghim),4049484,0.004,2026-10-21,out/runs/s27-pharmacity/vectors/handoff
+GIU-PRIVATE,out/runs/s37/cmax-d300 (phần ghim),1609616,0.001,2026-10-25,out/runs/s37/cmax-d300/supplement_vectors.npz
+GIU-PRIVATE,out/runs/s31-strong-judge/pool-extra (phần ghim),36110,0.0,2026-10-21,out/runs/s31-strong-judge/pool-extra/kaggle/judge_score.py
+GIU-PRIVATE,out/runs/s40/abl (phần ghim),16440,0.0,2026-10-26,out/runs/s40/abl/rehearsal-input
+GIU-PRIVATE,out/runs/reranker-trial,3111,0.0,2026-10-15,lệnh runbook / diễn tập rh100
+LUU-TRU,data/index,54542747266,50.797,2026-10-18,"vector BGE-M3 cũ theo segment (nguồn của canonical); tái tạo = embed lại, nhiều giờ GPU"
+LUU-TRU,data/docs_zh_full,4674954678,4.354,2026-10-13,"docs/chunks trung gian (nguồn canonical-20261018); tái tạo bằng extract từ raw, không chắc trùng byte"
+LUU-TRU,data/chunks_zh_full,2473740118,2.304,2026-10-13,"docs/chunks trung gian (nguồn canonical-20261018); tái tạo bằng extract từ raw, không chắc trùng byte"
+LUU-TRU,data/docs_vi,2427965673,2.261,2026-10-04,"docs/chunks trung gian (nguồn canonical-20261018); tái tạo bằng extract từ raw, không chắc trùng byte"
+LUU-TRU,data/chunks,1848595719,1.722,2026-10-04,"docs/chunks trung gian (nguồn canonical-20261018); tái tạo bằng extract từ raw, không chắc trùng byte"
+LUU-TRU,data/cc_aws,1190743326,1.109,2026-10-17,"docs/chunks trung gian (nguồn canonical-20261018); tái tạo bằng extract từ raw, không chắc trùng byte"
+LUU-TRU,data/docs_cc_longchau,410915268,0.383,2026-10-17,"docs/chunks trung gian (nguồn canonical-20261018); tái tạo bằng extract từ raw, không chắc trùng byte"
+LUU-TRU,data/chunks_cc_longchau,398733574,0.371,2026-10-17,"docs/chunks trung gian (nguồn canonical-20261018); tái tạo bằng extract từ raw, không chắc trùng byte"
+LUU-TRU,data/chunks_zh_v2,372703946,0.347,2026-10-18,"docs/chunks trung gian (nguồn canonical-20261018); tái tạo bằng extract từ raw, không chắc trùng byte"
+LUU-TRU,data/docs_zh_v2,340506565,0.317,2026-10-15,"docs/chunks trung gian (nguồn canonical-20261018); tái tạo bằng extract từ raw, không chắc trùng byte"
+LUU-TRU,data/pubmed_en,290857671,0.271,2026-10-14,"docs/chunks trung gian (nguồn canonical-20261018); tái tạo bằng extract từ raw, không chắc trùng byte"
+LUU-TRU,data/docs_zh_sample,251158360,0.234,2026-10-05,"docs/chunks trung gian (nguồn canonical-20261018); tái tạo bằng extract từ raw, không chắc trùng byte"
+LUU-TRU,out/runs/s43/probes/EN-hedge3-c5226/EN-hedge3-c5226-full+w768-t1536.zip,102124766,0.095,2026-10-28,"EN-hedge, bản 5, LB 0,4104"
+LUU-TRU,out/runs/s41/ch/compose/CH-rrf-full+w768-t1536.zip,100651136,0.094,2026-10-27,"CH-rrf, bản chốt private, LB 0,4138"
+LUU-TRU,out/runs/s43/probes/P1-carrier-w2/compose/P1-carrier-w2-full+w768-t1536.zip,99920352,0.093,2026-10-28,"P1-carrier-w2, LB 0,4141 (cao nhất public)"
+LUU-TRU,out/runs/release/120A-p4b-v3/compose/120A-p4b-v3-full+w768-t1536.zip,99417831,0.093,2026-10-26,"120A-p4b-v3, bàn giao S36"
+LUU-TRU,out/runs/s41/fallback/COSK150/compose/FB-COSK150-full+w768-t1536.zip,98548799,0.092,2026-10-28,"COS-K150, dự phòng 2, LB 0,3742"
+LUU-TRU,out/runs/s41/fallback/B0/compose/FB-B0-full+w768-t1536.zip,98383174,0.092,2026-10-28,"B0, dự phòng 1, LB 0,4101"
+LUU-TRU,data/chunks_zh_sample,79593570,0.074,2026-10-05,"docs/chunks trung gian (nguồn canonical-20261018); tái tạo bằng extract từ raw, không chắc trùng byte"
+LUU-TRU,data/s22_reextract,34308832,0.032,2026-10-17,"docs/chunks trung gian (nguồn canonical-20261018); tái tạo bằng extract từ raw, không chắc trùng byte"
+LUU-TRU,data/s22_zh_short_threshold,27104094,0.025,2026-10-18,"docs/chunks trung gian (nguồn canonical-20261018); tái tạo bằng extract từ raw, không chắc trùng byte"
+LUU-TRU,data/docs_zh_v2_redo,20406051,0.019,2026-10-15,"docs/chunks trung gian (nguồn canonical-20261018); tái tạo bằng extract từ raw, không chắc trùng byte"
+LUU-TRU,data/corpus_v2_ids.parquet,19947666,0.019,2026-10-13,"docs/chunks trung gian (nguồn canonical-20261018); tái tạo bằng extract từ raw, không chắc trùng byte"
+LUU-TRU,data/chunks_vi_s18,19731886,0.018,2026-10-16,"docs/chunks trung gian (nguồn canonical-20261018); tái tạo bằng extract từ raw, không chắc trùng byte"
+LUU-TRU,data/docs_cc_pilot,2679391,0.002,2026-10-12,"docs/chunks trung gian (nguồn canonical-20261018); tái tạo bằng extract từ raw, không chắc trùng byte"
+LUU-TRU,data/chunks_cc_pilot,2646120,0.002,2026-10-12,"docs/chunks trung gian (nguồn canonical-20261018); tái tạo bằng extract từ raw, không chắc trùng byte"
+LUU-TRU,data/docs_zh_v2_redo2,153237,0.0,2026-10-15,"docs/chunks trung gian (nguồn canonical-20261018); tái tạo bằng extract từ raw, không chắc trùng byte"
+LUU-TRU,data/cache,0,0.0,,"docs/chunks trung gian (nguồn canonical-20261018); tái tạo bằng extract từ raw, không chắc trùng byte"
+XOA,out/runs/s6,25879338565,24.102,2026-10-14,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s38-chunk-metric-v2,16356104435,15.233,2026-10-26,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s41,13099911091,12.2,2026-10-28,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/cc-longchau,10253810619,9.55,2026-10-17,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/best-vsappend,9528120506,8.874,2026-10-11,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s26-gold-structure,7181223988,6.688,2026-10-20,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/rrf-sweep-2026-10-06,7079884522,6.594,2026-10-06,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s40,6300862113,5.868,2026-10-27,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/c1,5290133393,4.927,2026-10-14,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/replay,5052483142,4.705,2026-10-12,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s25-canonical,4815614890,4.485,2026-10-18,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/rerank200,4064950151,3.786,2026-10-05,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/rrf-docs-2026-10-06,4047440223,3.769,2026-10-06,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/zh-sample,3969764152,3.697,2026-10-06,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/zh-full-ingest,3825417208,3.563,2026-10-13,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/chunk-exp,3692330315,3.439,2026-10-13,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s43,3241214291,3.019,2026-10-28,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s37,3122872557,2.908,2026-10-27,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s31-strong-judge,3069524448,2.859,2026-10-22,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/reranker-trial,2652416646,2.47,2026-10-26,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data; giữ tệp tracked git trong đó (không chuyển)
+XOA,out/runs/s1-replay,2526768597,2.353,2026-10-12,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/zh-select-2026-10-08,2311085683,2.152,2026-10-13,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/zh-full,1964079988,1.829,2026-10-28,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/H1,1911634858,1.78,2026-10-05,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/ab-2026-10-05c,1787975355,1.665,2026-10-05,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/deep-rerank-2026-10-05,1779103270,1.657,2026-10-05,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s36-fuse4,1522240896,1.418,2026-10-26,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/ab-2026-10-05b,1164029158,1.084,2026-10-05,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/release,1068163361,0.995,2026-10-26,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/selective-check,1066578522,0.993,2026-10-06,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/pool300-2026-10-06,1029575875,0.959,2026-10-06,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s24-recovery,881348682,0.821,2026-10-26,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data; giữ tệp tracked git trong đó (không chuyển)
+XOA,out/runs/s32-chunk-judge,790306726,0.736,2026-10-22,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s35-part-jina,683956909,0.637,2026-10-23,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s29-qwen-judge,652947981,0.608,2026-10-20,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/exact-gate,608041050,0.566,2026-10-04,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s33-btc-baseline,557573986,0.519,2026-10-22,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/replay-best-2026-10-05,507096682,0.472,2026-10-05,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/ab-2026-10-05,434045859,0.404,2026-10-05,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s9,391586648,0.365,2026-10-13,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/zh-v2,380009714,0.354,2026-10-18,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/move-check,230624050,0.215,2026-10-04,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/reproduce-sub06,228757930,0.213,2026-10-04,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/new-full,195499434,0.182,2026-10-05,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/chunk-batching,193009033,0.18,2026-10-04,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/extract.db.before-move,182296576,0.17,2026-10-04,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/c3,166396134,0.155,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s27-pharmacity,148727272,0.139,2026-10-21,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s29-qwen-pool16,122022762,0.114,2026-10-20,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s29-qwen-judge-parity-smoke,88758208,0.083,2026-10-20,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s29-qwen-judge-smoke2,88716909,0.083,2026-10-20,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s33-structure-signals,44750235,0.042,2026-10-22,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s29-qwen-judge-smoke,33096247,0.031,2026-10-20,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s21,23430171,0.022,2026-10-17,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/zh-v2-crawl,21586414,0.02,2026-10-28,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/vi-longchau,16299681,0.015,2026-10-11,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/vi-k100,15290577,0.014,2026-10-05,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/zh-v2-direct,11772757,0.011,2026-10-26,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_read_rows_from_memmap_is_0,10260260,0.01,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_tier1_base_levels_nest_a_0,8717418,0.008,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_deep_tier1_keeps_old_tier0,8317531,0.008,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_tier1_base_nests_base_run0,8273568,0.008,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_deep_gate_passes_on_fixtu0,8178882,0.008,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_checkpoint_resume_after_i0,8173990,0.008,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_deep_gate_pairs_flag0,8009610,0.007,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_candidates_only_full_rank0,7980732,0.007,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_exact_gate_stages_agree_o0,7964141,0.007,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_tier_flags_default_values0,7883080,0.007,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_k100_exact_equals_faiss0,7882724,0.007,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_deep_tier1_keeps_default_0,7838307,0.007,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_second_run_on_same_out_di0,7712746,0.007,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_sample_draws_seed42_queri0,7590046,0.007,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_tier1_base_argument_check0,7409865,0.007,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s23-cc-news,7314411,0.007,2026-10-17,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s29-qwen-judge-raw-cpu-audit,5848950,0.005,2026-10-20,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/restructure,3837944,0.004,2026-10-04,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_k100_exact_does_not_need_0,2822076,0.003,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/test-temp/validator-full,2492440,0.002,2026-10-04,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/test-temp/review-full,2479562,0.002,2026-10-04,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/coverage-rebuild,2466016,0.002,2026-10-04,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s17,2057525,0.002,2026-10-16,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_split_sparse_npz_roundtri0,1159740,0.001,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s10-en-pubmed-qa,1110227,0.001,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s20-coverage-20261017,793751,0.001,2026-10-17,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/test-temp/review-slow,630632,0.001,2026-10-04,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_duplicate_url_across_shar0,190703,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/backups/s10-before-worktree-repair-20261015,176034,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_best_build_slug_k_is_a_co0,162627,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_best_build_runs_slug_appe0,151492,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/test-temp/review-green,151437,0.0,2026-10-04,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_extracts_columns_and_keep0,144627,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/zh-v2-ingest,133698,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_only_new_shards_are_proce0,127773,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_best_build_fails_on_wrong1,126189,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_best_build_rd150_replays_0,124133,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_limit_is_per_domain_and_r0,112930,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_clean_run_completes_and_m0,112929,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_best_build_rrf_replays_cl0,103030,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_refuses_to_run_when_egres0,96093,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_best_build_rd150_fails_on0,87575,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_batched_output_matches_si0,80850,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_best_build_rrf_fails_on_w0,77810,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_same_content_docs_are_kep0,74360,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_parquet_written_atomicall0,74168,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_best_build_replays_d50_an0,69943,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_non_ok_records_are_skippe0,67594,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_best_build_fails_on_wrong0,63027,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_run_all_newest_first_cove0,62373,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_assemble_index_ann_writes0,61508,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_qa_report_lists_five_docs0,60284,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_rd150c_chunks_are_top_rrf0,58858,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_diff_flags_nothing_for_ex0,57637,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_rrf_build_keeps_docs_and_0,53121,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_rd150_keeps_base_chunks_a0,52515,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_doc_ranking_and_full_k_ch0,51336,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_dedup_walks_the_builder_o0,51054,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_expand_appends_cluster_ma0,50915,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_identity_is_byte_identica0,50742,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_assemble_index_no_ann_wri0,46518,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_text_mmap_cache_equals_co0,46321,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_impact_counts0,45006,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_backoff_on_429_503_then_o0,44473,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/s16,43533,0.0,2026-10-16,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_k_chunk_budget_adds_full_0,40669,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_step0_end_to_end_reports_0,39072,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_gold_report_keeps_legacy_0,37677,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_extra_zip_budget_picks_la0,37299,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_extra_chunks_appended_ver0,36096,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_doc_ranking_appends_docs_0,34067,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_lzma_dict_zip_roundtrip_a0,30809,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_assemble_cli_writes_meta_0,29925,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/test-temp/review-red,28444,0.0,2026-10-04,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_doc_ranking_ignores_cache0,28169,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_build_end_to_end_with_fak0,26217,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_build_end_to_end_with_fak1,26216,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_status_defaults_to_new_an0,24576,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_fetch_records_provenance_0,23460,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_priority_order_groups_and0,23381,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_priority_ids_fetched_firs0,22403,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_wrong_length_and_guard0,21481,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_stop_event_leaves_url_pen0,21122,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_take_texts_across_chunks_0,16804,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_extra_flag_errors_args0_0,16530,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_extra_flag_errors_args1_0,16530,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_extra_flag_errors_args2_0,16530,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_extra_flag_errors_args3_0,16530,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_run_all_403_midway_keeps_0,14882,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_replay_does_not_change_wh0,12738,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_apply_cli_writes_json_and0,12722,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_append_matches_the_step3_0,12510,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_golden_output_bytes_on_fi0,12510,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_append_k_limits_and_skips0,12505,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/test-temp/validator-green,12318,0.0,2026-10-04,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/test-temp/validator-red,12318,0.0,2026-10-04,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_report_status_connection_0,12288,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_pin_sha_mismatch_is_refus0,12282,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_pin_holds_every_url_in_cr0,12087,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/zh-v2-ingest-redo2,11937,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/zh-v2-ingest-redo,11485,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_zip_methods_roundtrip_def0,10662,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_zip_methods_roundtrip_lzm0,10592,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_member_ids_filter_drops_u0,10276,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/logs/s10_en_pubmed_fetch_20261014.pre-source-pin.log,9753,0.0,2026-10-13,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_heartbeat_exit_record_and0,9680,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_backoff_jitter_and_retry_0,9309,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_beat_stops_on_deadline_an0,9160,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_step0_only_one_crawl_and_0,8878,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_targets_reject_url_outsid0,8589,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_step0_unsorted_file_order0,8388,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_raw_override_and_new_stat0,5894,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_assemble_sparse_equals_vs0,5806,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_guard_rejects_redirected_0,5683,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_guard_rejects_redirected_1,5683,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_guard_rejects_redirected_2,5683,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_guard_rejects_redirected_3,5683,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_guard_rejects_redirected_4,5683,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_guard_rejects_old_but_not0,5675,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_external_data_requires_ex0,5578,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_dotenv_root_not_cwd_and_p0,5531,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_windows_quoted_path_and_l0,5511,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_empty_process_root_fails_0,5496,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_malformed_dotenv_hides_va0,5494,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_missing_and_empty_input_f0,5476,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/logs/s10_en_pubmed_fetch_20261014.log,5341,0.0,2026-10-14,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/logs/run_s10_en_pubmed_fetch_20261014_diag.ps1,4780,0.0,2026-10-14,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/logs/run_s10_en_pubmed_fetch_20261014.ps1,4774,0.0,2026-10-14,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/logs/run_s10_en_pubmed_fetch_20261014.pre-ps51-fix.ps1,4660,0.0,2026-10-13,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_footer_map_with_workers_e0,3901,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_empty_full_document_parqu0,3809,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_filter_big_lzma_dict_roun0,3654,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_filter_drops_outside_docs1,3654,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_filter_drop_hosts_removes0,3640,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_filter_refuses_bad_zip_an0,3558,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_filter_drops_outside_docs0,3315,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_load_ids_reloads_when_fil0,3205,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_failed_run_leaves_no_part0,3181,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_build_schema_lang_and_sor0,3169,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_check_main_exit_codes0,3169,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_check_revision_flags_hf_c0,3169,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_check_revision_flags_hf_c1,3169,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_check_revision_missing_fi0,3169,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_check_revision_ok0,3169,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_host_ids_selects_by_host0,3169,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_is_member_and_mask0,3169,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_direct_json_validation_pr2,3081,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_direct_json_validation_pr3,3081,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_direct_json_validation_pr0,3078,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_direct_json_validation_pr1,3078,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_host_stats_counts_bytes_a0,3078,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_check_revision_flags_loca0,3047,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_filter_rejects_unexpected0,2781,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_step0_403_stops_everythin0,2740,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_impact_counts_removed_and0,2364,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/logs/s10_en_pubmed_fetch_20261014_diag.log,2072,0.0,2026-10-14,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_validator_accepts_good_an0,1928,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_validator_verbatim_substr0,1928,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_prefix_scan_binary_search0,1894,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/vi_domains.csv,1870,0.0,2026-10-02,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_files_written_and_deferre0,1785,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_breaker_cools_down_on_thi0,1782,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_run_all_stops_when_the_ne0,1748,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_unsorted_files_are_report0,1322,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_404_returns_other_4xx_inv0,1301,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_build_rejects_bad_input_r2,1237,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_build_rejects_bad_input_r0,1228,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_build_rejects_bad_input_r1,1220,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_build_url_table_groups_du0,1127,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_classification_rules0,1127,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_release_check_fails_close0,981,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_503_is_unavailable_with_e0,874,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_pacing_limits_requests_pe0,842,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_load_job_stops_on_missing0,729,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_range_file_reads_parquet_0,708,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_ledger_caps_stop_and_pers0,646,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_release_check_zip_record0,637,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/cc-longchau-pilot,587,0.0,2026-10-12,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_retry_after_is_honoured0,567,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_manifest_tree_pin_and_pat0,554,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/runs/.env.before-move,441,0.0,2026-10-04,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_read_prefix_refuses_row_g0,388,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_render_protection_on_appe0,359,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_render_rows_keeps_base_by0,349,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_render_protection_off_kee0,347,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_manifest_malformed_sha_st3,343,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_manifest_malformed_sha_st4,342,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_manifest_verify_detects_c0,340,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_manifest_missing_pin_stop0,326,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_manifest_malformed_sha_st0,283,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_manifest_malformed_sha_st2,282,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_manifest_malformed_sha_st1,281,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_only_403_and_429_are_bloc0,271,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_only_403_and_429_are_bloc1,271,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_zip_rejects_bad_input0,239,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_protection_adds_nothing_w0,230,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_default_method_is_deflate0,219,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_validator_zip_must_hold_o0,202,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_membership_counts_outside0,195,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_read_docs_ignores_chunk_t0,179,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/deferred_domains.csv,145,0.0,2026-10-02,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_zip_timestamp_normalizati0,140,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_compression_profile_reads0,133,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_bge_tokenizer_pin_records0,121,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-vi/test_bge_tokenizer_pin_records0,121,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_build_checks_json_sha_oth0,120,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_build_checks_json_sha___n0,118,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_autorate_halves_on_503_an0,75,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_render_rows_stops_on_base0,62,0.0,2026-10-15,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_profile_import_and_locked0,0,0.0,,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data
+XOA,out/pytest-reranker-s15/test_profile_import_and_locked1,0,0.0,,kết quả thí nghiệm; số liệu + SHA đã ghi trong docs/ và docs/working-notes/data

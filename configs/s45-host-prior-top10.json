@@ -1,0 +1,135 @@
+{
+ "cnkang.com": {
+  "n": 2558,
+  "k": 629,
+  "rate": 0.245895,
+  "shrunk": 0.246218,
+  "lo": 0.229742,
+  "hi": 0.263069
+ },
+ "120ask.com": {
+  "n": 1845,
+  "k": 1045,
+  "rate": 0.566396,
+  "shrunk": 0.565457,
+  "lo": 0.542829,
+  "hi": 0.587951
+ },
+ "a-hospital.com": {
+  "n": 378,
+  "k": 68,
+  "rate": 0.179894,
+  "shrunk": 0.183411,
+  "lo": 0.146452,
+  "hi": 0.223477
+ },
+ "zhongyibaodian.net": {
+  "n": 325,
+  "k": 95,
+  "rate": 0.292308,
+  "shrunk": 0.29368,
+  "lo": 0.246052,
+  "hi": 0.343655
+ },
+ "test.pmphai.com": {
+  "n": 155,
+  "k": 54,
+  "rate": 0.348387,
+  "shrunk": 0.348433,
+  "lo": 0.277385,
+  "hi": 0.423003
+ },
+ "jbk.39.net": {
+  "n": 116,
+  "k": 30,
+  "rate": 0.258621,
+  "shrunk": 0.264481,
+  "lo": 0.190958,
+  "hi": 0.345198
+ },
+ "youlai.cn": {
+  "n": 112,
+  "k": 60,
+  "rate": 0.535714,
+  "shrunk": 0.523268,
+  "lo": 0.434072,
+  "hi": 0.611729
+ },
+ "wujue.com": {
+  "n": 105,
+  "k": 8,
+  "rate": 0.07619,
+  "shrunk": 0.095557,
+  "lo": 0.048752,
+  "hi": 0.155858
+ },
+ "jb39.com": {
+  "n": 70,
+  "k": 7,
+  "rate": 0.1,
+  "shrunk": 0.12561,
+  "lo": 0.062192,
+  "hi": 0.207129
+ },
+ "msdmanuals.cn": {
+  "n": 57,
+  "k": 21,
+  "rate": 0.368421,
+  "shrunk": 0.366066,
+  "lo": 0.254199,
+  "hi": 0.485741
+ },
+ "care.39.net": {
+  "n": 40,
+  "k": 19,
+  "rate": 0.475,
+  "shrunk": 0.454023,
+  "lo": 0.317101,
+  "hi": 0.594576
+ },
+ "zydcd.com": {
+  "n": 36,
+  "k": 2,
+  "rate": 0.055556,
+  "shrunk": 0.109041,
+  "lo": 0.03614,
+  "hi": 0.215232
+ },
+ "qihuangzhishu.com": {
+  "n": 31,
+  "k": 0,
+  "rate": 0.0,
+  "shrunk": 0.071751,
+  "lo": 0.01429,
+  "hi": 0.16983
+ },
+ "health.people.com.cn": {
+  "n": 20,
+  "k": 7,
+  "rate": 0.35,
+  "shrunk": 0.349805,
+  "lo": 0.18803,
+  "hi": 0.531888
+ },
+ "familydoctor.cn": {
+  "n": 12,
+  "k": 2,
+  "rate": 0.166667,
+  "shrunk": 0.239801,
+  "lo": 0.084899,
+  "hi": 0.443678
+ },
+ "_default": {
+  "shrunk": 0.349317,
+  "note": "zh host outside the S26 sample: prior mean"
+ },
+ "_meta": {
+  "source": "S26 zh 2pct sample, kept = in corpus v2; rate among docs with dt512 CLS min-rank <= 10",
+  "beta_prior": [
+   2.7993,
+   5.2143
+  ],
+  "top": 10,
+  "vi": "no labels: prior 1 (no change)"
+ }
+}

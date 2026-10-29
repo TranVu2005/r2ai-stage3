@@ -182,3 +182,33 @@ Trên `main` sau khi merge `feat/s41` (`--cos-k`) và `exp/s43` (`--en-hedge`, k
 | EN-hedge (`regress_enhedge.py`, nền là ZIP CH-rrf vừa dựng lại, N 3, X 0,5226) | 3.594 cặp en trùng `hedge.parquet` của S43, cả khi đọc tệp làn en lẫn khi tính lại từ vector (`lane_pairs`, đường `newq --en-hedge`); ZIP 102.124.766 B `ce0fabc01cd017ff2372351355711a31affa0152940f77c4f945acebc6188742` **trùng từng byte** bản S43 đã nộp; validator ok; 16,9 phút |
 | COS-K150 (`regress_public.py --variant COSK150 --compose`: `cos_only_map` + `cos_k_keep` của config K150) | docsel 180.000 dòng trùng (SHA256 tệp trùng), carrier trùng; ZIP 98.548.799 B `fd33125209bc508eadc459fa569a23780b3d58e8f5dc833f9b04758a3d93c2fb` **trùng từng byte**; compose 28,2 phút |
 | rh100 `--cos-k 150`, run mới `out/runs/s41/rh100-cosk150`, không nhập phần 4B nào | prepare 33 s, export 125 s, import C-max 0 s, `build --cos-k 150` (compose gồm) 165 s; 15.000 doc (150/query), 30.000 cặp suy điểm, T 1536, 16.966 chunk, 0 carrier bị bỏ, validator ok. ZIP 10.491.562 B `23d1d3ae62997627a8f29252f78da7ad2012e23c6ba512ded7874d7bdc1f115e`: JSON bên trong trùng từng byte bản rh100 trước (`448cc699…`), chỉ khác tên tệp JSON vì tên run khác |
+
+### 6.6 Mốc hồi quy từ 29/10 (Vu 29/10, S44)
+
+**Hồi quy public mục 6.5 không còn chạy lại được.** `scripts/s41/regress_public.py` và `regress_enhedge.py` đọc docsel / carriers / hedge parquet ở `out/runs/s40/abl/apply`, `out/runs/s41/{carriers,fallback}`, `out/runs/s43/probes/EN-hedge3-c5226`; các tệp này đã xoá trong đợt dọn S44 (28–29/10), không có trong `D:/_r2ai_archive`. Runbook private không đọc chúng (`docs/s44-housekeeping.md` mục 7).
+
+Từ nay mốc hồi quy cho **mọi thay đổi** mã / config / dữ liệu private là hai phần dưới, cả hai phải trùng từng byte.
+
+**(a) rh100 từ worktree tách** (`bash scripts/s44/verify_rh100.sh <thư mục mới dưới out/runs>`; query `out/runs/s40/abl/rehearsal-input/queries-rh100.parquet` `181819a3…2dfda`, điểm 4B / C-max nhập từ `out/runs/s40/rh100`). Mốc kiểm lần cuối 29/10 ở `out/runs/s44-verify-4` (`docs/s44-rh100-compare-29.json`), trùng hai lượt 28/10:
+
+| nhánh | lệnh build | ZIP (B) | SHA256 |
+|---|---|---|---|
+| CH-rrf | `build` | 10.912.265 | `57dca1798da23ea14a7473bad3f4965ec0112b5b1aa59668d7771e004faa57b5` |
+| B0 | `build --no-cmax` | 10.740.481 | `5afd66da90e6ab09a970cd2726effcec9be8d73df919308ab36efa611a015f72` |
+| CH-rrf + EN-hedge | `build --en-hedge 3 --name rh100-final-free-en3` (ZIP `…-t1536-en3.zip`) | 11.038.261 | `724054c6c543e5c2314c59f5e653bb3f88902d79d1eed4c131f14c56b72780c9` |
+| COS-K150 | `build --cos-k 150` | 10.491.562 | `23d1d3ae62997627a8f29252f78da7ad2012e23c6ba512ded7874d7bdc1f115e` |
+| COS-K150 + EN-hedge | `build --cos-k 150 --en-hedge 3 --name rh100-cosk150-free-cosk150-en3` (ZIP `…-t1536-en3.zip`) | 10.617.191 | `f13ee54c924905d6981a208f668397095a2992f918d78096834fbc71077f8108` |
+
+`ledger.json` của hai run (`rh100-final`, `rh100-cosk150`) cũng phải trùng; bản ledger S41 nằm trong `D:/_r2ai_archive/out-runs-meta.tar.xz` (đặt `S44_REF` tới thư mục giải nén cho `scripts/s44/compare_rh100.py`).
+
+**(b) 3 ZIP public lưu ở `D:/_r2ai_archive/zips/`** (bản đã nộp; so SHA256, không dựng lại được):
+
+| ZIP | B | SHA256 |
+|---|---|---|
+| `zips/out/runs/s41/ch/compose/CH-rrf-full+w768-t1536.zip` | 100.651.136 | `b12b85912ba03ec45062fb817b806583c0182633a89feaa2ae4f1372767908c8` |
+| `zips/out/runs/s41/fallback/COSK150/compose/FB-COSK150-full+w768-t1536.zip` | 98.548.799 | `fd33125209bc508eadc459fa569a23780b3d58e8f5dc833f9b04758a3d93c2fb` |
+| `zips/out/runs/s43/probes/EN-hedge3-c5226/EN-hedge3-c5226-full+w768-t1536.zip` | 102.124.766 | `ce0fabc01cd017ff2372351355711a31affa0152940f77c4f945acebc6188742` |
+
+Thêm vào đó, như cũ: `python -m r2ai.newq pins` báo `input pins ok: 79 files`, làn en trùng SHA ở checklist mục 5.
+
+**Không xoá gì thêm** trên máy (dữ liệu, `out/`, `D:/_r2ai_archive`) cho đến sau 04/11 (Vu 29/10).

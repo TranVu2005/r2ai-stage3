@@ -115,3 +115,23 @@ Không đề xuất, vì có thể thuộc dự án khác (có từ trước 10/
 ## 6. Cảnh báo junction
 
 Sáu worktree `D:/GitHub/r2ai-stage3-{vi,s6,chunk,cc,corpusv2,integrate}` có junction `data/`, `out/` (và `state/` ở bốn worktree đầu) trỏ vào `D:/GitHub/r2ai-stage3/…`. Chúng chỉ chứa mã (16–28 MiB mỗi worktree). Nếu xoá các thư mục này, trước hết gỡ junction bằng `rmdir <tên>` (không `/s`) hoặc dùng `git worktree remove`. Không bao giờ chạy `rm -rf` hay `Remove-Item -Recurse` lên chúng.
+
+## 7. Kiểm khẩn sau khi Vu xoá `D:/_r2ai_to_delete` (29/10 08:25–09:55)
+
+`D:/_r2ai_to_delete` không còn; trước khi xoá đã quét: 109.499 tệp, 162,4 GiB, 0 junction / symlink. D: còn trống 192 GB. Không xoá gì thêm.
+
+| kiểm | kết quả |
+|---|---|
+| `python -m r2ai.newq pins` (worktree tag 28c, băm đủ SHA256) | `input pins ok: 79 files`, 17 s |
+| làn en | `vectors.npz` `9edfe699…17bb0`, `docs.parquet` `c0e93e14…41c2`: trùng `docs/private-final.md` mục 5 |
+| 0.6B (C-max) `e61197ed…` | 14/14 tệp trùng byte + SHA256 trong `out/runs/reranker-trial/model-pin.json` |
+| BGE-M3 `5617a9f6…` (embed query) | snapshot = `refs/main` = `configs/retrieval.yaml`; `pytorch_model.bin`, `tokenizer.json`, `sentencepiece.bpe.model` trùng tên blob LFS (SHA256) |
+| 4B | không có bản trên máy (Kaggle tải); `REVISION_4B` `22e68366…`, notebook `58c645a7…` |
+| rh100 từ tag 28c (`out/runs/s44-verify-4`, `docs/s44-rh100-compare-29.json`) | **trùng từng byte**: CH-rrf `57dca179…57b5`, COS-K150 `23d1d3ae…115e` (mục 6.5), COS-K150 + EN-hedge `f13ee54c…8108` (mục 6.4); B0 `5afd66da…5f72`, CH-rrf + EN-hedge `724054c6…80c9` trùng lần 1 và 2; ledger hai run trùng ledger S41 (lấy từ `out-runs-meta.tar.xz`, cũng trùng `s44-verify-2`); validator ok cả 5 |
+| ZIP public mục 6.5 (bản trong `D:/_r2ai_archive/zips`) | CH-rrf `b12b8591…08c8`, COS-K150 `fd331252…c2fb`, EN-hedge `ce0fabc0…8742` trùng |
+
+**Tệp đã xoá so với runbook private.** 93 đường dẫn runbook dùng (79 ghim, làn en, hai model, `model-pin.json`, query + điểm rh100, các bản ghi) đối chiếu với 269 dòng XOÁ. Mọi đầu vào còn nguyên (S44 chỉ chuyển phần không ghim của các thư mục cha). Đã xoá, không dùng ở private: bản ghi `out/runs/s41/{rh100-final,rh100-cosk150,rh100-cos,regress-28c,fallback}`, `out/runs/s43/probes/EN-hedge3-c5226` (số + SHA ở docs; ZIP ở archive; ledger trong `out-runs-meta.tar.xz`), `out/runs/s29-qwen-judge` (chỉ module public `s36` / `s37.ingest` đọc; `newq` tự ghi `query_vectors.npz` của run).
+
+**Mất khả năng:** không chạy lại được hồi quy public mục 6.5 (`scripts/s41/regress_public.py`, `regress_enhedge.py`): docsel / carriers parquet ở `out/runs/s40/abl/apply`, `out/runs/s41/{carriers,fallback}`, `out/runs/s43/probes/.../hedge.parquet` đã xoá, không có trong archive. Private không cần chúng; ZIP kết quả còn ở archive với SHA trùng.
+
+`verify_rh100.sh`: sửa đường dẫn `compare_rh100.py` (bước so cuối chạy sau `cd` worktree nên `dirname "$0"` sai); lần này so tay với `S44_REF` = ledger giải nén từ archive.

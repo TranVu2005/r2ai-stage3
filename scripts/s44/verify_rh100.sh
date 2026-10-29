@@ -6,6 +6,7 @@
 #                     build --cos-k 150 --en-hedge 3 --name rh100-cosk150-free-cosk150-en3                  -> en3 ZIP f13ee54c...
 # Usage: verify_rh100.sh <out dir below out/runs, e.g. D:/GitHub/r2ai-stage3/out/runs/s44-verify-1>
 set -u
+HERE="$(cd "$(dirname "$0")" && pwd)"
 OUTROOT="$1"
 WT="D:/GitHub/r2ai-stage3/.superpowers/worktrees/s44-verify-28c"
 PY="D:/GitHub/r2ai-stage3/.venv/Scripts/python.exe"
@@ -43,5 +44,5 @@ step "$B" same-pairs "$PY" -u "$WT/scripts/s41/rehearsal_same_pairs.py" "$B" "$O
 step "$B" import-cmax "$PY" -u -m r2ai.newq import-scores --run "$B" --source cmax --scores "$OLD/cmax/gpu/qwen3-reranker-0.6b/scores-all.parquet"
 step "$B" build-cos-k150 "$PY" -u -m r2ai.newq build --run "$B" --cos-k 150
 step "$B" build-cos-k150-en3 "$PY" -u -m r2ai.newq build --run "$B" --cos-k 150 --en-hedge 3 --name rh100-cosk150-free-cosk150-en3
-"$PY" -I "$(dirname "$0")/compare_rh100.py" "$OUTROOT" | tee -a "$LOG"
+"$PY" -I "$HERE/compare_rh100.py" "$OUTROOT" | tee -a "$LOG"
 say "all done"

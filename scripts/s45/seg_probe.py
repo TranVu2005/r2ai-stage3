@@ -2,7 +2,8 @@
 stays true), keep everything else byte for byte. Doc R depends on relevant_docs only, so the LB Doc R drop gives the true precision of S:
 prec(S) ~ -dR * G / n_S, with G = gold per query = P * N / R of R0 and n_S = S docs dropped per query (micro ~ macro approximation).
 
-Segments (``SEGMENTS``): ``novi`` = every vi doc (canonical lang; 120ask segment docs are zh, Pharmacity docs vi).
+Segments (``SEGMENTS``: doc mask, chunk mask): ``novi`` = every vi doc (canonical lang; 120ask segment docs are zh, Pharmacity docs vi);
+``novi-safe`` = ``novi``, but a query with vi docs only keeps its best-RRF vi doc, without its chunks (no empty relevant_docs).
 
   seg_probe.py stats <segment>                          per-segment numbers before delivery (docs / query, carriers, p_cal, P4B, cosine)
   seg_probe.py zip <segment> <base.zip> <out.zip> [extra_dir ...]   the probe ZIP + S26 validator (``--max-chunks-per-doc 2 --no-p1``)
@@ -35,11 +36,18 @@ def frame():
     return m
 
 
-SEGMENTS = {'novi': lambda m: m.lang == 'vi'}
+def novi_safe(m):
+    vi = m.lang == 'vi'
+    only_vi = m.groupby('query_id').lang.transform(lambda x: (x == 'vi').all())
+    best = m['rank'] == m[vi].groupby('query_id')['rank'].transform('min').reindex(m.index)
+    return vi & ~(only_vi & best), vi
+
+
+SEGMENTS = {'novi': lambda m: (m.lang == 'vi',) * 2, 'novi-safe': novi_safe}
 
 
 def stats(seg):
-    m = frame(); s = SEGMENTS[seg](m); nq = m.query_id.nunique()
+    m = frame(); s = SEGMENTS[seg](m)[0]; nq = m.query_id.nunique()
     per_q = m[s].groupby('query_id').size().reindex(sorted(m.query_id.unique()), fill_value=0)
     def part(x):
         return {'docs_per_query': len(x) / nq, 'p_cal_mean': float(x.p_cal.mean()), 'p4b_mean': float(x.p4b.mean()),
@@ -67,12 +75,14 @@ def rows_of(zp):
 
 
 def build(seg, base, out, extra):
-    m = frame(); drop = set(zip(m.query_id[SEGMENTS[seg](m)].astype(int), m.doc_id[SEGMENTS[seg](m)].astype(int)))
+    m = frame(); doc_mask, chunk_mask = SEGMENTS[seg](m)
+    drop = set(zip(m.query_id[doc_mask].astype(int), m.doc_id[doc_mask].astype(int)))
+    drop_chunks = set(zip(m.query_id[chunk_mask].astype(int), m.doc_id[chunk_mask].astype(int)))
     rows, nd, nc, empty, outside = [], 0, 0, 0, 0
     for r in rows_of(base):
         q = int(r['id'])
         docs = [d for d in r['relevant_docs'] if (q, d) not in drop]
-        chunks = [c for c in r['relevant_chunks'] if (q, int(c['doc_id'])) not in drop]
+        chunks = [c for c in r['relevant_chunks'] if (q, int(c['doc_id'])) not in drop_chunks]
         nd += len(r['relevant_docs']) - len(docs); nc += len(r['relevant_chunks']) - len(chunks); empty += not docs
         outside += sum(int(c['doc_id']) not in set(docs) for c in chunks)
         rows.append({**r, 'relevant_docs': docs, 'relevant_chunks': chunks})

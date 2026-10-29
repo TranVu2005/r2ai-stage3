@@ -15,6 +15,11 @@ of its ``relevant_chunks``.
 ``--down-only``: the shift is ``B * min(0, logit r_host - logit r_mean)``, i.e. the prior only lowers hosts kept less than the mean.
 The 4B rank inside the RRF follows the moved P4B, so the doc order, G_q, the EF2 cut and the carrier flag all see the prior.
 
+``--depth D`` (S45 probe pool depth, with ``--top``): the pool is the cosine top-D of the exact merged_top(300); the rest leaves the
+RRF (4B / C-max ranks are taken inside the cut pool), the EF2 cut and the carriers. G_q reads the cosine top-211 (``g_depth``), so it
+does not move for D >= 211. Carrier target (Vu 29/10) = min(config target 146.29 x queries, docsel docs): a docsel smaller than
+175,548 docs makes every chosen doc a carrier; order rank and T unchanged (compose lowers T itself if the ZIP is over the ceiling).
+
   public_rebuild.py --run out/runs/s45/pub --out out/runs/s45/pub-rebuild [--name CH-rrf] [--host-prior f.json --beta 1]
 """
 import argparse, json, os, re, sys, time, zipfile
@@ -65,13 +70,16 @@ def public_pool(spec, depth, newq_top=None):
     return top[['query_id', 'cosine_rank', 'doc_id', 'cosine_score', 'pair_id']], dict(zip(top.pair_id.astype(int), top.score.astype(float)))
 
 
-def exact_pool(spec, top_file):
+def exact_pool(spec, top_file, depth=None):
     """The pools from the exact merged_top(300) of ``exact_top.py`` (S29 query vectors rebuilt byte for byte): its cosine order, the 4B
     score of each pair from the S31 union files + the spec's 4B files. -> newq ``top`` frame, {pair_id: P4B}, pairs without 4B."""
     runs = paths.RUNS_DIR
     a = pd.concat([pd.read_parquet(runs / f if not Path(f).is_absolute() else f, columns=['query_id', 'doc_id', 'score'])
                    for f in SCORE_FILES + list(spec['scores_4b'])]).drop_duplicates(['query_id', 'doc_id'])
-    top = pd.read_parquet(top_file).merge(a, on=['query_id', 'doc_id'], how='left')
+    top = pd.read_parquet(top_file)
+    if depth is not None:
+        top = top[top.cosine_rank <= depth]
+    top = top.merge(a, on=['query_id', 'doc_id'], how='left')
     top = top.sort_values(['query_id', 'cosine_rank']).reset_index(drop=True)
     top['pair_id'] = np.arange(len(top)) + 90_000_000
     have = top.dropna(subset=['score'])
@@ -118,11 +126,24 @@ def apply_prior(pools, prior, beta, a, hl, down_only=False):
     return {q: s31_build._with_judge_rank(rows) for q, rows in pools.items()}, moved
 
 
+def cap_carrier_target():
+    """``--depth``: the CR-fair carrier target becomes min(config target, docsel docs) (no-op while the docsel has >= target docs)."""
+    orig = newq.choose_carriers
+
+    def capped(sel, rule, queries, *a, **k):
+        target = int(round(float(rule['target_per_query']) * queries))
+        if len(sel) < target:
+            rule = {**{x: v for x, v in rule.items() if x != 'target_per_query'}, 'target': int(len(sel))}
+        return orig(sel, rule, queries, *a, **k)
+    newq.choose_carriers = capped
+
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument('--run', type=Path); ap.add_argument('--out', type=Path, required=True)
     ap.add_argument('--name', default='CH-rrf'); ap.add_argument('--host-prior', type=Path); ap.add_argument('--beta', type=float, default=0.0)
     ap.add_argument('--down-only', action='store_true')
     ap.add_argument('--top', type=Path, help='exact merged_top(300) parquet of exact_top.py (instead of the registry cosines)')
+    ap.add_argument('--depth', type=int, help='with --top: pool = cosine top-DEPTH (default: all 300)')
     args = ap.parse_args()
     apply_dir = args.out.resolve() / 'apply'; apply_dir.mkdir(parents=True, exist_ok=True)
     t0 = time.monotonic()
@@ -131,7 +152,9 @@ def main():
     for k in ('pairs_new', 'scores_4b', 'cmax'):
         spec[k] = [remap(p) for p in spec[k]] if isinstance(spec[k], list) else remap(spec[k])
     if args.top:
-        top, scores_4b, no_4b = exact_pool(spec, args.top)
+        top, scores_4b, no_4b = exact_pool(spec, args.top, args.depth)
+        if args.depth is not None:
+            cap_carrier_target()
     else:
         top, scores_4b = public_pool(spec, int(spec['depth']), pd.read_parquet(args.run / 'top.parquet') if args.run else None); no_4b = 0
     pools = newq.pools_from(top, scores_4b)
@@ -146,7 +169,7 @@ def main():
     for f in keyed:
         fr = pd.read_parquet(f, columns=['query_id', 'doc_id', 'cmax'])
         cmax.update(zip(zip(fr.query_id.astype(int), fr.doc_id.astype(int)), fr.cmax.astype(float)))
-    info = {'pool_pairs': int(len(top)), 'top': str(args.top) if args.top else 'registry cosine', 'pairs_without_4b': no_4b}
+    info = {'pool_pairs': int(len(top)), 'top': str(args.top) if args.top else 'registry cosine', 'pairs_without_4b': no_4b, 'depth': args.depth}
     res = {'name': args.name, 'load_seconds': round(time.monotonic() - t0, 1), 'pool': info}
     if args.host_prior:
         prior = json.loads(args.host_prior.read_text(encoding='utf-8'))

@@ -182,3 +182,12 @@ Trên `main` sau khi merge `feat/s41` (`--cos-k`) và `exp/s43` (`--en-hedge`, k
 | EN-hedge (`regress_enhedge.py`, nền là ZIP CH-rrf vừa dựng lại, N 3, X 0,5226) | 3.594 cặp en trùng `hedge.parquet` của S43, cả khi đọc tệp làn en lẫn khi tính lại từ vector (`lane_pairs`, đường `newq --en-hedge`); ZIP 102.124.766 B `ce0fabc01cd017ff2372351355711a31affa0152940f77c4f945acebc6188742` **trùng từng byte** bản S43 đã nộp; validator ok; 16,9 phút |
 | COS-K150 (`regress_public.py --variant COSK150 --compose`: `cos_only_map` + `cos_k_keep` của config K150) | docsel 180.000 dòng trùng (SHA256 tệp trùng), carrier trùng; ZIP 98.548.799 B `fd33125209bc508eadc459fa569a23780b3d58e8f5dc833f9b04758a3d93c2fb` **trùng từng byte**; compose 28,2 phút |
 | rh100 `--cos-k 150`, run mới `out/runs/s41/rh100-cosk150`, không nhập phần 4B nào | prepare 33 s, export 125 s, import C-max 0 s, `build --cos-k 150` (compose gồm) 165 s; 15.000 doc (150/query), 30.000 cặp suy điểm, T 1536, 16.966 chunk, 0 carrier bị bỏ, validator ok. ZIP 10.491.562 B `23d1d3ae62997627a8f29252f78da7ad2012e23c6ba512ded7874d7bdc1f115e`: JSON bên trong trùng từng byte bản rh100 trước (`448cc699…`), chỉ khác tên tệp JSON vì tên run khác |
+
+### 6.7 Tuỳ chọn cho bản phụ: cắt doc non-carrier sâu (Vu 29/10, S45; không thuộc tag `v-private-2026-10-28c`)
+
+* **Là gì:** bước hậu xử lý chạy trên ZIP đã dựng, không đụng `newq` hay config. `scripts/s45/trim_noncarrier.py` bỏ các doc **không** mang chunk có hạng cosine > 250 trong pool của run. Chunk giữ y nguyên; script kiểm chunk ⊂ relevant_docs rồi chạy validator S26.
+* **Lệnh** (run private; nguồn verbatim như compose của bản gốc):
+  `python scripts/s45/trim_noncarrier.py <ZIP bản chính> out/runs/private/top.parquet <ZIP mới> --queries out/runs/private/queries.parquet out/runs/s27-pharmacity/handoff/cc-s27-pharmacity <thư mục .validator-extra của compose>`
+* **Lợi dự kiến:** rất nhỏ. Public: P-D250-doconly +0,0005 (Doc P +0,0071, R −0,0082), DO-200 +0,0003, dưới ngưỡng +0,003 để đổi bản chính (`docs/s45.md` mục 5f–5g). Rủi ro thấp vì chunk không đổi.
+* **Dùng thế nào:** chỉ cho bản phụ (lượt 3 hoặc 4), Vu quyết. Bản chính (lượt 1) không dùng.
+* **Diễn tập:** R0 public: 7,64 doc bỏ/query, validator ok. rh100 CH-rrf `57dca179…57b5`: 6,78 doc bỏ/query, ZIP `067cc6a3…fffc`, validator ok. Script có trên nhánh `exp/s45`, cần lấy về worktree private nếu dùng.
